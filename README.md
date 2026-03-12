@@ -26,8 +26,8 @@
 | **USB ports** | :white_check_mark: Working | USB-C, USB-A, HDMI |
 | **NVMe** | :white_check_mark: Working | PCIe 4.0 detected and functional |
 | **USB Keyboard** | :white_check_mark: Working | External USB keyboards work fine |
-| **WiFi** | :x: Not working | FastConnect 6900 (WCN785x) - driver not loading despite firmware present |
-| **Battery** | :x: Not working | Battery manager not loading (battmgr firmware present but not picked up) |
+| **WiFi** | :construction: Testing v4 fix | WCN6855 (ath11k_pci) - regulators were being disabled; v4 DTB adds `regulator-always-on` |
+| **Battery** | :x: Not working | PMIC glink failures - DTB mismatch on power connector mapping |
 | **Built-in keyboard** | :x: Not working | Requires custom DTB (I2C/GPIO mapping) |
 | **Bluetooth** | :white_check_mark: Working | FastConnect 6900 UART - works out-of-the-box since v1 (no extra firmware needed) |
 | **GPU acceleration** | :construction: Untested | Adreno X1-45, firmware injected |
@@ -154,7 +154,8 @@ The kernel with `x1p42100-asus-zenbook-a14` DTB expects firmware at:
 |---------|-------------|--------|
 | v1 (`Fedora-44-VivoBook-X1407Q.iso`) | First attempt - custom GRUB, no firmware injection | Boots, touchpad + Bluetooth work |
 | v2 (`Fedora-44-VivoBook-v2.iso`) | Added firmware but in wrong path (`/qcom/` root) | Firmware not loaded |
-| **v3** (`Fedora-44-VivoBook-v3.iso`) | Firmware in correct device path | **Tested** - boots, touchpad works, WiFi/keyboard/battery not loading |
+| v3 (`Fedora-44-VivoBook-v3.iso`) | Firmware in correct device path | Boots, touchpad+BT work, WiFi/keyboard/battery not loading |
+| **v4** (`Fedora-44-VivoBook-v4.iso`) | DTB patched: `regulator-always-on` on WCN regulators | **Testing** - fix for WiFi power being cut during boot |
 
 ## How to Reproduce
 
@@ -207,6 +208,40 @@ The built-in keyboard/touchpad don't work because the Zenbook A14's DTB maps dif
 - [linux-x1e80100-zenbook-a14](https://github.com/alexVinarskis/linux-x1e80100-zenbook-a14) - Custom kernel repo
 - [qcom-firmware-updater](https://github.com/alejandroqh/qcom-firmware-updater) - Firmware management tool
 - [linux-firmware-qcom](https://archlinux.org/packages/core/any/linux-firmware-qcom/files/) - Arch package
+
+## Debugging Findings (v3 test - 2026-03-12)
+
+### WiFi not loading
+```
+VREG_WCN_3P3: disabling
+VREG_WCN_0P95: disabling
+VREG_WCN_1P9: disabling
+ath11k_pci 0004:01:00.0: pci device id mismatch: 0xffff 0x1103
+ath11k_pci 0004:01:00.0: probe with driver ath11k_pci failed with error -5
+```
+**Root cause:** Linux regulator framework disables WCN voltage regulators (no active consumer claims them in time). WiFi chip loses power, PCI reads return `0xffff`.
+
+**Fix (v4):** Added `regulator-always-on` to `VREG_WCN_3P3`, `VREG_WCN_0P95`, `VREG_WCN_1P9` in the DTB.
+
+### GPU firmware
+```
+msm_dpu ae01000.display-controller: Direct firmware load for qcom/gen71500_sqe.fw failed with error -2
+[drm:adreno_request_fw [msm]] *ERROR* failed to load gen71500_sqe.fw
+```
+Files exist as `.xz` compressed (`gen71500_sqe.fw.xz`, `gen71500_gmu.bin.xz`). SELinux was blocking `firmware_load`. After `setenforce 0`, display works.
+
+### Battery / PMIC
+```
+qcom_pmic_glink pmic-glink: Failed to create device link (0x180) with supplier ...
+```
+PMIC glink connector mapping differs between Zenbook A14 and Vivobook 14. Needs custom DTB.
+
+### WiFi hardware details
+- **Chip:** Qualcomm QCNFA765 (WCN6855) - NOT WCN7850 as initially assumed
+- **PCI ID:** `17cb:1103` at bus `0004:01:00.0`
+- **Driver:** `ath11k_pci` (not ath12k)
+- **PMU:** `qcom,wcn6855-pmu` in DTB
+- **Firmware path:** `ath11k/WCN6855/hw2.x/` (not ath12k/WCN7850)
 
 ## Technical Notes
 
