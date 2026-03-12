@@ -1,0 +1,6 @@
+# ISOs are too large for git
+*.iso
+
+# Temporary build artifacts
+/tmp/
+*.bak
