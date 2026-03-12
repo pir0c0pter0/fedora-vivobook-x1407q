@@ -22,15 +22,16 @@
 |---------|--------|-------|
 | **Boot** | :white_check_mark: Working | Fedora 44 Beta boots with custom GRUB + Zenbook A14 DTB |
 | **Display** | :white_check_mark: Working | Via Adreno X1-45 GPU |
+| **Touchpad** | :white_check_mark: Working | Built-in touchpad functional with Zenbook A14 DTB |
 | **USB ports** | :white_check_mark: Working | USB-C, USB-A, HDMI |
 | **NVMe** | :white_check_mark: Working | PCIe 4.0 detected and functional |
 | **USB Keyboard** | :white_check_mark: Working | External USB keyboards work fine |
-| **WiFi** | :construction: Needs firmware | FastConnect 6900 - firmware extracted from Windows |
-| **Bluetooth** | :construction: Needs firmware | FastConnect 6900 UART |
-| **GPU acceleration** | :construction: Needs firmware | Adreno X1-45, firmware extracted |
+| **WiFi** | :x: Not working | FastConnect 6900 (WCN785x) - driver not loading despite firmware present |
+| **Battery** | :x: Not working | Battery manager not loading (battmgr firmware present but not picked up) |
 | **Built-in keyboard** | :x: Not working | Requires custom DTB (I2C/GPIO mapping) |
-| **Built-in touchpad** | :x: Not working | Same DTB issue as keyboard |
-| **Audio** | :x: Not working | ADSP firmware loaded but no codec mapping in DTB |
+| **Bluetooth** | :white_check_mark: Working | FastConnect 6900 UART - functional |
+| **GPU acceleration** | :construction: Untested | Adreno X1-45, firmware injected |
+| **Audio** | :x: Not working | ADSP firmware present but no codec mapping in DTB |
 | **Camera** | :x: Not working | No driver support yet |
 
 ## The Problem
@@ -153,7 +154,7 @@ The kernel with `x1p42100-asus-zenbook-a14` DTB expects firmware at:
 |---------|-------------|--------|
 | v1 (`Fedora-44-VivoBook-X1407Q.iso`) | First attempt - custom GRUB, no firmware injection | Boots but no peripherals |
 | v2 (`Fedora-44-VivoBook-v2.iso`) | Added firmware but in wrong path (`/qcom/` root) | Firmware not loaded |
-| **v3** (`Fedora-44-VivoBook-v3.iso`) | Firmware in correct device path | **Latest - needs testing** |
+| **v3** (`Fedora-44-VivoBook-v3.iso`) | Firmware in correct device path | **Tested** - boots, touchpad works, WiFi/keyboard/battery not loading |
 
 ## How to Reproduce
 
