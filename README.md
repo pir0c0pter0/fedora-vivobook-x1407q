@@ -26,7 +26,7 @@
 | **USB ports** | :white_check_mark: Working | USB-C, USB-A, HDMI |
 | **NVMe** | :white_check_mark: Working | PCIe 4.0 detected and functional |
 | **USB Keyboard** | :white_check_mark: Working | External USB keyboards work fine |
-| **WiFi** | :construction: Testing v4 fix | WCN6855 (ath11k_pci) - regulators disabled during boot; v4 DTB adds `regulator-always-on` + GRUB fix to load it |
+| **WiFi** | :white_check_mark: Working | WCN6855 (ath11k_pci) - fixed via DKMS kernel module + board.bin (see [WiFi Fix](#wifi-fix)) |
 | **Battery** | :x: Not working | PMIC glink failures - DTB mismatch on power connector mapping |
 | **Built-in keyboard** | :x: Not working | Requires custom DTB (I2C/GPIO mapping) |
 | **Bluetooth** | :white_check_mark: Working | FastConnect 6900 UART - works out-of-the-box since v1 (no extra firmware needed) |
@@ -210,45 +210,96 @@ The built-in keyboard/touchpad don't work because the Zenbook A14's DTB maps dif
 - [qcom-firmware-updater](https://github.com/alejandroqh/qcom-firmware-updater) - Firmware management tool
 - [linux-firmware-qcom](https://archlinux.org/packages/core/any/linux-firmware-qcom/files/) - Arch package
 
-## Debugging Findings (v3 test - 2026-03-12)
+## WiFi Fix
 
-### WiFi not loading
+WiFi is working on the installed system via a DKMS kernel module + custom board data file. No DTB override needed.
+
+### The Problem
+
+Two bugs prevent WiFi from working on kernel 6.19:
+
+1. **PCIe PERST# race condition** (known upstream bug, fix targeting kernel ~6.21): the `qcom-pcie` driver deasserts PERST# and scans the bus **before** `pci-pwrctrl-pwrseq` powers on the WiFi chip. The PCIe link trains briefly (Gen.3 x1) but the chip isn't ready — `DLActive` never becomes true and config space reads return `0xFFFFFFFF`.
+
+2. **Regulator cleanup**: the Linux regulator framework disables WCN voltage regulators ~30s after boot (no active consumer holds them), killing any chance of late enumeration.
+
+3. **Missing board data**: the upstream `board-2.bin` has no entry for subsystem device `105b:e130` (QCNFA765 as used in this laptop).
+
+### The Fix (2 parts)
+
+#### Part 1: DKMS kernel module `wcn_regulator_fix`
+
+A kernel module loaded early via initramfs that:
+
+1. **Holds WCN regulators** via the regulator consumer API (`regulator_get` + `regulator_enable`), preventing the ~30s cleanup
+2. **Patches the Device Tree** with `regulator-always-on` on all 3 WCN regulator nodes (belt and suspenders)
+3. **Schedules delayed PCIe bus rescans** every 5s (up to 6 attempts) — the WiFi chip is found on the first attempt (~6s after boot)
+
 ```
-VREG_WCN_3P3: disabling
-VREG_WCN_0P95: disabling
-VREG_WCN_1P9: disabling
-ath11k_pci 0004:01:00.0: pci device id mismatch: 0xffff 0x1103
-ath11k_pci 0004:01:00.0: probe with driver ath11k_pci failed with error -5
-```
-**Root cause:** Linux regulator framework disables WCN voltage regulators (no active consumer claims them in time). WiFi chip loses power, PCI reads return `0xffff`.
-
-**Fix (v4):** Added `regulator-always-on` to `VREG_WCN_3P3`, `VREG_WCN_0P95`, `VREG_WCN_1P9` in the DTB.
-
-### GRUB failed to load WiFi-fix DTB (v4 test - 2026-03-12)
-
-The v4 DTB with `regulator-always-on` was correctly placed on the USB EFI partition (sda2, FAT32), but GRUB silently failed to load it. The live FDT (`/sys/firmware/fdt`) did not contain the fix — regulators were still being disabled.
-
-**Root cause:** The GRUB config used `search --file --set=efipart /x1p42100-asus-zenbook-a14-wifi-fix.dtb` to find the EFI partition containing the fixed DTB. However, the `fat` filesystem module was not loaded at that point, so GRUB could not read the FAT32 partition. The `search` command failed silently, `$efipart` remained empty, and the `devicetree ($efipart)/...` command fell back to the original DTB from the ISO (iso9660 partition).
-
-**Fix (v4.1):** Updated GRUB config on the EFI partition to:
-1. Load `insmod fat` and `insmod part_gpt` before referencing the EFI partition
-2. Use explicit `set efipart=(hd0,gpt2)` instead of `search --file`
-
-```grub
-insmod fat
-insmod part_gpt
-set efipart=(hd0,gpt2)
-
-menuentry "Fedora 44 - Vivobook X1407Q - WiFi Fix DTB" {
-    devicetree ($efipart)/x1p42100-asus-zenbook-a14-wifi-fix.dtb
-}
+[    0.847] wcn-wifi-fix: loading (regulator hold + delayed PCIe rescan)
+[    0.847] wcn-wifi-fix: holding VREG_WCN_0P95 enabled
+[    0.847] wcn-wifi-fix: holding VREG_WCN_1P9 enabled
+[    0.847] wcn-wifi-fix: holding VREG_WCN_3P3 enabled
+[    0.847] wcn-wifi-fix: held 3/3 regulators
+[    6.115] wcn-wifi-fix: PCIe rescan attempt 1
+[    6.135] wcn-wifi-fix: WiFi device FOUND! 17cb:1103
 ```
 
-**Verification after reboot:**
+**Install:**
+
 ```bash
-sudo dtc -I dtb -O dts /sys/firmware/fdt | grep -A5 "regulator-wcn-0p95"
-# Should show: regulator-always-on;
+# Source is in /usr/src/wcn-regulator-fix-1.0/
+sudo dkms add /usr/src/wcn-regulator-fix-1.0
+sudo dkms build wcn-regulator-fix/1.0
+sudo dkms install wcn-regulator-fix/1.0
+
+# Load early via initramfs
+echo "force_drivers+=\" wcn_regulator_fix \"" | sudo tee /etc/dracut.conf.d/wcn-regulator-fix.conf
+echo "wcn_regulator_fix" | sudo tee /etc/modules-load.d/wcn-regulator-fix.conf
+
+# Add to kernel cmdline for early loading
+sudo grubby --update-kernel=ALL --args="rd.driver.pre=wcn_regulator_fix"
+
+# Rebuild initramfs
+sudo dracut --force
 ```
+
+#### Part 2: WiFi board data (`board.bin`)
+
+The `ath11k` driver needs calibration data matching our hardware identifiers:
+
+```
+bus=pci,vendor=17cb,device=1103,subsystem-vendor=105b,subsystem-device=e130,
+qmi-chip-id=18,qmi-board-id=255,variant=UX3407Q
+```
+
+No matching entry exists in the upstream `board-2.bin`. As a workaround, board data from a similar WCN6855 variant (`105b:e0ce`, same chip-id/board-id) is provided as a fallback `board.bin`:
+
+```bash
+# Already installed at:
+/lib/firmware/ath11k/WCN6855/hw2.1/board.bin
+```
+
+> **Note:** This uses generic calibration data. For optimal RF performance, extract the device-specific board data (`bdwlan_wcn685x_2p1_nfa765a_AS_SA_X14QA.elf`) from the Windows driver (see [GUIA-EXTRAIR-FIRMWARE.md](GUIA-EXTRAIR-FIRMWARE.md)).
+
+### WiFi hardware details
+
+| Property | Value |
+|----------|-------|
+| **Module** | Qualcomm QCNFA765 |
+| **Chip** | WCN6855 hw2.1 |
+| **PCI ID** | `17cb:1103` (subsystem `105b:e130`) |
+| **PCIe bus** | `0004:01:00.0` |
+| **Driver** | `ath11k_pci` |
+| **PMU** | `qcom,wcn6855-pmu` in DTB |
+| **Firmware** | WLAN.HSP.1.1-03125 (2024-04-17) |
+| **Interface** | `wlP4p1s0` |
+| **Calibration variant** | `UX3407Q` |
+
+### Upstream status
+
+The PCIe PERST# race condition is being fixed upstream by Manivannan Sadhasivam (Qualcomm/Linaro) in a [15-patch series](https://lkml.org/lkml/2026/1/15/415) "PCI/pwrctrl: Major rework to integrate pwrctrl devices with controller drivers". Expected to land in kernel ~6.21, which will make the DKMS module unnecessary.
+
+## Other Debugging Findings
 
 ### GPU firmware
 ```
@@ -263,13 +314,6 @@ qcom_pmic_glink pmic-glink: Failed to create device link (0x180) with supplier .
 ```
 PMIC glink connector mapping differs between Zenbook A14 and Vivobook 14. Needs custom DTB.
 
-### WiFi hardware details
-- **Chip:** Qualcomm QCNFA765 (WCN6855) - NOT WCN7850 as initially assumed
-- **PCI ID:** `17cb:1103` at bus `0004:01:00.0`
-- **Driver:** `ath11k_pci` (not ath12k)
-- **PMU:** `qcom,wcn6855-pmu` in DTB
-- **Firmware path:** `ath11k/WCN6855/hw2.x/` (not ath12k/WCN7850)
-
 ## Technical Notes
 
 - Windows has BitLocker enabled - firmware must be extracted from Windows itself, not from Linux
@@ -279,13 +323,40 @@ PMIC glink connector mapping differs between Zenbook A14 and Vivobook 14. Needs 
 - Bash gotcha: `((var++))` with var=0 returns exit code 1 under `set -e` - use `var=$((var + 1))` instead
 - GRUB gotcha: `search --file` cannot find files on FAT32 partitions unless `insmod fat` is loaded first; the search fails silently and the variable remains unset
 
+## WiFi DTB Override — Failed Attempts (historical)
+
+> **Note:** These attempts are no longer relevant — WiFi was fixed via a [kernel module approach](#wifi-fix) that bypasses the DTB entirely.
+
+<details>
+<summary>7 failed methods to load custom DTB on installed system (click to expand)</summary>
+
+The initial approach was to patch the DTB with `regulator-always-on` on WCN regulators. Loading it on the installed system proved impossible due to INSYDE firmware controlling the DTB.
+
+| # | Method | Why it fails |
+|---|--------|-------------|
+| 1 | **GRUB BLS `devicetree` directive** | GRUB `blscfg` on Fedora aarch64 **ignores** the `devicetree` field in BLS entries |
+| 2 | **Replacing DTB in `/boot/dtb/`** | Kernel does **not** use DTBs from `/boot/dtb/` — the DTB comes from UEFI firmware (INSYDE), embedded in firmware ROM |
+| 3 | **Custom GRUB entry with `insmod fdt` + `devicetree`** (no modules) | `insmod fdt` failed silently — GRUB modules didn't exist in `/boot/grub2/arm64-efi/` |
+| 4 | **dtbloader.efi as EFI Driver** (pre-built) | INSYDE firmware **ignores EFI Driver variables** (`DriverOrder`/`Driver####`) — dtbloader never executes |
+| 5 | **dtbloader.efi custom-built** with Vivobook X1407QA hwids | Same as #4 — INSYDE ignores EFI drivers regardless of device matching |
+| 6 | **EFI stub `dtb=` kernel parameter** | `CONFIG_EFI_ARMSTUB_DTB_LOADER=y` exists but adding `dtb=` to cmdline **prevents boot entirely** |
+| 7 | **Custom GRUB entry with `insmod fdt` + `devicetree`** (modules installed) | Confirmed booted from custom entry, fdt module loaded, but `devicetree` command **still cannot override UEFI-provided DTB** on INSYDE firmware |
+
+**Key facts:**
+- The DTB comes from **UEFI firmware (INSYDE)**, not from `/boot/dtb/`
+- GRUB on aarch64 **cannot override** the firmware DTB on INSYDE
+- No `regulator_ignore_unused` kernel parameter exists (unlike `clk_ignore_unused`)
+- No ConfigFS DT overlay support (`OF_CONFIGFS` not compiled in kernel)
+
+</details>
+
 ## Next Steps
 
-1. **Reboot with v4.1 GRUB fix** - Verify DTB with `regulator-always-on` is loaded and WiFi powers up
-2. **Test WiFi** - Check if `ath11k_pci` probes successfully and `wlan0` appears
-3. **Custom DTB** - Create a DTB for the X1407Q (for keyboard/battery support)
+1. ~~**WiFi**~~ :white_check_mark: Solved — DKMS module + board.bin (see [WiFi Fix](#wifi-fix))
+2. **Extract device-specific board data** from Windows driver (`bdwlan_wcn685x_2p1_nfa765a_AS_SA_X14QA.elf`) for optimal RF calibration
+3. **Custom DTB** - Create a DTB for the X1407Q (for keyboard/battery/audio support)
 4. **Upstream contribution** - Submit DTB patches to the Linux kernel
-5. **Wait for Fedora 44 final** (April 2026) - May have better out-of-the-box support
+5. **Kernel ~6.21** - PCIe pwrctrl fix will land upstream, making the DKMS module unnecessary
 
 ## Contributing
 
