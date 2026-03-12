@@ -11,7 +11,7 @@
 | **GPU** | Adreno X1-45 |
 | **RAM** | 16GB LPDDR5X |
 | **Storage** | NVMe PCIe 4.0 |
-| **WiFi** | Qualcomm FastConnect 6900 (WCN785x) - ath12k driver |
+| **WiFi** | Qualcomm QCNFA765 (WCN6855) - ath11k_pci driver |
 | **Bluetooth** | FastConnect 6900 (UART) |
 | **NPU** | Hexagon 45 TOPS |
 | **BIOS** | _ASUS_ - 8380 |
@@ -26,7 +26,7 @@
 | **USB ports** | :white_check_mark: Working | USB-C, USB-A, HDMI |
 | **NVMe** | :white_check_mark: Working | PCIe 4.0 detected and functional |
 | **USB Keyboard** | :white_check_mark: Working | External USB keyboards work fine |
-| **WiFi** | :construction: Testing v4 fix | WCN6855 (ath11k_pci) - regulators were being disabled; v4 DTB adds `regulator-always-on` |
+| **WiFi** | :construction: Testing v4 fix | WCN6855 (ath11k_pci) - regulators disabled during boot; v4 DTB adds `regulator-always-on` + GRUB fix to load it |
 | **Battery** | :x: Not working | PMIC glink failures - DTB mismatch on power connector mapping |
 | **Built-in keyboard** | :x: Not working | Requires custom DTB (I2C/GPIO mapping) |
 | **Bluetooth** | :white_check_mark: Working | FastConnect 6900 UART - works out-of-the-box since v1 (no extra firmware needed) |
@@ -136,7 +136,7 @@ The kernel with `x1p42100-asus-zenbook-a14` DTB expects firmware at:
 | `qcav1e8380.mbn` | AV1 encoder |
 | `qcvss8380.mbn`, `qcvss8380_pa.mbn` | Video subsystem |
 
-### WiFi firmware (ath12k/WCN7850/hw2.0/)
+### WiFi firmware (ath11k/WCN6855/hw2.x/)
 
 - `amss.bin`, `board-2.bin`, `m3.bin`, `m320.bin`, `regdb.bin`
 - `bdwlan_wcn785x_2p0_ncm825_UX3407Q.elf` (Vivobook-specific)
@@ -155,7 +155,8 @@ The kernel with `x1p42100-asus-zenbook-a14` DTB expects firmware at:
 | v1 (`Fedora-44-VivoBook-X1407Q.iso`) | First attempt - custom GRUB, no firmware injection | Boots, touchpad + Bluetooth work |
 | v2 (`Fedora-44-VivoBook-v2.iso`) | Added firmware but in wrong path (`/qcom/` root) | Firmware not loaded |
 | v3 (`Fedora-44-VivoBook-v3.iso`) | Firmware in correct device path | Boots, touchpad+BT work, WiFi/keyboard/battery not loading |
-| **v4** (`Fedora-44-VivoBook-v4.iso`) | DTB patched: `regulator-always-on` on WCN regulators | **Testing** - fix for WiFi power being cut during boot |
+| **v4** (`Fedora-44-VivoBook-v4.iso`) | DTB patched: `regulator-always-on` on WCN regulators | GRUB failed to load DTB from EFI partition (missing `insmod fat`) - fix applied |
+| **v4.1** (USB hotfix) | GRUB config fixed: explicit `(hd0,gpt2)` + `insmod fat` for EFI partition | **Testing** - DTB now loads correctly from EFI partition |
 
 ## How to Reproduce
 
@@ -223,6 +224,32 @@ ath11k_pci 0004:01:00.0: probe with driver ath11k_pci failed with error -5
 
 **Fix (v4):** Added `regulator-always-on` to `VREG_WCN_3P3`, `VREG_WCN_0P95`, `VREG_WCN_1P9` in the DTB.
 
+### GRUB failed to load WiFi-fix DTB (v4 test - 2026-03-12)
+
+The v4 DTB with `regulator-always-on` was correctly placed on the USB EFI partition (sda2, FAT32), but GRUB silently failed to load it. The live FDT (`/sys/firmware/fdt`) did not contain the fix — regulators were still being disabled.
+
+**Root cause:** The GRUB config used `search --file --set=efipart /x1p42100-asus-zenbook-a14-wifi-fix.dtb` to find the EFI partition containing the fixed DTB. However, the `fat` filesystem module was not loaded at that point, so GRUB could not read the FAT32 partition. The `search` command failed silently, `$efipart` remained empty, and the `devicetree ($efipart)/...` command fell back to the original DTB from the ISO (iso9660 partition).
+
+**Fix (v4.1):** Updated GRUB config on the EFI partition to:
+1. Load `insmod fat` and `insmod part_gpt` before referencing the EFI partition
+2. Use explicit `set efipart=(hd0,gpt2)` instead of `search --file`
+
+```grub
+insmod fat
+insmod part_gpt
+set efipart=(hd0,gpt2)
+
+menuentry "Fedora 44 - Vivobook X1407Q - WiFi Fix DTB" {
+    devicetree ($efipart)/x1p42100-asus-zenbook-a14-wifi-fix.dtb
+}
+```
+
+**Verification after reboot:**
+```bash
+sudo dtc -I dtb -O dts /sys/firmware/fdt | grep -A5 "regulator-wcn-0p95"
+# Should show: regulator-always-on;
+```
+
 ### GPU firmware
 ```
 msm_dpu ae01000.display-controller: Direct firmware load for qcom/gen71500_sqe.fw failed with error -2
@@ -250,12 +277,13 @@ PMIC glink connector mapping differs between Zenbook A14 and Vivobook 14. Needs 
 - `UX3407QA` (X1P) vs `UX3407RA` (X1E): only ADSP firmware differs; CDSP and GPU are identical
 - `qcom-firmware-extract` (Debian tool) can automate extraction but requires Windows partition access
 - Bash gotcha: `((var++))` with var=0 returns exit code 1 under `set -e` - use `var=$((var + 1))` instead
+- GRUB gotcha: `search --file` cannot find files on FAT32 partitions unless `insmod fat` is loaded first; the search fails silently and the variable remains unset
 
 ## Next Steps
 
-1. **Test v3 ISO** - Write to USB and boot on the Vivobook
-2. **Check dmesg** - Verify firmware loads from the correct path
-3. **Custom DTB** - Create a DTB for the X1407Q (for keyboard/touchpad support)
+1. **Reboot with v4.1 GRUB fix** - Verify DTB with `regulator-always-on` is loaded and WiFi powers up
+2. **Test WiFi** - Check if `ath11k_pci` probes successfully and `wlan0` appears
+3. **Custom DTB** - Create a DTB for the X1407Q (for keyboard/battery support)
 4. **Upstream contribution** - Submit DTB patches to the Linux kernel
 5. **Wait for Fedora 44 final** (April 2026) - May have better out-of-the-box support
 
