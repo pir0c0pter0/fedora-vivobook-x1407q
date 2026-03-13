@@ -26,7 +26,7 @@
 | **WiFi** | :white_check_mark: Working | DKMS module + board.bin (see [WiFi Fix](#wifi-fix)) |
 | **Built-in keyboard** | :white_check_mark: Working | DKMS module (see [Keyboard Fix](#keyboard-fix)) |
 | **Bluetooth** | :white_check_mark: Working | FastConnect 6900 UART - works out-of-the-box |
-| **Battery** | :x: Not working | PMIC glink DTB mismatch |
+| **Battery** | :white_check_mark: Working | ADSP firmware in initramfs (see [Battery Fix](#battery-fix)) |
 | **Audio** | :x: Not working | ADSP codec not mapped in DTB |
 | **Camera** | :x: Not working | No driver support |
 
@@ -111,6 +111,30 @@ sudo dracut --force
 | **HID descriptor** | Register `0x0001` |
 | **Interrupt** | TLMM GPIO 67, level-low |
 
+## Battery Fix
+
+ADSP firmware included in initramfs so `qcom-battmgr` can communicate with the PMIC.
+
+### Problem
+
+The `qcom-battmgr` driver registers power supply entries but all reads return `EAGAIN` ("Resource temporarily unavailable"). The ADSP remoteproc fails to boot at early boot because its firmware (`qcadsp8380.mbn`) is not in the initramfs — the rootfs isn't mounted yet at 1.7s when the kernel requests it.
+
+### Fix
+
+Include ADSP firmware in initramfs via dracut:
+
+```bash
+echo 'install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcadsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsp_dtbs.elf /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspr.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsps.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspua.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/battmgr.jsn "' | sudo tee /etc/dracut.conf.d/qcom-adsp-firmware.conf
+sudo dracut --force
+```
+
+| Property | Value |
+|----------|-------|
+| **Driver** | `qcom_battmgr` (via `pmic_glink`) |
+| **Dependency** | ADSP remoteproc (`qcadsp8380.mbn`) |
+| **Battery** | X321-42, 50Wh, Li-ion |
+| **sysfs** | `/sys/class/power_supply/qcom-battmgr-bat/` |
+
 ## Scripts
 
 | Script | Purpose |
@@ -132,7 +156,7 @@ Key paths:
 ## Known Issues
 
 - **DTB override impossible** on INSYDE firmware — all hardware fixes must use kernel modules
-- **Battery**: PMIC glink connector mapping differs from Zenbook A14
+- **Battery**: Requires ADSP firmware in initramfs — without it, `qcom-battmgr` reads fail with EAGAIN
 - **Audio**: ADSP firmware present but no codec mapping in DTB
 - **GPU**: `setenforce 0` needed for firmware loading (SELinux blocks `.xz` firmware)
 - **3 unknown I2C devices** on bus 4: addresses `0x43`, `0x5b`, `0x76`
@@ -145,11 +169,10 @@ Key paths:
 
 ## Next Steps
 
-1. **Battery** — Investigate PMIC glink connector mapping
-2. **Audio** — ADSP codec mapping
-3. **Identify bus 4 devices** — 0x43, 0x5b, 0x76
-4. **WiFi calibration** — Extract device-specific board data from Windows driver
-5. **Upstream** — Submit DTB patches for Vivobook X1407QA
+1. **Audio** — ADSP codec mapping (ADSP now boots, need codec node in DTB)
+2. **Identify bus 4 devices** — 0x43, 0x5b, 0x76
+3. **WiFi calibration** — Extract device-specific board data from Windows driver
+4. **Upstream** — Submit DTB patches for Vivobook X1407QA
 
 ## License
 
