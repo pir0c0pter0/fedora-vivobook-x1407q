@@ -18,6 +18,7 @@
 | **Bluetooth** | FastConnect 6900 (UART) |
 | **Keyboard** | ASUS I2C-HID, VID `0x0b05`, PID `0x4543`, bus 4 (`b94000`), addr `0x3a` |
 | **Touchpad** | ELAN I2C-HID clickpad, VID `0x04f3`, PID `0x3313`, bus 1 (`b80000`), addr `0x15` |
+| **Camera** | FHD IR module: 2× OV02C10 RGB (2MP) + 2× IR sensors (Windows Hello), CCI1, CSIPHY4 |
 | **Battery** | 50Wh Li-ion X321-42, driver `qcom_battmgr` via `pmic_glink` |
 
 ## Achievements
@@ -58,7 +59,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **USB ports** | :white_check_mark: Working | USB-C, USB-A, HDMI |
 | **NVMe** | :white_check_mark: Working | PCIe 4.0 |
 | **Audio** | :white_check_mark: Working | UCM2 regex fix (see [Audio Fix](#12-audio-fix)) |
-| **Camera** | :x: Not working | No driver support |
+| **Camera** | :x: Not working | 4 sensors identified, needs kernel patches (see [Camera Research](#camera-research)) |
 
 ---
 
@@ -845,16 +846,97 @@ See [GUIA-POS-INSTALACAO.md](GUIA-POS-INSTALACAO.md) for details.
 
 ---
 
+## Camera Research
+
+### Hardware — 4 Sensors
+
+The Vivobook 14 X1407QA has an FHD IR camera module with **4 sensors**:
+
+| Sensor | Type | Purpose | I2C Address | Status |
+|--------|------|---------|-------------|--------|
+| **OV02C10** | RGB | Main webcam (2MP, 1080p) | `0x36` on CCI1 | Driver exists in kernel (`ov02c10.ko`) |
+| **OV02C10** | RGB | Secondary (likely wide-angle or depth) | TBD | Same driver |
+| **IR sensor** | IR | Windows Hello flood illuminator | TBD | No Linux driver |
+| **IR sensor** | IR | Windows Hello dot projector | TBD | No Linux driver |
+
+### Camera Pipeline (what's needed)
+
+The camera uses Qualcomm's CAMSS (Camera Subsystem), NOT regular I2C/USB. The full pipeline:
+
+```
+OV02C10 sensor → CCI1 (I2C control) → CSIPHY4 (MIPI CSI-2 PHY) → CSID (decoder) → VFE/IFE (image front-end) → V4L2 → libcamera → PipeWire
+```
+
+**Required kernel components:**
+
+| Component | Module | Compatible | Status in kernel 6.19 |
+|-----------|--------|------------|----------------------|
+| Camera Clock Controller | `camcc-x1e80100.ko` | `qcom,x1e80100-camcc` | Module exists, no DT node |
+| Camera Subsystem | `qcom-camss.ko` | `qcom,x1e80100-camss` | Module exists, no DT node |
+| CCI (I2C for camera) | `v4l2-cci.ko` | — | Module exists |
+| OV02C10 sensor | `ov02c10.ko` | `ovti,ov02c10` | Module exists |
+| CSIPHY | (part of camss) | — | 4x CSIPHY (DPHY mode, 2.5Gbps, 4-lane) |
+
+### Why it doesn't work
+
+1. **No camera nodes in DTB** — The Zenbook A14 DTB we use has NO CAMSS, CAMCC, CCI, or CSIPHY device tree nodes
+2. **INSYDE blocks DTB override** — Can't add nodes via GRUB/EFI (7 methods tested, all failed)
+3. **Too complex for DKMS** — Unlike other fixes (single device probe), camera needs the entire CAMSS pipeline: clock controller + 4 CSIPHYs + 3 CSIDs + 2 IFEs + CCI + sensor nodes
+4. **Patches not merged upstream** — Bryan O'Donoghue (Linaro) has a [v8 patch series (18 patches)](https://lkml.org/lkml/2026/2/25/1157) adding x1e80100 CAMSS to the kernel, still in review on LKML as of Feb 2026
+
+### Zenbook A14 camera status (same die)
+
+From [alexVinarskis/linux-x1e80100-zenbook-a14](https://github.com/alexVinarskis/linux-x1e80100-zenbook-a14):
+
+- Patch: `0015-arm64-dts-qcom-x1-asus-zenbook-a14-Add-on-OV02C10-RG.patch`
+- **Stable on Hamoa (X1E variant)**
+- **NOT fully working on Purwa (X1P variant)** ← our die!
+- Needs Bryan/Linaro's custom kernel tree (not mainline)
+- RGB sensor only (IR sensors not supported in Linux yet)
+
+### Sensor connection map (from Zenbook A14 patch)
+
+```
+OV02C10 RGB sensor
+├── I2C: CCI1, address 0x36
+├── MIPI CSI: CSIPHY4, data lanes 1+2
+├── Clock: CAM_CC_MCLK4_CLK @ 19.2 MHz
+├── Reset: GPIO 237 (active low)
+├── MCLK pin: GPIO 100
+├── Power: AVDD/DVDD 2.8V (vreg_l7b_2p8) + DOVDD 1.8V (vreg_l3m_1p8)
+├── CSIPHY power: 0.8V (vreg_l2c_0p8) + 1.2V (vreg_l1c_1p2)
+├── Link frequency: 400 MHz
+└── Privacy LED: GPIO 110
+```
+
+### Upstream patch status
+
+| Patch series | Author | Version | Target | Status |
+|-------------|--------|---------|--------|--------|
+| [x1e80100 CAMSS dt-bindings + dtsi](https://lkml.org/lkml/2026/2/25/1157) | Bryan O'Donoghue (Linaro) | v8 (18 patches) | linux-next | In review (Feb 2026) |
+| [x1e/Hamoa camera DTSI](https://lkml.org/lkml/2026/2/26/1238) | Bryan O'Donoghue | v1 (11 patches) | linux-next | In review (Feb 2026) |
+| [CAMSS driver for X1 Elite](https://lore.kernel.org/all/20250314-b4-media-comitters-next-25-03-13-x1e80100-camss-driver-v2-7-d163d66fcc0d@linaro.org/T/) | Bryan O'Donoghue | v2 (7 patches) | media-committers/next | In review |
+| [ov08x40 on x1e80100 CRD](https://lwn.net/Articles/992466/) | Bryan O'Donoghue | — | — | Merged/WIP |
+
+### What we can do
+
+| Option | Effort | Risk | Notes |
+|--------|--------|------|-------|
+| **Wait for upstream merge** | None | Low | Patches at v8, likely kernel ~6.21 or 6.22. Purwa (X1P) support may take longer |
+| **Build custom kernel** | High | Medium | Apply Bryan/Linaro patches to Fedora's kernel source. Purwa still "not fully working" |
+| **Extract camera firmware from Windows** | Medium | N/A | Windows was erased. Would need reinstall or another X1407QA with Windows |
+| **DKMS approach** | Very High | High | Would need to register entire CAMSS pipeline from a module — technically possible but extremely complex |
+
+### Missing info (need Windows or hardware inspection)
+
+- Exact sensor models for IR cameras (likely OmniVision or Samsung IR sensors)
+- CCI bus assignment for 2nd RGB sensor and IR sensors
+- CSIPHY connections for non-primary sensors
+- Camera firmware requirements (OV02C10 doesn't need external firmware, but IR sensors might)
+
+---
+
 ## Future Development
-
-### Camera (priority 1)
-
-No driver support exists yet. Needs:
-
-1. **Identify the camera sensor** — check I2C bus, ACPI, and Windows driver info
-2. **Check if CCI (Camera Control Interface)** is mapped in the DTB
-3. **Write or adapt a sensor driver** using the V4L2 subsystem
-4. This likely requires upstream kernel work
 
 ### WiFi Calibration
 
@@ -888,6 +970,9 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 | Zenbook A14 DTB | Patches by Alex Vinarskis | Merged in 6.19 |
 | Vivobook X1407QA DTB | Not submitted yet | TBD |
 | UCM2 Vivobook 14 audio | Not submitted yet | alsa-ucm-conf |
+| x1e80100 CAMSS (camera subsystem) | v8 by Bryan O'Donoghue (Linaro), 18 patches | ~6.21/6.22 |
+| x1e/Hamoa camera DTSI | v1 by Bryan O'Donoghue, 11 patches | ~6.21/6.22 |
+| OV02C10 sensor driver | Merged (Hans de Goede) | 6.19 (available) |
 
 ---
 
@@ -910,13 +995,18 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **Audio**: UCM2 fix modifies system file — will be overwritten by `alsa-ucm` updates (needs upstream PR)
 - **GPU**: Firmware must be in initramfs for early loading. SELinux may block `.xz` firmware (`setenforce 0` as workaround)
 - **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
-- **3 unknown I2C devices** on bus 4: addresses `0x43`, `0x5b`, `0x76`
+- **Camera**: 4 sensors (2× OV02C10 RGB + 2× IR) identified but not functional — CAMSS/CCI/CSIPHY nodes missing from DTB, patches in review upstream (see [Camera Research](#camera-research))
+- **1 unknown I2C device** on bus 4: address `0x5b` (0x43 and 0x76 not responding — may be camera sensors on CCI, not regular I2C)
 
 ## Upstream References
 
 - [Zenbook A14 patches](https://patchew.org/linux/20250523131605.6624-1-alex.vinarskis@gmail.com/) by Alex Vinarskis
 - [PCIe pwrctrl fix](https://lkml.org/lkml/2026/1/15/415) — 15-patch series targeting kernel ~6.21
-- [linux-x1e80100-zenbook-a14](https://github.com/alexVinarskis/linux-x1e80100-zenbook-a14) — Custom kernel repo
+- [linux-x1e80100-zenbook-a14](https://github.com/alexVinarskis/linux-x1e80100-zenbook-a14) — Custom kernel repo with camera patch
+- [x1e80100 CAMSS patches v8](https://lkml.org/lkml/2026/2/25/1157) — Bryan O'Donoghue (Linaro), 18 patches for camera subsystem
+- [x1e/Hamoa camera DTSI](https://lkml.org/lkml/2026/2/26/1238) — Device tree camera nodes for x1e80100 laptops
+- [CAMSS driver for X1 Elite](https://lore.kernel.org/all/20250314-b4-media-comitters-next-25-03-13-x1e80100-camss-driver-v2-7-d163d66fcc0d@linaro.org/T/) — Camera subsystem driver patches
+- [ov08x40 on x1e80100 CRD](https://lwn.net/Articles/992466/) — OV08X40 sensor support for reference design
 
 ## License
 
