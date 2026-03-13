@@ -19,7 +19,7 @@
 #include <string.h>
 #include <stdio.h>
 
-#define POOL_MULTIPLIER 50
+#define POOL_MULTIPLIER 200
 
 typedef VkResult (*PFN_vkCreateDescriptorPool)(
     VkDevice device,
