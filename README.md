@@ -29,7 +29,7 @@
 | **Battery** | :white_check_mark: Working | ADSP firmware in initramfs (see [Battery Fix](#battery-fix)) |
 | **Brightness** | :white_check_mark: Working | DKMS module (see [Brightness Fix](#brightness-fix)) |
 | **Audio** | :x: Not working | ADSP codec not mapped in DTB |
-| **Brightness keys** | :x: Not working | Fn+F5/F6 keycodes registered but no events generated |
+| **Brightness keys** | :white_check_mark: Working | DKMS module (see [Hotkey Fix](#hotkey-fix)) |
 | **Camera** | :x: Not working | No driver support |
 
 ## The Problem
@@ -151,8 +151,8 @@ The panel (Innolux N140JCA-ELK, IPS LCD) uses an external PWM signal for brightn
 - Finds PMK8550 regmap via DT child platform device lookup
 - Enables DTEST3 routing: writes `0x01` to LPG TEST register E2 (offset 0xE2) via SEC_ACCESS unlock
 - Writes PWM value + **PWM_SYNC** (offset 0x47) to latch values into hardware
-- Registers `/sys/class/backlight/vivobook-backlight` (4096 levels)
-- GNOME Quick Settings slider works automatically (may need logout/login after first install)
+- Registers `/sys/class/backlight/vivobook-backlight` (4096 levels, type `platform`)
+- GNOME Quick Settings slider + Fn brightness keys work automatically
 - On unload, restores DTEST3 to 0x00 (GPIO5 floats HIGH = 100% brightness, safe)
 
 **Signal path**: `LPG ch0 PWM → DTEST3 bus → GPIO5 (DIG_OUT_SRC=0x04) → panel backlight`
@@ -174,6 +174,42 @@ echo "vivobook_bl_fix" | sudo tee /etc/modules-load.d/vivobook-bl-fix.conf
 | **Backlight enable** | PMC8380_3 GPIO4 (on/off, already HIGH) |
 
 > **WARNING**: Never change GPIO5 DIG_OUT_SOURCE_CTL to 0x00 (func3) or force GPIO output LOW — this kills the display and requires a forced reboot.
+
+## Hotkey Fix
+
+DKMS module `vivobook_hotkey_fix`.
+
+### Problem
+
+The keyboard (I2C HID, VID `0x0B05`, PID `0x4543`) sends Fn hotkey events on ASUS vendor usage page `0xFF31` (HID report ID `0x5A`). However, the keyboard firmware requires an ASUS-specific initialization sequence before it will forward these events to the host — without it, Fn+F5/F6 (brightness) and other Fn hotkeys are silently swallowed by firmware.
+
+The standard `hid-asus` kernel driver handles this for known ASUS keyboards, but it's disabled in Fedora's aarch64 kernel (`CONFIG_HID_ASUS is not set`) and PID `0x4543` isn't in its device table anyway. The `hid-generic` driver that handles the keyboard doesn't send the init and can't map vendor-specific usage pages.
+
+### Fix
+
+**Module** (`/usr/src/vivobook-hotkey-fix-1.0/`):
+- Registers as HID driver for `0x0B05:0x4543`, binding instead of `hid-generic`
+- Sends ASUS init sequence (`"ASUS Tech.Inc.\0"`) via SET_FEATURE to report `0x5A` — enables Fn hotkey forwarding
+- Maps vendor page `0xFF31` hotkeys to standard input events (brightness, mic mute, airplane mode, etc.)
+- Returns 0 for all other HID usages so the generic layer handles standard keyboard (report `0x36`) and consumer control/volume (report `0x37`)
+
+```bash
+sudo dkms add /usr/src/vivobook-hotkey-fix-1.0
+sudo dkms build vivobook-hotkey-fix/1.0
+sudo dkms install vivobook-hotkey-fix/1.0
+echo "vivobook_hotkey_fix" | sudo tee /etc/modules-load.d/vivobook-hotkey-fix.conf
+```
+
+> **Note**: Must load BEFORE `vivobook_kbd_fix` so the HID driver is registered when the I2C device is created. The `modules-load.d` alphabetical order handles this automatically.
+
+| Hotkey | Vendor Usage | Mapped Key |
+|--------|-------------|------------|
+| Fn+F5 | `0xFF31:0x10` | `KEY_BRIGHTNESSDOWN` |
+| Fn+F6 | `0xFF31:0x20` | `KEY_BRIGHTNESSUP` |
+| Mic mute | `0xFF31:0x7c` | `KEY_MICMUTE` |
+| Camera | `0xFF31:0x82` | `KEY_CAMERA` |
+| Airplane | `0xFF31:0x88` | `KEY_RFKILL` |
+| Kbd backlight | `0xFF31:0xc7` | `KEY_KBDILLUMTOGGLE` |
 
 ## Scripts
 
@@ -209,8 +245,7 @@ Key paths:
 
 ## Next Steps
 
-1. **Brightness keys** — Fn+F5/F6 keycodes registered in vivobook-kbd but no events generated
-2. **Audio** — ADSP codec mapping (ADSP now boots, need codec node in DTB)
+1. **Audio** — ADSP codec mapping (ADSP now boots, need codec node in DTB)
 3. **Identify bus 4 devices** — 0x43, 0x5b, 0x76
 4. **WiFi calibration** — Extract device-specific board data from Windows driver
 5. **Upstream** — Submit DTB patches for Vivobook X1407QA
