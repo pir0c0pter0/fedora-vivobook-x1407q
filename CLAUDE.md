@@ -64,9 +64,11 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 | Áudio codec | WCD938x (WCD9385) via SoundWire |
 | Áudio speakers | WSA884x × 2 via SoundWire |
 | Áudio DSP | ADSP via Q6APM, LPASS macros (rx, tx, wsa, va) |
+| Câmera RGB | OV02C10 × 2 (OmniVision, 2MP), CCI1, I2C 0x36, CSIPHY4, MCLK4 19.2MHz |
+| Câmera IR | 2 sensores IR (Windows Hello), modelos TBD |
 
 ## TODO
 
-- **Câmera** — Sem driver
-- **3 devices I2C desconhecidos** — bus 4: 0x43, 0x5b, 0x76
+- **Câmera** — 4 sensores identificados (2x OV02C10 RGB + 2x IR). CCI/CAMSS/CSIPHY não estão no DTB. Patches do Bryan O'Donoghue (Linaro) v8 em review no LKML (Fev 2026). Purwa (X1P) "not fully working" no repo do alexVinarskis. Precisa kernel custom ou esperar merge upstream (~6.21/6.22). Firmware de câmera do Windows NÃO foi extraído.
+- **3 devices I2C desconhecidos** — bus 4: 0x5b respondendo (0x43 e 0x76 não responderam no scan). 0x5b pode ser PTN3222 (USB retimer) já mapeado no DTB.
 - **UCM2 upstream** — PR para alsa-ucm-conf adicionando Vivobook 14 ao regex
