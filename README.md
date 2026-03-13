@@ -426,10 +426,10 @@ sudo dracut --force
 
 DKMS module `vivobook_kbd_fix`.
 
-**Problem:** The Zenbook DTB maps the keyboard to `i2c@a80000:0x15`. On the Vivobook, it's on a completely different bus: `i2c@b94000` (bus 4) at address `0x3a`.
+**Problem:** The Zenbook DTB maps the keyboard to `i2c@a80000:0x15`. On the Vivobook, it's on a completely different bus: `i2c@b94000` at address `0x3a`.
 
 **Module** (`/usr/src/vivobook-kbd-fix-1.0/`):
-- Registers I2C HID driver (`vivobook-kbd`)
+- Finds I2C adapter by **DT path** (`/soc@0/geniqup@bc0000/i2c@b94000`) — bus numbers are dynamic and shift when other I2C controllers (e.g., camera CCI) probe first
 - Maps TLMM GPIO 67 to IRQ via `irq_create_fwspec_mapping()` (legacy `gpio_to_irq()` doesn't work on Qualcomm TLMM)
 - Creates I2C device on correct bus/address
 - Calls exported `i2c_hid_core_probe()` from `i2c_hid` module
@@ -446,7 +446,7 @@ sudo dracut --force
 | Property | Value |
 |----------|-------|
 | **Controller** | ASUS I2C-HID, VID `0x0b05`, PID `0x4543` |
-| **I2C bus** | 4 (`b94000.i2c`) |
+| **I2C controller** | `b94000.i2c` (DT path: `/soc@0/geniqup@bc0000/i2c@b94000`) |
 | **I2C address** | `0x3a` |
 | **HID descriptor** | Register `0x0001` |
 | **Interrupt** | TLMM GPIO 67, level-low |
@@ -877,12 +877,29 @@ OV02C10 sensor → CCI1 (I2C control) → CSIPHY4 (MIPI CSI-2 PHY) → CSID (dec
 | OV02C10 sensor | `ov02c10.ko` | `ovti,ov02c10` | Module exists |
 | CSIPHY | (part of camss) | — | 4x CSIPHY (DPHY mode, 2.5Gbps, 4-lane) |
 
+### What was tested (DKMS DT overlay approach)
+
+A DKMS module (`vivobook_cam_fix`) applies a DT overlay via `of_overlay_fdt_apply()` at runtime. Results:
+
+| Component | Status |
+|-----------|--------|
+| CAMCC (camera clocks) | Probes OK — all clocks registered |
+| CCI0 + CCI1 (camera I2C) | Probes OK — 4 buses created, but overlay fails -22 on `i2c-bus` child nodes |
+| CAMSS (ISP pipeline) | Probes OK — CSID, VFE, CSIPHY registered, IOMMU group |
+| pm8010 RPMH regulators | Register via overlay under `&apps_rsc`, report correct voltages, but pm8010 is physically absent |
+| OV02C10 sensor | **I2C timeout** — sensor doesn't respond on any CCI bus |
+
+**Key finding:** Even with all subsystems probing successfully, the OV02C10 sensor at 0x36 never responds. The pm8010 camera PMIC is not physically present (SPMI scan confirms), so RPMH regulator commands go nowhere.
+
+**Side effect:** CCI adapters create dynamic I2C buses (i2c-0 to i2c-3) that shift all Geni I2C bus numbers. The keyboard module was updated to find its adapter by DT path instead of fixed bus number.
+
 ### Why it doesn't work
 
 1. **No camera nodes in DTB** — The Zenbook A14 DTB we use has NO CAMSS, CAMCC, CCI, or CSIPHY device tree nodes
 2. **INSYDE blocks DTB override** — Can't add nodes via GRUB/EFI (7 methods tested, all failed)
-3. **Too complex for DKMS** — Unlike other fixes (single device probe), camera needs the entire CAMSS pipeline: clock controller + 4 CSIPHYs + 3 CSIDs + 2 IFEs + CCI + sensor nodes
-4. **Patches not merged upstream** — Bryan O'Donoghue (Linaro) has a [v8 patch series (18 patches)](https://lkml.org/lkml/2026/2/25/1157) adding x1e80100 CAMSS to the kernel, still in review on LKML as of Feb 2026
+3. **pm8010 camera PMIC absent** — The dedicated camera PMIC is not physically present on the Vivobook (confirmed via SPMI bus scan). Power topology for the camera is unknown
+4. **Overlay apply error -22** — DT overlay changeset notifier returns EINVAL on CCI `i2c-bus` child nodes
+5. **Patches not merged upstream** — Bryan O'Donoghue (Linaro) has a [v8 patch series (18 patches)](https://lkml.org/lkml/2026/2/25/1157) adding x1e80100 CAMSS to the kernel, still in review on LKML as of Feb 2026
 
 ### Zenbook A14 camera status (same die)
 
