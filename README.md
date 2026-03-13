@@ -7,14 +7,16 @@
 | Component | Details |
 |-----------|---------|
 | **Model** | ASUS Vivobook 14 X1407QA |
-| **SoC** | Qualcomm Snapdragon X X1-26-100 (8 cores, 2.97GHz, die "Purwa") |
-| **GPU** | Adreno X1-45 (freedreno / Mesa) |
+| **SoC** | Qualcomm Snapdragon X X1-26-100 (8 cores, 2.97GHz, die "Purwa" — x1p42100) |
+| **GPU** | Adreno X1-45 (freedreno / turnip / Mesa) |
 | **RAM** | 16GB LPDDR5X |
 | **Storage** | NVMe PCIe 4.0 |
-| **Display** | 14" 1920x1200 IPS, 60Hz |
-| **WiFi** | Qualcomm QCNFA765 (WCN6855) — ath11k_pci |
+| **Display** | 14" Samsung ATANA33XC20, eDP, 1920x1200 IPS, 60Hz |
+| **WiFi** | Qualcomm QCNFA765 (WCN6855 hw2.1) — ath11k_pci, PCI `17cb:1103` |
 | **Bluetooth** | FastConnect 6900 (UART) |
-| **Battery** | 50Wh Li-ion (X321-42) |
+| **Keyboard** | ASUS I2C-HID, VID `0x0b05`, PID `0x4543`, bus 4 (`b94000`), addr `0x3a` |
+| **Touchpad** | ELAN I2C-HID clickpad, VID `0x04f3`, PID `0x3313`, bus 1 (`b80000`), addr `0x15` |
+| **Battery** | 50Wh Li-ion X321-42, driver `qcom_battmgr` via `pmic_glink` |
 
 ## Achievements
 
@@ -41,47 +43,340 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | Feature | Status | Notes |
 |---------|--------|-------|
 | **Boot** | :white_check_mark: Working | Fedora 44 via Zenbook A14 DTB |
-| **Boot time** | :white_check_mark: 8s | Was ~2min (see [Boot Time Fix](#boot-time-fix)) |
-| **Display** | :white_check_mark: Working | GPU firmware in initramfs (see [GPU Firmware Fix](#gpu-firmware-fix)) |
-| **WiFi** | :white_check_mark: Working | DKMS module + board.bin (see [WiFi Fix](#wifi-fix)) |
+| **Boot time** | :white_check_mark: 8s | Was ~2min (see [Boot Time Fix](#8-boot-time-fix)) |
+| **Display** | :white_check_mark: Working | GPU firmware in initramfs (see [GPU Firmware Fix](#7-gpu-firmware-fix)) |
+| **WiFi** | :white_check_mark: Working | DKMS module + board.bin (see [WiFi Fix](#2-wifi-fix)) |
 | **Bluetooth** | :white_check_mark: Working | FastConnect 6900 UART — out-of-the-box |
-| **Keyboard** | :white_check_mark: Working | DKMS module (see [Keyboard Fix](#keyboard-fix)) |
-| **Touchpad** | :white_check_mark: Working | Clickpad — `click-method: areas` for right-click (see [Touchpad Fix](#touchpad-fix)) |
-| **Battery** | :white_check_mark: Working | ADSP firmware in initramfs (see [Battery Fix](#battery-fix)) |
-| **Brightness** | :white_check_mark: Working | DKMS module (see [Brightness Fix](#brightness-fix)) |
-| **Brightness keys** | :white_check_mark: Working | DKMS module (see [Hotkey Fix](#hotkey-fix)) |
+| **Keyboard** | :white_check_mark: Working | DKMS module (see [Keyboard Fix](#3-keyboard-fix)) |
+| **Touchpad** | :white_check_mark: Working | Clickpad — `click-method: areas` for right-click (see [Touchpad Fix](#11-touchpad-right-click-fix)) |
+| **Battery** | :white_check_mark: Working | ADSP firmware in initramfs (see [Battery Fix](#4-battery-fix)) |
+| **Brightness** | :white_check_mark: Working | DKMS module (see [Brightness Fix](#5-brightness-fix)) |
+| **Brightness keys** | :white_check_mark: Working | DKMS module (see [Hotkey Fix](#6-fn-hotkey-fix)) |
 | **USB ports** | :white_check_mark: Working | USB-C, USB-A, HDMI |
 | **NVMe** | :white_check_mark: Working | PCIe 4.0 |
 | **Audio** | :x: Not working | ADSP codec not mapped in DTB |
 | **Camera** | :x: Not working | No driver support |
 
-## Still TODO
+---
 
-1. **Audio** — ADSP boots successfully, but no codec node mapped in DTB. Needs WCD938x/WSA883x codec routing
-2. **Identify I2C devices** — 3 unknown devices on bus 4: `0x43`, `0x5b`, `0x76`
-3. **WiFi calibration** — Extract device-specific board data from Windows driver for optimal performance
-4. **Upstream DTB** — Submit Device Tree patches for Vivobook X1407QA to mainline kernel
+## Quick Start — Complete Installation Guide
+
+### Prerequisites
+
+| Item | Details |
+|------|---------|
+| **ISO** | Fedora Workstation 44 aarch64 (Live) |
+| **Download** | https://download.fedoraproject.org/pub/fedora/linux/releases/44/Workstation/aarch64/iso/ |
+| **ISO used** | `Fedora-Workstation-Live-44_Beta-1.2.aarch64.iso` (used for original development; final release also works) |
+| **Kernel** | `6.19.6-300.fc44.aarch64` |
+| **USB drive** | 8GB+ for ISO, 32GB+ recommended for persistence |
+| **Second machine** | To prepare the USB (or use Windows on the Vivobook itself) |
+
+### Step 0 — Prepare BIOS
+
+1. Power off the Vivobook completely
+2. Hold **F2** and power on to enter UEFI/BIOS
+3. **Disable Secure Boot** (Security → Secure Boot → Disabled)
+4. **Enable USB boot** (Boot → USB Boot → Enabled)
+5. Save and exit (F10)
+
+### Step 1 — Download ISO and Flash USB
+
+```bash
+# Download Fedora 44 aarch64 Workstation Live ISO
+wget https://download.fedoraproject.org/pub/fedora/linux/releases/44/Workstation/aarch64/iso/Fedora-Workstation-Live-aarch64-44-1.1.iso
+
+# Flash to USB (REPLACE /dev/sdX with your USB device!)
+sudo dd if=Fedora-Workstation-Live-aarch64-44-1.1.iso of=/dev/sdX bs=4M status=progress oflag=sync
+sync
+```
+
+Or use the custom ISO builder script from this repo:
+
+```bash
+bash prepare-fedora-snapdragon.sh
+```
+
+This script modifies the ISO to include `clk_ignore_unused pd_ignore_unused` kernel parameters and a GRUB DTB selection menu.
+
+### Step 2 — Boot from USB
+
+1. Connect the USB drive
+2. Hold **F12** (or **ESC**) during power-on for boot menu
+3. Select the USB drive
+4. At the GRUB menu, press **e** to edit the boot entry and add to the `linux` line:
+   ```
+   clk_ignore_unused pd_ignore_unused
+   ```
+5. Press **Ctrl+X** to boot
+6. The system will boot using the **Zenbook A14 DTB** (`x1p42100-asus-zenbook-a14.dtb`) — same Qualcomm "Purwa" die
+
+> **Why Zenbook A14 DTB?** There is no DTB for the Vivobook X1407QA in the kernel. The Zenbook A14 uses the same Qualcomm x1p42100 SoC. The INSYDE UEFI firmware provides the DTB and **cannot be overridden** from GRUB on aarch64 (7 methods tested: BLS devicetree, GRUB fdt module, dtbloader.efi, EFI stub — all fail). So we boot with the Zenbook DTB and fix all hardware differences via runtime kernel modules.
+
+### Step 3 — Install Fedora to NVMe
+
+1. Once booted into the Live environment, open the installer
+2. Install Fedora to the NVMe drive (default btrfs layout)
+3. Reboot into the installed system
+
+> **Important:** At first boot from NVMe, edit GRUB again with `clk_ignore_unused pd_ignore_unused` — you'll make this permanent in Step 5.
+
+### Step 4 — Extract Firmware from Windows
+
+The Qualcomm firmware is proprietary and must be extracted from the Windows partition. BitLocker prevents direct access from Linux, so run this **from Windows** (PowerShell as Administrator):
+
+See [GUIA-EXTRAIR-FIRMWARE.md](GUIA-EXTRAIR-FIRMWARE.md) for the full PowerShell scripts.
+
+Quick version — copy the extracted firmware to a USB drive, then on the Linux side:
+
+```bash
+# Mount the USB with the extracted firmware
+sudo mount /dev/sdX1 /mnt
+
+# Copy firmware to the correct paths
+sudo mkdir -p /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/
+sudo cp /mnt/qcom-firmware/*.mbn /mnt/qcom-firmware/*.elf \
+    /mnt/qcom-firmware/*.jsn /mnt/qcom-firmware/*.bin \
+    /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/
+
+# WiFi board data
+sudo mkdir -p /lib/firmware/ath11k/WCN6855/hw2.1/
+sudo cp /mnt/qcom-firmware/board*.bin /lib/firmware/ath11k/WCN6855/hw2.1/board.bin
+
+sudo umount /mnt
+```
+
+### Step 5 — Apply All Fixes (Automated)
+
+Clone this repo and run the complete setup script:
+
+```bash
+git clone https://github.com/pir0c0pter0/fedora-vivobook-x1407q.git
+cd fedora-vivobook-x1407q
+sudo bash setup-all.sh
+```
+
+Or apply each fix manually — see [Detailed Fix Guide](#detailed-fix-guide) below.
+
+### Step 6 — Reboot and Verify
+
+```bash
+sudo reboot
+```
+
+After reboot, verify everything:
+
+```bash
+# WiFi
+ip link show wlP4p1s0
+
+# Keyboard (should already be working)
+dmesg | grep vivobook-kbd
+
+# Battery
+cat /sys/class/power_supply/qcom-battmgr-bat/capacity
+
+# Brightness
+cat /sys/class/backlight/vivobook-backlight/brightness
+
+# GPU
+glxinfo | grep "OpenGL renderer"
+
+# Hotkeys (press Fn+F5/F6)
+dmesg | grep vivobook_hotkey
+
+# Boot time
+systemd-analyze
+```
 
 ---
 
-## The Challenge
+## Complete Setup Script
 
-Fedora 44 aarch64 **does not boot** out of the box — there is no DTB for this laptop in kernel 6.19. The closest match is the **Zenbook A14** (`x1p42100-asus-zenbook-a14.dtb`) which shares the same Qualcomm "Purwa" die and ASUS manufacturer, but maps completely different peripherals.
+The `setup-all.sh` script applies all 11 fixes in the correct order. It assumes firmware has already been extracted (Step 4).
 
-The INSYDE UEFI firmware provides the DTB and **cannot be overridden** from GRUB on aarch64 (7 methods tested: BLS devicetree, GRUB fdt module, dtbloader.efi, EFI stub — all fail). This means every hardware difference must be fixed via **runtime kernel modules**, not DTB patches.
+```bash
+#!/bin/bash
+# setup-all.sh — Apply all ASUS Vivobook X1407QA fixes
+# Run as root after firmware extraction
+set -euo pipefail
 
-## The Approach
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+log() { echo -e "${GREEN}[+]${NC} $1"; }
+err() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
-1. **Custom Fedora ISO** with GRUB DTB selection menu + Qualcomm firmware injected into squashfs
-2. **5 DKMS kernel modules** to fix hardware that differs from the Zenbook A14 at runtime
-3. **Firmware extracted from Windows** via PowerShell (BitLocker prevents Linux access)
-4. **initramfs tuning** for firmware loading and boot time optimization
+[[ $EUID -eq 0 ]] || err "Execute como root: sudo bash setup-all.sh"
+
+# ─── 1. Kernel parameters (GRUB) ────────────────────────────────────────
+log "1/11 — Configurando parâmetros de kernel no GRUB..."
+if ! grep -q "clk_ignore_unused" /etc/default/grub; then
+    sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet rhgb clk_ignore_unused pd_ignore_unused rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"/' /etc/default/grub
+fi
+grubby --update-kernel=ALL --args="clk_ignore_unused pd_ignore_unused rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"
+
+# ─── 2. WiFi — DKMS wcn_regulator_fix ───────────────────────────────────
+log "2/11 — Instalando módulo WiFi (wcn_regulator_fix)..."
+if ! dkms status | grep -q "wcn-regulator-fix"; then
+    dkms add /usr/src/wcn-regulator-fix-1.0
+    dkms build wcn-regulator-fix/1.0
+    dkms install wcn-regulator-fix/1.0
+fi
+echo "wcn_regulator_fix" > /etc/modules-load.d/wcn-regulator-fix.conf
+echo 'force_drivers+=" wcn_regulator_fix "' > /etc/dracut.conf.d/wcn-regulator-fix.conf
+
+# ─── 3. Keyboard — DKMS vivobook_kbd_fix ─────────────────────────────────
+log "3/11 — Instalando módulo teclado (vivobook_kbd_fix)..."
+if ! dkms status | grep -q "vivobook-kbd-fix"; then
+    dkms add /usr/src/vivobook-kbd-fix-1.0
+    dkms build vivobook-kbd-fix/1.0
+    dkms install vivobook-kbd-fix/1.0
+fi
+echo "vivobook_kbd_fix" > /etc/modules-load.d/vivobook-kbd-fix.conf
+echo 'force_drivers+=" vivobook_kbd_fix "' > /etc/dracut.conf.d/vivobook-kbd-fix.conf
+
+# ─── 4. Battery — ADSP firmware in initramfs ─────────────────────────────
+log "4/11 — Adicionando firmware ADSP ao initramfs..."
+cat > /etc/dracut.conf.d/qcom-adsp-firmware.conf << 'EOF'
+install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcadsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsp_dtbs.elf /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspr.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsps.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspua.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/battmgr.jsn "
+EOF
+
+# ─── 5. Brightness — DKMS vivobook_bl_fix ────────────────────────────────
+log "5/11 — Instalando módulo brilho (vivobook_bl_fix)..."
+if ! dkms status | grep -q "vivobook-bl-fix"; then
+    dkms add /usr/src/vivobook-bl-fix-1.0
+    dkms build vivobook-bl-fix/1.0
+    dkms install vivobook-bl-fix/1.0
+fi
+echo "vivobook_bl_fix" > /etc/modules-load.d/vivobook-bl-fix.conf
+
+# ─── 6. Fn Hotkeys — DKMS vivobook_hotkey_fix ───────────────────────────
+log "6/11 — Instalando módulo hotkeys (vivobook_hotkey_fix)..."
+if ! dkms status | grep -q "vivobook-hotkey-fix"; then
+    dkms add /usr/src/vivobook-hotkey-fix-1.0
+    dkms build vivobook-hotkey-fix/1.0
+    dkms install vivobook-hotkey-fix/1.0
+fi
+echo "vivobook_hotkey_fix" > /etc/modules-load.d/vivobook-hotkey-fix.conf
+
+# ─── 7. GPU — Firmware in initramfs ──────────────────────────────────────
+log "7/11 — Adicionando firmware GPU ao initramfs..."
+cat > /etc/dracut.conf.d/qcom-gpu-firmware.conf << 'EOF'
+install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/gen71500_zap.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcdxkmsucpurwa.mbn "
+EOF
+
+# ─── 8. Boot time — Mask phantom TPM ─────────────────────────────────────
+log "8/11 — Otimizando boot time (masking TPM fantasma)..."
+systemctl mask dev-tpm0.device dev-tpmrm0.device 2>/dev/null || true
+echo 'omit_dracutmodules+=" tpm2-tss systemd-pcrphase "' > /etc/dracut.conf.d/no-tpm.conf
+echo 'omit_dracutmodules+=" nfs "' > /etc/dracut.conf.d/no-nfs.conf
+
+# ─── 9. Terminal flicker — Vulkan pool fix ───────────────────────────────
+log "9/11 — Instalando fix Vulkan (vk_pool_fix.so)..."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Build if source exists
+if [[ -f "${SCRIPT_DIR}/vk_pool_fix.c" ]]; then
+    gcc -shared -fPIC -o /usr/local/lib64/vk_pool_fix.so "${SCRIPT_DIR}/vk_pool_fix.c" -ldl
+elif [[ -f "${SCRIPT_DIR}/vk_pool_fix.so" ]]; then
+    cp "${SCRIPT_DIR}/vk_pool_fix.so" /usr/local/lib64/vk_pool_fix.so
+fi
+
+# Wrapper script (needed because Ptyxis uses D-Bus activation)
+cat > /usr/local/bin/ptyxis-fixed << 'WRAPPER'
+#!/bin/sh
+export LD_PRELOAD=/usr/local/lib64/vk_pool_fix.so
+exec /usr/bin/ptyxis "$@"
+WRAPPER
+chmod +x /usr/local/bin/ptyxis-fixed
+
+# D-Bus service override (this is what actually launches Ptyxis)
+REAL_USER="${SUDO_USER:-$USER}"
+REAL_HOME=$(eval echo "~${REAL_USER}")
+mkdir -p "${REAL_HOME}/.local/share/dbus-1/services"
+cat > "${REAL_HOME}/.local/share/dbus-1/services/org.gnome.Ptyxis.service" << 'DBUS'
+[D-BUS Service]
+Name=org.gnome.Ptyxis
+Exec=/usr/local/bin/ptyxis-fixed --gapplication-service
+DBUS
+
+# Desktop entry override
+mkdir -p "${REAL_HOME}/.local/share/applications"
+cp /usr/share/applications/org.gnome.Ptyxis.desktop "${REAL_HOME}/.local/share/applications/" 2>/dev/null || true
+sed -i 's|^Exec=ptyxis|Exec=/usr/local/bin/ptyxis-fixed|g' \
+    "${REAL_HOME}/.local/share/applications/org.gnome.Ptyxis.desktop" 2>/dev/null || true
+chown -R "${REAL_USER}:${REAL_USER}" "${REAL_HOME}/.local/share/dbus-1" "${REAL_HOME}/.local/share/applications"
+
+# ─── 10. Battery time extension ──────────────────────────────────────────
+log "10/11 — Instalando extensão GNOME (battery-time)..."
+sudo -u "${REAL_USER}" bash "${SCRIPT_DIR}/install-battery-time-ext.sh"
+
+# ─── 11. Touchpad right-click ────────────────────────────────────────────
+log "11/11 — Configurando touchpad (click-method: areas)..."
+sudo -u "${REAL_USER}" gsettings set org.gnome.desktop.peripherals.touchpad click-method 'areas'
+
+# ─── Disable auto updates ────────────────────────────────────────────────
+log "Desabilitando auto-updates (previne quebra dos módulos DKMS)..."
+systemctl disable --now dnf-makecache.timer 2>/dev/null || true
+systemctl mask packagekit.service 2>/dev/null || true
+sudo -u "${REAL_USER}" gsettings set org.gnome.software download-updates false 2>/dev/null || true
+sudo -u "${REAL_USER}" gsettings set org.gnome.software download-updates-notify false 2>/dev/null || true
+
+# ─── Rebuild initramfs ───────────────────────────────────────────────────
+log "Regenerando initramfs com todos os firmwares e módulos..."
+dracut --force
+
+# ─── Update GRUB ─────────────────────────────────────────────────────────
+log "Atualizando GRUB..."
+grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || true
+
+echo ""
+echo "============================================"
+echo " INSTALAÇÃO COMPLETA"
+echo "============================================"
+echo ""
+echo " Reboot para aplicar: sudo reboot"
+echo ""
+echo " Após o reboot, verificar:"
+echo "   - WiFi: ip link show wlP4p1s0"
+echo "   - Teclado: dmesg | grep vivobook-kbd"
+echo "   - Bateria: cat /sys/class/power_supply/qcom-battmgr-bat/capacity"
+echo "   - Brilho: ls /sys/class/backlight/vivobook-backlight/"
+echo "   - GPU: glxinfo | grep renderer"
+echo "   - Boot time: systemd-analyze"
+echo ""
+echo " ATENÇÃO: Faça logout e login para ativar a extensão de bateria"
+echo ""
+```
 
 ---
 
-## Fixes
+## Detailed Fix Guide
 
-### WiFi Fix
+### 1. Boot Fix
+
+**Problem:** Fedora 44 aarch64 does not boot out of the box — there is no DTB for the Vivobook X1407QA in kernel 6.19.
+
+**Solution:** Boot using the Zenbook A14 DTB (`x1p42100-asus-zenbook-a14.dtb`) which shares the same Qualcomm "Purwa" die. The INSYDE UEFI firmware cannot be overridden (7 methods tested), so all hardware differences are fixed via runtime kernel modules.
+
+**Kernel parameters** (required in GRUB):
+
+| Parameter | Purpose |
+|-----------|---------|
+| `clk_ignore_unused` | Prevents kernel from disabling Qualcomm clocks needed by firmware |
+| `pd_ignore_unused` | Prevents kernel from disabling power domains needed by firmware |
+| `rd.driver.pre=wcn_regulator_fix` | Loads WiFi regulator fix before PCIe scan |
+| `rd.systemd.mask=dev-tpm0.device` | Skips TPM wait in initrd |
+| `rd.systemd.mask=dev-tpmrm0.device` | Skips TPM resource manager wait in initrd |
+
+**Full kernel cmdline used:**
+
+```
+BOOT_IMAGE=/vmlinuz-6.19.6-300.fc44.aarch64 root=UUID=<your-uuid> ro rootflags=subvol=root quiet rhgb clk_ignore_unused pd_ignore_unused rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device
+```
+
+### 2. WiFi Fix
 
 DKMS module `wcn_regulator_fix` + custom `board.bin`.
 
@@ -114,7 +409,7 @@ sudo dracut --force
 | **Interface** | `wlP4p1s0` |
 | **Firmware** | WLAN.HSP.1.1-03125 |
 
-### Keyboard Fix
+### 3. Keyboard Fix
 
 DKMS module `vivobook_kbd_fix`.
 
@@ -143,7 +438,7 @@ sudo dracut --force
 | **HID descriptor** | Register `0x0001` |
 | **Interrupt** | TLMM GPIO 67, level-low |
 
-### Battery Fix
+### 4. Battery Fix
 
 ADSP firmware in initramfs so `qcom-battmgr` can communicate with the PMIC.
 
@@ -161,7 +456,7 @@ sudo dracut --force
 | **Battery** | X321-42, 50Wh, Li-ion |
 | **sysfs** | `/sys/class/power_supply/qcom-battmgr-bat/` |
 
-### Brightness Fix
+### 5. Brightness Fix
 
 DKMS module `vivobook_bl_fix`.
 
@@ -194,7 +489,7 @@ echo "vivobook_bl_fix" | sudo tee /etc/modules-load.d/vivobook-bl-fix.conf
 
 > **WARNING**: Never change GPIO5 DIG_OUT_SOURCE_CTL to 0x00 (func3) or force GPIO output LOW — this kills the display and requires a forced reboot.
 
-### Hotkey Fix
+### 6. Fn Hotkey Fix
 
 DKMS module `vivobook_hotkey_fix`.
 
@@ -224,7 +519,7 @@ echo "vivobook_hotkey_fix" | sudo tee /etc/modules-load.d/vivobook-hotkey-fix.co
 | Airplane | `0xFF31:0x88` | `KEY_RFKILL` |
 | Kbd backlight | `0xFF31:0xc7` | `KEY_KBDILLUMTOGGLE` |
 
-### GPU Firmware Fix
+### 7. GPU Firmware Fix
 
 GPU firmware in initramfs for early loading.
 
@@ -250,7 +545,7 @@ sudo dracut --force
 
 > **WARNING**: The `qcdxkmsucpurwa.mbn` ZAP shader is critical. Without it the MDT loader fails immediately with `gpu hw init failed: -2` and the GPU has no 3D acceleration.
 
-### Boot Time Fix
+### 8. Boot Time Fix
 
 TPM device masking + initrd cleanup — from 1min47s to **8 seconds**.
 
@@ -272,9 +567,8 @@ sudo systemctl mask dev-tpm0.device dev-tpmrm0.device
 echo 'omit_dracutmodules+=" tpm2-tss systemd-pcrphase "' | sudo tee /etc/dracut.conf.d/no-tpm.conf
 echo 'omit_dracutmodules+=" nfs "' | sudo tee /etc/dracut.conf.d/no-nfs.conf
 
-# Add TPM mask to kernel cmdline for initrd
-# In /etc/grub.d/08_vivobook, add to linux line:
-#   rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device
+# Add TPM mask to kernel cmdline for initrd (already in /etc/default/grub)
+# rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device
 
 # Regenerate
 sudo grub2-mkconfig -o /boot/grub2/grub.cfg
@@ -287,83 +581,7 @@ sudo dracut --force
 | 46s initrd | 2.3s initrd |
 | 60s userspace | 5s userspace |
 
----
-
-## System Configuration
-
-### GRUB
-
-Custom GRUB entry at `/etc/grub.d/08_vivobook` that loads the correct DTB and all kernel parameters:
-
-```bash
-sudo cat > /etc/grub.d/08_vivobook << 'SCRIPT'
-#!/usr/bin/sh
-cat << 'GRUBENTRY'
-menuentry 'Fedora 6.19.6 - ASUS Vivobook' --class fedora {
-    insmod fdt
-    search --no-floppy --fs-uuid --set=root <your-boot-uuid>
-    linux /vmlinuz-6.19.6-300.fc44.aarch64 root=UUID=<your-root-uuid> ro rootflags=subvol=root quiet rhgb clk_ignore_unused pd_ignore_unused rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device
-    initrd /initramfs-6.19.6-300.fc44.aarch64.img
-    devicetree /dtb/qcom/x1p42100-asus-vivobook-x1407qa.dtb
-}
-GRUBENTRY
-SCRIPT
-chmod +x /etc/grub.d/08_vivobook
-sudo grub2-mkconfig -o /boot/grub2/grub.cfg
-sudo grub2-set-default "Fedora 6.19.6 - ASUS Vivobook"
-```
-
-| Parameter | Purpose |
-|-----------|---------|
-| `clk_ignore_unused` | Prevents kernel from disabling Qualcomm clocks needed by firmware |
-| `pd_ignore_unused` | Prevents kernel from disabling power domains needed by firmware |
-| `rd.driver.pre=wcn_regulator_fix` | Loads WiFi regulator fix before PCIe scan |
-| `rd.systemd.mask=dev-tpm0.device` | Skips TPM wait in initrd |
-| `rd.systemd.mask=dev-tpmrm0.device` | Skips TPM resource manager wait in initrd |
-| `devicetree` | Loads Vivobook-specific DTB instead of UEFI-provided Zenbook DTB |
-
-### Disable Auto Updates
-
-Prevents kernel/mesa updates from breaking the custom setup:
-
-```bash
-sudo systemctl disable --now dnf-makecache.timer
-sudo systemctl mask packagekit.service
-gsettings set org.gnome.software download-updates false
-gsettings set org.gnome.software download-updates-notify false
-```
-
-### Firmware
-
-Firmware must be extracted from Windows (BitLocker enabled). See [GUIA-EXTRAIR-FIRMWARE.md](GUIA-EXTRAIR-FIRMWARE.md).
-
-| Path | Contents |
-|------|----------|
-| `/usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/` | ADSP, GPU, ZAP shader |
-| `/lib/firmware/ath11k/WCN6855/hw2.1/` | WiFi board data |
-
-### Scripts
-
-| Script | Purpose |
-|--------|---------|
-| `prepare-fedora-snapdragon.sh` | Creates custom ISO with GRUB DTB menu + firmware |
-| `build-v3-iso.sh` | Rebuilds ISO with firmware in correct path |
-| `build-v4-iso.sh` | ISO with patched DTB (regulator fix) |
-| `extract-qcom-firmware.sh` | Extracts firmware from Windows partition |
-| `post-install-protect.sh` | Protects boot against kernel updates |
-| `vk_pool_fix.c` | LD_PRELOAD fix for GTK4/turnip Vulkan descriptor pool fragmentation |
-| `install-battery-time-ext.sh` | Installs GNOME Shell battery time remaining extension |
-
-## Known Issues
-
-- **DTB override impossible** on INSYDE firmware — all hardware fixes must use kernel modules
-- **Audio**: ADSP firmware present but no codec mapping in DTB
-- **GPU**: Firmware must be in initramfs for early loading. SELinux may block `.xz` firmware (`setenforce 0` as workaround)
-- **Terminal flicker (Ptyxis/Vulkan)**: :white_check_mark: **Fixed** — GTK4/turnip descriptor pool fragmentation, solved via LD_PRELOAD (see [Terminal Flicker Fix](#terminal-flicker-fix))
-- **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
-- **3 unknown I2C devices** on bus 4: addresses `0x43`, `0x5b`, `0x76`
-
-### Terminal Flicker Fix
+### 9. Terminal Flicker Fix
 
 LD_PRELOAD fix for GTK4/turnip Vulkan descriptor pool fragmentation.
 
@@ -422,11 +640,31 @@ update-desktop-database ~/.local/share/applications/
 | **Error** | `VK_ERROR_OUT_OF_POOL_MEMORY` at `tu_descriptor_set.cc:649` |
 | **Fix** | `vk_pool_fix.so` — increases pool size 50x via LD_PRELOAD |
 | **Alternative** | `GSK_RENDERER=ngl` (forces GL, avoids Vulkan entirely) |
-| **Scope** | Per-app (desktop entry override) |
 
 > **Note**: This is an interaction bug between GTK4 and Mesa/turnip — GTK4 creates pools too small for turnip's linear allocator. May be fixed upstream in future GTK4 or Mesa releases. To check: remove the LD_PRELOAD and monitor with `journalctl -f | grep VK_ERROR`.
 
-### Touchpad Fix
+### 10. Battery Time Extension
+
+GNOME Shell extension to show battery time remaining on hover.
+
+**Problem:** GNOME 50 shows battery percentage but not time remaining. No existing extension supports GNOME 50 yet. UPower's instantaneous estimate fluctuates with power draw changes (e.g., brightness adjustments).
+
+**Fix:** Custom GNOME Shell extension `battery-time@wifiteste`:
+
+```bash
+bash install-battery-time-ext.sh
+# Logout and login (Wayland requires session restart for new extensions)
+```
+
+| Property | Value |
+|----------|-------|
+| **Display** | Hover over battery icon → `4:12` (hours:minutes) |
+| **Estimation** | Weighted rolling average (30 samples × 30s = 15min window) |
+| **Data source** | sysfs `/sys/class/power_supply/qcom-battmgr-bat/` |
+| **Updates** | Every 30 seconds |
+| **States** | Discharging (time remaining) and charging (time to full) |
+
+### 11. Touchpad Right-Click Fix
 
 gsettings `click-method` from `fingers` to `areas`.
 
@@ -448,26 +686,150 @@ gsettings set org.gnome.desktop.peripherals.touchpad click-method 'areas'
 | **Resolution** | 3905×2382 @ 31 units/mm (126×77mm) |
 | **Fix** | `click-method: areas` — bottom-left = left click, bottom-right = right click |
 
-### Battery Time Extension
+---
 
-GNOME Shell extension to show battery time remaining in the panel.
+## System Configuration Summary
 
-**Problem:** GNOME 50 shows battery percentage but not time remaining. No existing extension supports GNOME 50 yet. UPower's instantaneous estimate fluctuates with power draw changes (e.g., brightness adjustments).
+### Files modified on the system
 
-**Fix:** Custom GNOME Shell extension `battery-time@wifiteste`:
+```
+/etc/default/grub
+    GRUB_CMDLINE_LINUX_DEFAULT="quiet rhgb clk_ignore_unused pd_ignore_unused
+        rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"
 
-```bash
-bash install-battery-time-ext.sh
-# Logout and login (Wayland requires session restart for new extensions)
+/etc/dracut.conf.d/
+    wcn-regulator-fix.conf     → force_drivers+=" wcn_regulator_fix "
+    vivobook-kbd-fix.conf      → force_drivers+=" vivobook_kbd_fix "
+    qcom-adsp-firmware.conf    → install_items+=" qcadsp8380.mbn adsp_dtbs.elf ... "
+    qcom-gpu-firmware.conf     → install_items+=" gen71500_sqe.fw.xz gen71500_gmu.bin.xz ... "
+    no-tpm.conf                → omit_dracutmodules+=" tpm2-tss systemd-pcrphase "
+    no-nfs.conf                → omit_dracutmodules+=" nfs "
+
+/etc/modules-load.d/
+    wcn-regulator-fix.conf     → wcn_regulator_fix
+    vivobook-kbd-fix.conf      → vivobook_kbd_fix
+    vivobook-bl-fix.conf       → vivobook_bl_fix
+    vivobook-hotkey-fix.conf   → vivobook_hotkey_fix
+
+/usr/src/
+    wcn-regulator-fix-1.0/     → DKMS module source
+    vivobook-kbd-fix-1.0/      → DKMS module source
+    vivobook-bl-fix-1.0/       → DKMS module source
+    vivobook-hotkey-fix-1.0/   → DKMS module source
+
+/usr/local/lib64/
+    vk_pool_fix.so             → Vulkan pool fix library
+
+/usr/local/bin/
+    ptyxis-fixed               → Wrapper script with LD_PRELOAD
+
+~/.local/share/gnome-shell/extensions/battery-time@wifiteste/
+    extension.js               → Battery time GNOME extension
+    metadata.json
+
+~/.local/share/dbus-1/services/
+    org.gnome.Ptyxis.service   → D-Bus override for LD_PRELOAD
+
+~/.local/share/applications/
+    org.gnome.Ptyxis.desktop   → Desktop entry override
+
+/usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/
+    qcadsp8380.mbn, adsp_dtbs.elf, adspr.jsn, adsps.jsn, adspua.jsn, battmgr.jsn
+    qcdxkmsucpurwa.mbn
+
+/lib/firmware/ath11k/WCN6855/hw2.1/
+    board.bin
 ```
 
-| Property | Value |
-|----------|-------|
-| **Display** | Hover over battery icon → `4:12` (hours:minutes) |
-| **Estimation** | Weighted rolling average (30 samples × 30s = 15min window) |
-| **Data source** | sysfs `/sys/class/power_supply/qcom-battmgr-bat/` |
-| **Updates** | Every 30 seconds |
-| **States** | Discharging (time remaining) and charging (time to full) |
+### Disable Auto Updates
+
+Prevents kernel/mesa updates from breaking the custom setup:
+
+```bash
+sudo systemctl disable --now dnf-makecache.timer
+sudo systemctl mask packagekit.service
+gsettings set org.gnome.software download-updates false
+gsettings set org.gnome.software download-updates-notify false
+```
+
+### Protect Against Kernel Updates
+
+Run the post-install protection script to ensure new kernels get the correct DTB and boot parameters:
+
+```bash
+sudo bash post-install-protect.sh
+```
+
+See [GUIA-POS-INSTALACAO.md](GUIA-POS-INSTALACAO.md) for details.
+
+---
+
+## Future Development
+
+### Audio (priority 1)
+
+The ADSP firmware boots successfully, but there is no codec node mapped in the DTB. The audio hardware uses WCD938x (headphone/speaker codec) and WSA883x (smart amplifier). Fixing this requires:
+
+1. **Identify the codec I2C/SoundWire addresses** — probe I2C bus for WCD938x, check SoundWire bus for WSA883x
+2. **Create a DKMS module** that registers the codec devices at the correct bus/address (same approach as the keyboard fix)
+3. **Route ADSP → codec** via the audio DSP path (qcom_q6v5_pas → APR/GPR services)
+4. Three unknown I2C devices on bus 4 (`0x43`, `0x5b`, `0x76`) may include audio codec components
+
+### Camera (priority 2)
+
+No driver support exists yet. Needs:
+
+1. **Identify the camera sensor** — check I2C bus, ACPI, and Windows driver info
+2. **Check if CCI (Camera Control Interface)** is mapped in the DTB
+3. **Write or adapt a sensor driver** using the V4L2 subsystem
+4. This likely requires upstream kernel work
+
+### WiFi Calibration
+
+Current WiFi works with a fallback `board.bin` from a similar WCN6855 variant. For optimal performance:
+
+1. **Extract device-specific board data** from the Windows ath11k driver (subsystem `105b:e130`)
+2. **Create a proper `board-2.bin`** entry for this specific hardware
+
+### Upstream DTB
+
+Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel:
+
+1. **Create `x1p42100-asus-vivobook-x1407qa.dts`** based on the Zenbook A14 DTS
+2. **Add all hardware mappings** discovered via these runtime fixes
+3. **Submit to linux-arm-msm mailing list** for review
+4. This would eventually eliminate the need for most DKMS modules
+
+### Upstream Fixes
+
+| Fix | Upstream status | Target kernel |
+|-----|----------------|---------------|
+| PCIe race condition | 15-patch series by Konrad Dybcio | ~6.21 |
+| Zenbook A14 DTB | Patches by Alex Vinarskis | Merged in 6.19 |
+| Vivobook X1407QA DTB | Not submitted yet | TBD |
+
+---
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `setup-all.sh` | **Complete setup** — applies all 11 fixes in correct order |
+| `prepare-fedora-snapdragon.sh` | Creates custom ISO with GRUB DTB menu + firmware |
+| `build-v3-iso.sh` | Rebuilds ISO with firmware in correct path |
+| `build-v4-iso.sh` | ISO with patched DTB (regulator fix) |
+| `extract-qcom-firmware.sh` | Extracts firmware from Windows partition |
+| `post-install-protect.sh` | Protects boot against kernel updates |
+| `install-battery-time-ext.sh` | Installs GNOME Shell battery time extension |
+| `vk_pool_fix.c` | Source for Vulkan descriptor pool fix |
+
+## Known Issues
+
+- **DTB override impossible** on INSYDE firmware — all hardware fixes must use kernel modules
+- **Audio**: ADSP firmware present but no codec mapping in DTB
+- **GPU**: Firmware must be in initramfs for early loading. SELinux may block `.xz` firmware (`setenforce 0` as workaround)
+- **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
+- **3 unknown I2C devices** on bus 4: addresses `0x43`, `0x5b`, `0x76`
 
 ## Upstream References
 
