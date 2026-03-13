@@ -354,8 +354,55 @@ Firmware must be extracted from Windows (BitLocker enabled). See [GUIA-EXTRAIR-F
 - **DTB override impossible** on INSYDE firmware — all hardware fixes must use kernel modules
 - **Audio**: ADSP firmware present but no codec mapping in DTB
 - **GPU**: Firmware must be in initramfs for early loading. SELinux may block `.xz` firmware (`setenforce 0` as workaround)
+- **Terminal flicker (Ptyxis/Vulkan)**: GTK4's Vulkan renderer triggers `VK_ERROR_OUT_OF_POOL_MEMORY` on the freedreno `turnip` driver, causing visible flicker in the terminal. Fix: force GL renderer (see [Terminal Flicker Fix](#terminal-flicker-fix))
 - **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
 - **3 unknown I2C devices** on bus 4: addresses `0x43`, `0x5b`, `0x76`
+
+### Terminal Flicker Fix
+
+Force GL renderer for Ptyxis (GNOME 50 terminal).
+
+**Problem:** GTK4 on GNOME 50 defaults to the Vulkan renderer (`GSK_RENDERER=vulkan`). The freedreno Vulkan driver (`turnip`) has a descriptor pool leak in `tu_descriptor_set.cc` — after extended use, it spams `VK_ERROR_OUT_OF_POOL_MEMORY` (hundreds of errors per minute), causing visible flicker/redraw glitches in the terminal.
+
+**Fix:** Override the Ptyxis desktop entry to use the GL renderer:
+
+```bash
+mkdir -p ~/.local/share/applications
+cp /usr/share/applications/org.gnome.Ptyxis.desktop ~/.local/share/applications/
+sed -i 's|^Exec=ptyxis|Exec=env GSK_RENDERER=ngl ptyxis|g' ~/.local/share/applications/org.gnome.Ptyxis.desktop
+update-desktop-database ~/.local/share/applications/
+```
+
+| Property | Value |
+|----------|-------|
+| **Affected app** | Ptyxis (GNOME Terminal, pid `ptyxis`) |
+| **Driver bug** | `turnip` — `tu_descriptor_set.cc:649` pool exhaustion |
+| **Error** | `VK_ERROR_OUT_OF_POOL_MEMORY` (continuous after ~30min use) |
+| **Fix** | `GSK_RENDERER=ngl` (forces OpenGL instead of Vulkan) |
+| **Scope** | Per-app (desktop entry override), does not affect other GTK4 apps |
+
+> **Note**: This is a Mesa/turnip driver bug, not a GTK or Ptyxis bug. May be fixed in future Mesa releases. To check if it's resolved, remove the override and monitor with `journalctl -f | grep VK_ERROR`.
+
+### Battery Time Extension
+
+GNOME Shell extension to show battery time remaining in the panel.
+
+**Problem:** GNOME 50 shows battery percentage but not time remaining. No existing extension supports GNOME 50 yet. UPower's instantaneous estimate fluctuates with power draw changes (e.g., brightness adjustments).
+
+**Fix:** Custom GNOME Shell extension `battery-time@wifiteste`:
+
+```bash
+bash install-battery-time-ext.sh
+# Logout and login (Wayland requires session restart for new extensions)
+```
+
+| Property | Value |
+|----------|-------|
+| **Display** | `43% 4:12` (percentage + hours:minutes) |
+| **Estimation** | Weighted rolling average (30 samples × 30s = 15min window) |
+| **Data source** | sysfs `/sys/class/power_supply/qcom-battmgr-bat/` |
+| **Updates** | Every 30 seconds |
+| **States** | Discharging (time remaining) and charging (time to full) |
 
 ## Upstream References
 
