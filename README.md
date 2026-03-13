@@ -42,8 +42,9 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 13 | **Lid close = screen off** | logind `HandleLidSwitch=lock` + mask all suspend targets | S3 suspend crashes Snapdragon X → disabled suspend, lid just turns off screen |
 | 14 | **CPU frequency scaling** | Autoload in-tree `scmi_cpufreq` module | CPU scales 710MHz–2.96GHz, battery savings + thermal protection |
 | 15 | **CDSP / NPU online** | CDSP firmware in initramfs | Hexagon Compute DSP boots at early boot — fastrpc compute contexts available |
+| 16 | **Battery charge limit** | udev rule sets 80% threshold | Charge stops at 80%, starts at 50% — extends battery lifespan |
 
-**5 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
+**5 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
 
 ## Current Status
 
@@ -66,7 +67,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **Suspend (S3)** | :warning: Broken | S3 deep suspend crashes → cold reboot. Disabled via masked targets. `s2idle` untested ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4)) |
 | **cpufreq** | :white_check_mark: Working | SCMI cpufreq via autoload — 710MHz–2.96GHz, schedutil governor (see [CPU Frequency Fix](#14-cpu-frequency-fix)) |
 | **CDSP / NPU** | :white_check_mark: Working | CDSP firmware in initramfs — Hexagon compute online (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
-| **Charge control** | :x: Not working | Battery tech "OOD" unknown, thresholds stuck at 0 ([#5](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/5)) |
+| **Charge control** | :white_check_mark: Working | Charge limit 80% via udev rule (see [Charge Control Fix](#16-battery-charge-control-fix)) |
 | **USB-C DP alt-mode** | :grey_question: Untested | pmic_glink device link failures on both ports ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
 | **Stability** | :warning: Crashes | Unexplained reboots — possible thermal/watchdog ([#7](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/7)) |
 | **Camera** | :x: Not working | 4 sensors identified, needs kernel patches (see [Camera Research](#camera-research)) |
@@ -919,6 +920,41 @@ cat /sys/class/remoteproc/remoteproc1/name     # → cdsp
 
 ---
 
+### 16. Battery Charge Control Fix
+
+**Problem:** Battery charge thresholds read as 0 and `technology` reports "Unknown" — firmware sends string `OOD` which the kernel `qcom_battmgr` driver doesn't recognize.
+
+**Root cause:** The thresholds were never "stuck" — they were simply unset (0 = no limit). The `qcom_battmgr` driver supports `charge_control_end_threshold` writes, which the ADSP firmware honors. The `OOD` technology string is a cosmetic firmware quirk that doesn't affect charge control functionality.
+
+**Evidence from dmesg:**
+```
+Unknown battery technology 'OOD'
+```
+
+**Solution:** udev rule to set charge limit when the battery device appears:
+
+```bash
+echo 'SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-bat", ATTR{charge_control_end_threshold}="80"' | sudo tee /etc/udev/rules.d/99-battery-charge-limit.rules
+sudo udevadm control --reload-rules
+```
+
+**Verify:**
+```bash
+cat /sys/class/power_supply/qcom-battmgr-bat/charge_control_end_threshold    # → 80
+cat /sys/class/power_supply/qcom-battmgr-bat/charge_control_start_threshold  # → 50 (auto-set by firmware)
+```
+
+| Property | Value |
+|----------|-------|
+| **Driver** | `qcom_battmgr` via `pmic_glink` |
+| **Battery** | X321-42 50Wh, serial 10956 |
+| **Charge stop** | 80% (`charge_control_end_threshold`) |
+| **Charge start** | 50% (auto-set by firmware when end=80) |
+| **Technology** | Reported as "OOD" by firmware — cosmetic, non-functional |
+| **Config file** | `/etc/udev/rules.d/99-battery-charge-limit.rules` |
+
+---
+
 ## System Configuration Summary
 
 ### Files modified on the system
@@ -977,6 +1013,9 @@ cat /sys/class/remoteproc/remoteproc1/name     # → cdsp
 systemd masked targets:
     suspend.target, hibernate.target, hybrid-sleep.target,
     suspend-then-hibernate.target, sleep.target
+
+/etc/udev/rules.d/
+    99-battery-charge-limit.rules → charge_control_end_threshold=80
 
 /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/
     qcadsp8380.mbn, adsp_dtbs.elf, adspr.jsn, adsps.jsn, adspua.jsn, battmgr.jsn
@@ -1180,7 +1219,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **Suspend (S3)**: `PM: suspend entry (deep)` crashes → cold reboot. Firmware fails to save/restore Snapdragon X power domains. All suspend targets masked as workaround. `s2idle` (S0ix) available but untested ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
 - **cpufreq**: No CPU frequency scaling — SCMI perf domain fails to register OPP table (`Failed to add opps_by_lvl at 2956800 for NCC1`). CPU runs at fixed frequency, no kernel thermal throttling ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
 - **~~CDSP/NPU offline~~**: Fixed — firmware in initramfs, CDSP boots at early boot (see [CDSP/NPU Fix](#15-cdspnpu-fix))
-- **Battery charge control**: Firmware reports technology "OOD" (unknown). `charge_control_end_threshold` stuck at 0, cannot set charge limit ([#5](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/5))
+- **~~Battery charge control~~**: Fixed — udev rule sets 80% charge limit, firmware accepts writes (see [Charge Control Fix](#16-battery-charge-control-fix)). Technology string "OOD" is cosmetic.
 - **USB-C device links**: pmic_glink fails to link with PTN3222 retimers and USB controllers. Data/charging works, DP alt-mode untested ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6))
 - **Unexplained crashes**: Multiple reboots without graceful shutdown — possibly thermal (no cpufreq throttling) or firmware watchdog ([#7](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/7))
 - **1 unknown I2C device** on bus 4: address `0x5b` (0x43 and 0x76 not responding — may be camera sensors on CCI, not regular I2C)
