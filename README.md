@@ -69,7 +69,6 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **CDSP / NPU** | :white_check_mark: Working | CDSP firmware in initramfs — Hexagon compute online (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
 | **Charge control** | :white_check_mark: Working | Charge limit 80% via udev rule (see [Charge Control Fix](#16-battery-charge-control-fix)) |
 | **USB-C DP alt-mode** | :grey_question: Untested | pmic_glink device link failures on both ports ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
-| **Stability** | :warning: Crashes | Unexplained reboots — possible thermal/watchdog ([#7](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/7)) |
 | **Camera** | :x: Not working | 4 sensors identified, needs kernel patches (see [Camera Research](#camera-research)) |
 
 ---
@@ -1221,7 +1220,6 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **~~CDSP/NPU offline~~**: Fixed — firmware in initramfs, CDSP boots at early boot (see [CDSP/NPU Fix](#15-cdspnpu-fix))
 - **~~Battery charge control~~**: Fixed — udev rule sets 80% charge limit, firmware accepts writes (see [Charge Control Fix](#16-battery-charge-control-fix)). Technology string "OOD" is cosmetic.
 - **USB-C device links**: pmic_glink fails to link with PTN3222 retimers and USB controllers. Data/charging works, DP alt-mode untested ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6))
-- **Unexplained crashes**: Multiple reboots without graceful shutdown — possibly thermal (no cpufreq throttling) or firmware watchdog ([#7](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/7))
 - **1 unknown I2C device** on bus 4: address `0x5b` (0x43 and 0x76 not responding — may be camera sensors on CCI, not regular I2C)
 
 ## Upstream References
