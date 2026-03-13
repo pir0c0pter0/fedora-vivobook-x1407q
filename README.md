@@ -41,8 +41,9 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 12 | **Audio working** | ALSA UCM2 regex fix for Vivobook 14 | Speaker, headphones, internal mic, headset mic, HDMI audio |
 | 13 | **Lid close = screen off** | logind `HandleLidSwitch=lock` + mask all suspend targets | S3 suspend crashes Snapdragon X → disabled suspend, lid just turns off screen |
 | 14 | **CPU frequency scaling** | Autoload in-tree `scmi_cpufreq` module | CPU scales 710MHz–2.96GHz, battery savings + thermal protection |
+| 15 | **CDSP / NPU online** | CDSP firmware in initramfs | Hexagon Compute DSP boots at early boot — fastrpc compute contexts available |
 
-**5 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
+**5 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
 
 ## Current Status
 
@@ -64,7 +65,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **Lid close** | :white_check_mark: Working | Lid close = screen off only, no suspend (see [Lid Close Fix](#13-lid-close-fix)) |
 | **Suspend (S3)** | :warning: Broken | S3 deep suspend crashes → cold reboot. Disabled via masked targets. `s2idle` untested ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4)) |
 | **cpufreq** | :white_check_mark: Working | SCMI cpufreq via autoload — 710MHz–2.96GHz, schedutil governor (see [CPU Frequency Fix](#14-cpu-frequency-fix)) |
-| **CDSP / NPU** | :x: Offline | Firmware `qccdsp8380.mbn` not extracted from Windows ([#3](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/3)) |
+| **CDSP / NPU** | :white_check_mark: Working | CDSP firmware in initramfs — Hexagon compute online (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
 | **Charge control** | :x: Not working | Battery tech "OOD" unknown, thresholds stuck at 0 ([#5](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/5)) |
 | **USB-C DP alt-mode** | :grey_question: Untested | pmic_glink device link failures on both ports ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
 | **Stability** | :warning: Crashes | Unexplained reboots — possible thermal/watchdog ([#7](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/7)) |
@@ -880,6 +881,44 @@ cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_frequencies
 
 ---
 
+### 15. CDSP/NPU Fix
+
+**Problem:** The Compute DSP (CDSP / Hexagon NPU) stays offline at boot — `remoteproc1` fails to load firmware with error `-2` (ENOENT).
+
+**Root cause:** Same as achievement #4 (ADSP/battery). The `remoteproc` for CDSP probes during early boot when only the initramfs is available. The firmware `qccdsp8380.mbn` existed on the rootfs but wasn't included in the initramfs, so the kernel couldn't find it.
+
+**Evidence from dmesg:**
+```
+remoteproc remoteproc1: cdsp is available
+remoteproc remoteproc1: Direct firmware load for qcom/x1p42100/ASUSTeK/zenbook-a14/qccdsp8380.mbn failed with error -2
+remoteproc remoteproc1: powering up cdsp
+remoteproc remoteproc1: Direct firmware load for qcom/x1p42100/ASUSTeK/zenbook-a14/qccdsp8380.mbn failed with error -2
+```
+
+**Solution:** Add CDSP firmware to initramfs via dracut:
+
+```bash
+echo 'install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qccdsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdsp_dtbs.elf /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdspr.jsn "' | sudo tee /etc/dracut.conf.d/qcom-cdsp-firmware.conf
+sudo dracut --force
+```
+
+**Verify:**
+```bash
+cat /sys/class/remoteproc/remoteproc1/state    # → running
+cat /sys/class/remoteproc/remoteproc1/name     # → cdsp
+```
+
+| Property | Value |
+|----------|-------|
+| **Remoteproc** | `remoteproc1` (CDSP) |
+| **Firmware** | `qccdsp8380.mbn` (3.1MB, ELF Qualcomm DSP6) |
+| **Support files** | `cdsp_dtbs.elf`, `cdspr.jsn` |
+| **FastRPC contexts** | 13 compute callback contexts (cb@1 through cb@13) |
+| **IOMMU groups** | Groups 15–26 |
+| **Config file** | `/etc/dracut.conf.d/qcom-cdsp-firmware.conf` |
+
+---
+
 ## System Configuration Summary
 
 ### Files modified on the system
@@ -894,6 +933,7 @@ cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_frequencies
     vivobook-kbd-fix.conf      → force_drivers+=" vivobook_kbd_fix "
     qcom-adsp-firmware.conf    → install_items+=" qcadsp8380.mbn adsp_dtbs.elf ... "
     qcom-gpu-firmware.conf     → install_items+=" gen71500_sqe.fw.xz gen71500_gmu.bin.xz ... "
+    qcom-cdsp-firmware.conf    → install_items+=" qccdsp8380.mbn cdsp_dtbs.elf cdspr.jsn "
     no-tpm.conf                → omit_dracutmodules+=" tpm2-tss systemd-pcrphase "
     no-nfs.conf                → omit_dracutmodules+=" nfs "
 
@@ -940,6 +980,7 @@ systemd masked targets:
 
 /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/
     qcadsp8380.mbn, adsp_dtbs.elf, adspr.jsn, adsps.jsn, adspua.jsn, battmgr.jsn
+    qccdsp8380.mbn, cdsp_dtbs.elf, cdspr.jsn
     qcdxkmsucpurwa.mbn
 
 /lib/firmware/ath11k/WCN6855/hw2.1/
@@ -1138,7 +1179,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **Camera**: 4 sensors (2× OV02C10 RGB + 2× IR) identified but not functional — CAMSS/CCI/CSIPHY nodes missing from DTB, patches in review upstream (see [Camera Research](#camera-research))
 - **Suspend (S3)**: `PM: suspend entry (deep)` crashes → cold reboot. Firmware fails to save/restore Snapdragon X power domains. All suspend targets masked as workaround. `s2idle` (S0ix) available but untested ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
 - **cpufreq**: No CPU frequency scaling — SCMI perf domain fails to register OPP table (`Failed to add opps_by_lvl at 2956800 for NCC1`). CPU runs at fixed frequency, no kernel thermal throttling ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
-- **CDSP/NPU offline**: `qccdsp8380.mbn` firmware not extracted from Windows. Hexagon compute / AI acceleration unavailable ([#3](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/3))
+- **~~CDSP/NPU offline~~**: Fixed — firmware in initramfs, CDSP boots at early boot (see [CDSP/NPU Fix](#15-cdspnpu-fix))
 - **Battery charge control**: Firmware reports technology "OOD" (unknown). `charge_control_end_threshold` stuck at 0, cannot set charge limit ([#5](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/5))
 - **USB-C device links**: pmic_glink fails to link with PTN3222 retimers and USB controllers. Data/charging works, DP alt-mode untested ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6))
 - **Unexplained crashes**: Multiple reboots without graceful shutdown — possibly thermal (no cpufreq throttling) or firmware watchdog ([#7](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/7))
