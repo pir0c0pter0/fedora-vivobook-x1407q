@@ -31,7 +31,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 7 | **GPU acceleration** | Firmware in initramfs (4 files including ZAP shader) | Adreno X1-45 with full 3D |
 | 8 | **Boot time: 1min47s -> 8s** | TPM timeout elimination + initrd cleanup | Masked phantom TPM devices, removed unused modules |
 | 9 | **Terminal flicker fixed** | LD_PRELOAD Vulkan pool fix (`vk_pool_fix.so`) | GTK4/turnip descriptor pool fragmentation → 952 errors eliminated |
-| 10 | **Battery time in panel** | GNOME Shell extension `battery-time@wifiteste` | Weighted rolling average, shows `43% 4:12` in top bar |
+| 10 | **Battery time in panel** | GNOME Shell extension `battery-time@wifiteste` | Hover over battery icon shows time remaining (weighted rolling average) |
 | 11 | **Touchpad right-click** | gsettings `click-method` → `areas` | Clickpad only reports BTN_LEFT; area-based mapping restores right-click |
 
 **5 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
@@ -463,7 +463,7 @@ bash install-battery-time-ext.sh
 
 | Property | Value |
 |----------|-------|
-| **Display** | `43% 4:12` (percentage + hours:minutes) |
+| **Display** | Hover over battery icon → `4:12` (hours:minutes) |
 | **Estimation** | Weighted rolling average (30 samples × 30s = 15min window) |
 | **Data source** | sysfs `/sys/class/power_supply/qcom-battmgr-bat/` |
 | **Updates** | Every 30 seconds |
