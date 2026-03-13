@@ -61,7 +61,12 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **NVMe** | :white_check_mark: Working | PCIe 4.0 |
 | **Audio** | :white_check_mark: Working | UCM2 regex fix (see [Audio Fix](#12-audio-fix)) |
 | **Lid close** | :white_check_mark: Working | Lid close = screen off only, no suspend (see [Lid Close Fix](#13-lid-close-fix)) |
-| **Suspend (S3)** | :warning: Broken | S3 deep suspend crashes → cold reboot. Disabled via masked systemd targets. `s2idle` untested |
+| **Suspend (S3)** | :warning: Broken | S3 deep suspend crashes → cold reboot. Disabled via masked targets. `s2idle` untested ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4)) |
+| **cpufreq** | :x: Not working | No CPU frequency scaling — SCMI OPP table fails to register. Thermal risk ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2)) |
+| **CDSP / NPU** | :x: Offline | Firmware `qccdsp8380.mbn` not extracted from Windows ([#3](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/3)) |
+| **Charge control** | :x: Not working | Battery tech "OOD" unknown, thresholds stuck at 0 ([#5](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/5)) |
+| **USB-C DP alt-mode** | :grey_question: Untested | pmic_glink device link failures on both ports ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
+| **Stability** | :warning: Crashes | Unexplained reboots — possible thermal/watchdog ([#7](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/7)) |
 | **Camera** | :x: Not working | 4 sensors identified, needs kernel patches (see [Camera Research](#camera-research)) |
 
 ---
@@ -1085,7 +1090,12 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **GPU**: Firmware must be in initramfs for early loading. SELinux may block `.xz` firmware (`setenforce 0` as workaround)
 - **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
 - **Camera**: 4 sensors (2× OV02C10 RGB + 2× IR) identified but not functional — CAMSS/CCI/CSIPHY nodes missing from DTB, patches in review upstream (see [Camera Research](#camera-research))
-- **Suspend (S3)**: `PM: suspend entry (deep)` crashes → cold reboot. Firmware fails to save/restore Snapdragon X power domains. All suspend targets masked as workaround. `s2idle` (S0ix) available but untested
+- **Suspend (S3)**: `PM: suspend entry (deep)` crashes → cold reboot. Firmware fails to save/restore Snapdragon X power domains. All suspend targets masked as workaround. `s2idle` (S0ix) available but untested ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
+- **cpufreq**: No CPU frequency scaling — SCMI perf domain fails to register OPP table (`Failed to add opps_by_lvl at 2956800 for NCC1`). CPU runs at fixed frequency, no kernel thermal throttling ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
+- **CDSP/NPU offline**: `qccdsp8380.mbn` firmware not extracted from Windows. Hexagon compute / AI acceleration unavailable ([#3](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/3))
+- **Battery charge control**: Firmware reports technology "OOD" (unknown). `charge_control_end_threshold` stuck at 0, cannot set charge limit ([#5](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/5))
+- **USB-C device links**: pmic_glink fails to link with PTN3222 retimers and USB controllers. Data/charging works, DP alt-mode untested ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6))
+- **Unexplained crashes**: Multiple reboots without graceful shutdown — possibly thermal (no cpufreq throttling) or firmware watchdog ([#7](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/7))
 - **1 unknown I2C device** on bus 4: address `0x5b` (0x43 and 0x76 not responding — may be camera sensors on CCI, not regular I2C)
 
 ## Upstream References
