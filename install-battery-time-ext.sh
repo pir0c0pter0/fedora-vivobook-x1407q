@@ -59,6 +59,9 @@ export default class BatteryTimeExtension extends Extension {
         this._timerId = null;
         this._desktopSettings = null;
         this._settingsSignalId = null;
+        this._hovering = false;
+        this._enterSignalId = null;
+        this._leaveSignalId = null;
 
         this._initId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
             this._initId = null;
@@ -94,6 +97,19 @@ export default class BatteryTimeExtension extends Extension {
             style: 'margin-left: 2px; font-size: 0.9em;',
         });
         system.add_child(this._timeLabel);
+        this._timeLabel.hide();
+
+        // Show/hide time on hover
+        this._system = system;
+        system.reactive = true;
+        this._enterSignalId = system.connect('enter-event', () => {
+            this._hovering = true;
+            this._update();
+        });
+        this._leaveSignalId = system.connect('leave-event', () => {
+            this._hovering = false;
+            this._timeLabel.hide();
+        });
 
         this._desktopSettings = new Gio.Settings({
             schema_id: 'org.gnome.desktop.interface',
@@ -184,7 +200,8 @@ export default class BatteryTimeExtension extends Extension {
 
         if (timeStr) {
             this._timeLabel.set_text(timeStr);
-            this._timeLabel.show();
+            if (this._hovering)
+                this._timeLabel.show();
         } else {
             this._timeLabel.hide();
         }
@@ -210,6 +227,17 @@ export default class BatteryTimeExtension extends Extension {
             this._desktopSettings.disconnect(this._settingsSignalId);
             this._settingsSignalId = null;
         }
+
+        if (this._enterSignalId && this._system) {
+            this._system.disconnect(this._enterSignalId);
+            this._enterSignalId = null;
+        }
+        if (this._leaveSignalId && this._system) {
+            this._system.disconnect(this._leaveSignalId);
+            this._leaveSignalId = null;
+        }
+        this._system = null;
+        this._hovering = false;
 
         if (this._timeLabel) {
             this._timeLabel.destroy();
@@ -242,7 +270,7 @@ echo ""
 echo ">>> FAÇA LOGOUT E LOGIN para ativar <<<"
 echo "    (Wayland exige reinício da sessão para extensões novas)"
 echo ""
-echo "Após o login, o painel vai mostrar: 43% 4:12"
-echo "  - Percentual + tempo restante (hh:mm)"
+echo "Após o login, passe o mouse sobre o ícone da bateria para ver o tempo"
+echo "  - Hover mostra tempo restante (hh:mm)"
 echo "  - Atualiza a cada 30s com média ponderada do consumo"
 echo "  - Funciona tanto descarregando quanto carregando"
