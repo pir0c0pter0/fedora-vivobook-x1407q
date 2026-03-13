@@ -32,6 +32,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 8 | **Boot time: 1min47s -> 8s** | TPM timeout elimination + initrd cleanup | Masked phantom TPM devices, removed unused modules |
 | 9 | **Terminal flicker fixed** | LD_PRELOAD Vulkan pool fix (`vk_pool_fix.so`) | GTK4/turnip descriptor pool fragmentation → 952 errors eliminated |
 | 10 | **Battery time in panel** | GNOME Shell extension `battery-time@wifiteste` | Weighted rolling average, shows `43% 4:12` in top bar |
+| 11 | **Touchpad right-click** | gsettings `click-method` → `areas` | Clickpad only reports BTN_LEFT; area-based mapping restores right-click |
 
 **5 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
 
@@ -45,7 +46,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **WiFi** | :white_check_mark: Working | DKMS module + board.bin (see [WiFi Fix](#wifi-fix)) |
 | **Bluetooth** | :white_check_mark: Working | FastConnect 6900 UART — out-of-the-box |
 | **Keyboard** | :white_check_mark: Working | DKMS module (see [Keyboard Fix](#keyboard-fix)) |
-| **Touchpad** | :white_check_mark: Working | Out-of-the-box with Zenbook DTB |
+| **Touchpad** | :white_check_mark: Working | Clickpad — `click-method: areas` for right-click (see [Touchpad Fix](#touchpad-fix)) |
 | **Battery** | :white_check_mark: Working | ADSP firmware in initramfs (see [Battery Fix](#battery-fix)) |
 | **Brightness** | :white_check_mark: Working | DKMS module (see [Brightness Fix](#brightness-fix)) |
 | **Brightness keys** | :white_check_mark: Working | DKMS module (see [Hotkey Fix](#hotkey-fix)) |
@@ -424,6 +425,28 @@ update-desktop-database ~/.local/share/applications/
 | **Scope** | Per-app (desktop entry override) |
 
 > **Note**: This is an interaction bug between GTK4 and Mesa/turnip — GTK4 creates pools too small for turnip's linear allocator. May be fixed upstream in future GTK4 or Mesa releases. To check: remove the LD_PRELOAD and monitor with `journalctl -f | grep VK_ERROR`.
+
+### Touchpad Fix
+
+gsettings `click-method` from `fingers` to `areas`.
+
+**Problem:** The ELAN touchpad (04F3:3313) is a clickpad (`INPUT_PROP_BUTTONPAD`) — a single physical button under the entire pad surface, reporting only `BTN_LEFT` at the kernel level. GNOME defaults to `click-method: fingers` (2-finger click = right-click), but area-based clicking (bottom-right corner = right-click) is the expected behavior.
+
+**Fix:**
+
+```bash
+gsettings set org.gnome.desktop.peripherals.touchpad click-method 'areas'
+```
+
+| Property | Value |
+|----------|-------|
+| **Touchpad** | ELAN I2C HID, VID `0x04f3`, PID `0x3313` |
+| **I2C bus** | 1 (`b80000.i2c`) |
+| **I2C address** | `0x15` |
+| **Type** | Clickpad (`INPUT_PROP_BUTTONPAD`) — single physical button |
+| **Multi-touch** | 5 slots (`ABS_MT_SLOT` max 4) |
+| **Resolution** | 3905×2382 @ 31 units/mm (126×77mm) |
+| **Fix** | `click-method: areas` — bottom-left = left click, bottom-right = right click |
 
 ### Battery Time Extension
 
