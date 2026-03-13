@@ -30,8 +30,10 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 6 | **Fn hotkeys** | DKMS module `vivobook_hotkey_fix` | ASUS vendor HID init + key mapping |
 | 7 | **GPU acceleration** | Firmware in initramfs (4 files including ZAP shader) | Adreno X1-45 with full 3D |
 | 8 | **Boot time: 1min47s -> 8s** | TPM timeout elimination + initrd cleanup | Masked phantom TPM devices, removed unused modules |
+| 9 | **Terminal flicker fixed** | LD_PRELOAD Vulkan pool fix (`vk_pool_fix.so`) | GTK4/turnip descriptor pool fragmentation → 952 errors eliminated |
+| 10 | **Battery time in panel** | GNOME Shell extension `battery-time@wifiteste` | Weighted rolling average, shows `43% 4:12` in top bar |
 
-**5 custom kernel modules**, **0 kernel patches** — everything done at runtime via DKMS because the INSYDE UEFI blocks DTB overrides.
+**5 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
 
 ## Current Status
 
@@ -348,40 +350,61 @@ Firmware must be extracted from Windows (BitLocker enabled). See [GUIA-EXTRAIR-F
 | `build-v4-iso.sh` | ISO with patched DTB (regulator fix) |
 | `extract-qcom-firmware.sh` | Extracts firmware from Windows partition |
 | `post-install-protect.sh` | Protects boot against kernel updates |
+| `vk_pool_fix.c` | LD_PRELOAD fix for GTK4/turnip Vulkan descriptor pool fragmentation |
+| `install-battery-time-ext.sh` | Installs GNOME Shell battery time remaining extension |
 
 ## Known Issues
 
 - **DTB override impossible** on INSYDE firmware — all hardware fixes must use kernel modules
 - **Audio**: ADSP firmware present but no codec mapping in DTB
 - **GPU**: Firmware must be in initramfs for early loading. SELinux may block `.xz` firmware (`setenforce 0` as workaround)
-- **Terminal flicker (Ptyxis/Vulkan)**: GTK4's Vulkan renderer triggers `VK_ERROR_OUT_OF_POOL_MEMORY` on the freedreno `turnip` driver, causing visible flicker in the terminal. Fix: force GL renderer (see [Terminal Flicker Fix](#terminal-flicker-fix))
+- **Terminal flicker (Ptyxis/Vulkan)**: :white_check_mark: **Fixed** — GTK4/turnip descriptor pool fragmentation, solved via LD_PRELOAD (see [Terminal Flicker Fix](#terminal-flicker-fix))
 - **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
 - **3 unknown I2C devices** on bus 4: addresses `0x43`, `0x5b`, `0x76`
 
 ### Terminal Flicker Fix
 
-Force GL renderer for Ptyxis (GNOME 50 terminal).
+LD_PRELOAD fix for GTK4/turnip Vulkan descriptor pool fragmentation.
 
-**Problem:** GTK4 on GNOME 50 defaults to the Vulkan renderer (`GSK_RENDERER=vulkan`). The freedreno Vulkan driver (`turnip`) has a descriptor pool leak in `tu_descriptor_set.cc` — after extended use, it spams `VK_ERROR_OUT_OF_POOL_MEMORY` (hundreds of errors per minute), causing visible flicker/redraw glitches in the terminal.
+**Problem:** GTK4's Vulkan renderer (GSK) creates descriptor pools with `maxSets=100` and `VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT`. The freedreno `turnip` driver (`tu_descriptor_set.cc:649`) fragments these small pools under rapid alloc/free cycles from terminal text rendering. After ~30 minutes, pools are exhausted — the allocation loop iterates all fragmented pools, generating hundreds of `VK_ERROR_OUT_OF_POOL_MEMORY` errors per minute and causing visible flicker.
 
-**Fix:** Override the Ptyxis desktop entry to use the GL renderer:
+**Root cause** (in GTK4 `gsk/gpu/gskvulkandevice.c`):
+```c
+// GSK creates pools with only 100 sets — too small for sustained rendering
+.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,  // enables fragmentation
+.maxSets = 100,
+.descriptorCount = 100,
+```
+
+**Fix:** LD_PRELOAD library that intercepts `vkCreateDescriptorPool` and increases pool sizes by 50x (100 → 5000 sets), eliminating fragmentation:
 
 ```bash
+# Build
+gcc -shared -fPIC -o vk_pool_fix.so vk_pool_fix.c -ldl
+
+# Install
+sudo cp vk_pool_fix.so /usr/local/lib64/vk_pool_fix.so
+
+# Apply to Ptyxis
 mkdir -p ~/.local/share/applications
 cp /usr/share/applications/org.gnome.Ptyxis.desktop ~/.local/share/applications/
-sed -i 's|^Exec=ptyxis|Exec=env GSK_RENDERER=ngl ptyxis|g' ~/.local/share/applications/org.gnome.Ptyxis.desktop
+sed -i 's|^Exec=ptyxis|Exec=env LD_PRELOAD=/usr/local/lib64/vk_pool_fix.so ptyxis|g' \
+    ~/.local/share/applications/org.gnome.Ptyxis.desktop
 update-desktop-database ~/.local/share/applications/
 ```
 
+**Result:** 952 errors → 0 errors. Vulkan renderer preserved (better performance than GL fallback).
+
 | Property | Value |
 |----------|-------|
-| **Affected app** | Ptyxis (GNOME Terminal, pid `ptyxis`) |
-| **Driver bug** | `turnip` — `tu_descriptor_set.cc:649` pool exhaustion |
-| **Error** | `VK_ERROR_OUT_OF_POOL_MEMORY` (continuous after ~30min use) |
-| **Fix** | `GSK_RENDERER=ngl` (forces OpenGL instead of Vulkan) |
-| **Scope** | Per-app (desktop entry override), does not affect other GTK4 apps |
+| **Affected app** | Ptyxis (GNOME Terminal) and any GTK4 Vulkan app on turnip |
+| **Root cause** | GTK4 GSK `maxSets=100` + turnip pool fragmentation |
+| **Error** | `VK_ERROR_OUT_OF_POOL_MEMORY` at `tu_descriptor_set.cc:649` |
+| **Fix** | `vk_pool_fix.so` — increases pool size 50x via LD_PRELOAD |
+| **Alternative** | `GSK_RENDERER=ngl` (forces GL, avoids Vulkan entirely) |
+| **Scope** | Per-app (desktop entry override) |
 
-> **Note**: This is a Mesa/turnip driver bug, not a GTK or Ptyxis bug. May be fixed in future Mesa releases. To check if it's resolved, remove the override and monitor with `journalctl -f | grep VK_ERROR`.
+> **Note**: This is an interaction bug between GTK4 and Mesa/turnip — GTK4 creates pools too small for turnip's linear allocator. May be fixed upstream in future GTK4 or Mesa releases. To check: remove the LD_PRELOAD and monitor with `journalctl -f | grep VK_ERROR`.
 
 ### Battery Time Extension
 
