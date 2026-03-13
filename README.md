@@ -2,6 +2,8 @@
 
 > Full Linux support for the ASUS Vivobook 14 X1407QA with Qualcomm Snapdragon X (X1-26-100) on Fedora 44 aarch64 — from zero to daily driver.
 
+**Author:** Pir0c0pter0 — pir0c0pter0000@gmail.com
+
 ## Hardware
 
 | Component | Details |
