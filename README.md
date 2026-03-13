@@ -68,7 +68,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **cpufreq** | :white_check_mark: Working | SCMI cpufreq via autoload — 710MHz–2.96GHz, schedutil governor (see [CPU Frequency Fix](#14-cpu-frequency-fix)) |
 | **CDSP / NPU** | :white_check_mark: Working | CDSP firmware in initramfs — Hexagon compute online (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
 | **Charge control** | :white_check_mark: Working | Charge limit 80% via udev rule (see [Charge Control Fix](#16-battery-charge-control-fix)) |
-| **USB-C DP alt-mode** | :grey_question: Untested | pmic_glink device link failures on both ports ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
+| **USB-C DP alt-mode** | :white_check_mark: Working | Working on both usb c |
 | **Camera** | :x: Not working | 4 sensors identified, needs kernel patches (see [Camera Research](#camera-research)) |
 
 ---
