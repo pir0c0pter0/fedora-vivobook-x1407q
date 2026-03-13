@@ -27,7 +27,9 @@
 | **Built-in keyboard** | :white_check_mark: Working | DKMS module (see [Keyboard Fix](#keyboard-fix)) |
 | **Bluetooth** | :white_check_mark: Working | FastConnect 6900 UART - works out-of-the-box |
 | **Battery** | :white_check_mark: Working | ADSP firmware in initramfs (see [Battery Fix](#battery-fix)) |
+| **Brightness** | :white_check_mark: Working | DKMS module (see [Brightness Fix](#brightness-fix)) |
 | **Audio** | :x: Not working | ADSP codec not mapped in DTB |
+| **Brightness keys** | :x: Not working | Fn+F5/F6 keycodes registered but no events generated |
 | **Camera** | :x: Not working | No driver support |
 
 ## The Problem
@@ -135,6 +137,44 @@ sudo dracut --force
 | **Battery** | X321-42, 50Wh, Li-ion |
 | **sysfs** | `/sys/class/power_supply/qcom-battmgr-bat/` |
 
+## Brightness Fix
+
+DKMS module `vivobook_bl_fix`.
+
+### Problem
+
+The panel (Innolux N140JCA-ELK, IPS LCD) uses an external PWM signal for brightness control. The PMIC (PMK8550) has an LPG (Light Pulse Generator) channel pre-configured by firmware as a 12-bit PWM at 19.2 MHz, but the DTB node is `status = "disabled"`, so no kernel driver claims it. The PWM signal is not routed to the output GPIO, leaving the screen stuck at 100% brightness.
+
+### Fix
+
+**Module** (`/usr/src/vivobook-bl-fix-1.0/`):
+- Finds PMK8550 regmap via DT child platform device lookup
+- Enables DTEST3 routing: writes `0x01` to LPG TEST register E2 (offset 0xE2) via SEC_ACCESS unlock
+- Writes PWM value + **PWM_SYNC** (offset 0x47) to latch values into hardware
+- Registers `/sys/class/backlight/vivobook-backlight` (4096 levels)
+- GNOME Quick Settings slider works automatically (may need logout/login after first install)
+- On unload, restores DTEST3 to 0x00 (GPIO5 floats HIGH = 100% brightness, safe)
+
+**Signal path**: `LPG ch0 PWM → DTEST3 bus → GPIO5 (DIG_OUT_SRC=0x04) → panel backlight`
+
+```bash
+sudo dkms add /usr/src/vivobook-bl-fix-1.0
+sudo dkms build vivobook-bl-fix/1.0
+sudo dkms install vivobook-bl-fix/1.0
+echo "vivobook_bl_fix" | sudo tee /etc/modules-load.d/vivobook-bl-fix.conf
+```
+
+| Property | Value |
+|----------|-------|
+| **PMIC** | PMK8550 (SPMI SID 0, pmic@0) |
+| **LPG channel** | ch0, base 0xE800, HI_RES_PWM (subtype 0x0C) |
+| **Resolution** | 12-bit (4096 levels) |
+| **GPIO** | PMK8550 GPIO5 (0xBC00), sources DTEST3 (DIG_OUT_SRC=0x04) |
+| **Key registers** | TEST3 (0xE8E2, SEC_ACCESS protected), PWM_SYNC (0xE847) |
+| **Backlight enable** | PMC8380_3 GPIO4 (on/off, already HIGH) |
+
+> **WARNING**: Never change GPIO5 DIG_OUT_SOURCE_CTL to 0x00 (func3) or force GPIO output LOW — this kills the display and requires a forced reboot.
+
 ## Scripts
 
 | Script | Purpose |
@@ -169,10 +209,11 @@ Key paths:
 
 ## Next Steps
 
-1. **Audio** — ADSP codec mapping (ADSP now boots, need codec node in DTB)
-2. **Identify bus 4 devices** — 0x43, 0x5b, 0x76
-3. **WiFi calibration** — Extract device-specific board data from Windows driver
-4. **Upstream** — Submit DTB patches for Vivobook X1407QA
+1. **Brightness keys** — Fn+F5/F6 keycodes registered in vivobook-kbd but no events generated
+2. **Audio** — ADSP codec mapping (ADSP now boots, need codec node in DTB)
+3. **Identify bus 4 devices** — 0x43, 0x5b, 0x76
+4. **WiFi calibration** — Extract device-specific board data from Windows driver
+5. **Upstream** — Submit DTB patches for Vivobook X1407QA
 
 ## License
 
