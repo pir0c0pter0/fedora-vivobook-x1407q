@@ -382,16 +382,35 @@ LD_PRELOAD fix for GTK4/turnip Vulkan descriptor pool fragmentation.
 # Build
 gcc -shared -fPIC -o vk_pool_fix.so vk_pool_fix.c -ldl
 
-# Install
+# Install library
 sudo cp vk_pool_fix.so /usr/local/lib64/vk_pool_fix.so
 
-# Apply to Ptyxis
+# Create wrapper script (needed because Ptyxis uses D-Bus activation,
+# which ignores Exec= in .desktop and LD_PRELOAD env vars)
+sudo tee /usr/local/bin/ptyxis-fixed << 'WRAPPER'
+#!/bin/sh
+export LD_PRELOAD=/usr/local/lib64/vk_pool_fix.so
+exec /usr/bin/ptyxis "$@"
+WRAPPER
+sudo chmod +x /usr/local/bin/ptyxis-fixed
+
+# Override D-Bus service (this is what actually launches Ptyxis)
+mkdir -p ~/.local/share/dbus-1/services
+cat > ~/.local/share/dbus-1/services/org.gnome.Ptyxis.service << 'DBUS'
+[D-BUS Service]
+Name=org.gnome.Ptyxis
+Exec=/usr/local/bin/ptyxis-fixed --gapplication-service
+DBUS
+
+# Override desktop entry (for manual launches)
 mkdir -p ~/.local/share/applications
 cp /usr/share/applications/org.gnome.Ptyxis.desktop ~/.local/share/applications/
-sed -i 's|^Exec=ptyxis|Exec=env LD_PRELOAD=/usr/local/lib64/vk_pool_fix.so ptyxis|g' \
+sed -i 's|^Exec=ptyxis|Exec=/usr/local/bin/ptyxis-fixed|g' \
     ~/.local/share/applications/org.gnome.Ptyxis.desktop
 update-desktop-database ~/.local/share/applications/
 ```
+
+> **Important**: Ptyxis uses `DBusActivatable=true` — the D-Bus service file override is required, not just the desktop entry. Without it, systemd launches `/usr/bin/ptyxis` directly, bypassing LD_PRELOAD.
 
 **Result:** 952 errors → 0 errors. Vulkan renderer preserved (better performance than GL fallback).
 
