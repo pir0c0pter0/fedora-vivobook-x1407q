@@ -217,23 +217,33 @@ GPU firmware included in initramfs for early loading.
 
 ### Problem
 
-The Adreno X1-45 GPU requires three firmware files (`gen71500_sqe.fw`, `gen71500_gmu.bin`, `gen71500_zap.mbn`) to initialize properly. These are only available as compressed `.xz` files in `/lib/firmware/qcom/`, and the kernel's direct firmware loader fails to find them during early boot. The GPU starts without shader firmware and only loads it ~105 seconds later via userspace fallback, causing rendering issues (terminal flickering during rapid text updates).
+The Adreno X1-45 GPU requires four firmware files to initialize properly. The generic firmware (`gen71500_sqe.fw`, `gen71500_gmu.bin`) is only available compressed (`.xz`) in `/lib/firmware/qcom/`, and the kernel's direct firmware loader fails to find them during early boot — the GPU starts without shader firmware and only loads it ~105 seconds later via userspace fallback.
+
+Additionally, the Vivobook DTB references the ZAP shader (TrustZone) as `qcdxkmsucpurwa.mbn` at the device-specific path `qcom/x1p42100/ASUSTeK/zenbook-a14/`. The kernel's MDT loader (`zap_shader_load_mdt`) does NOT retry like the normal firmware loader — if the file isn't available immediately, GPU initialization fails completely (no 3D acceleration, display artifacts).
 
 ### Fix
 
-Include GPU firmware in initramfs via dracut:
+Include all GPU firmware in initramfs via dracut:
 
 ```bash
-echo 'install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/gen71500_zap.mbn "' | sudo tee /etc/dracut.conf.d/qcom-gpu-firmware.conf
+echo 'install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/gen71500_zap.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcdxkmsucpurwa.mbn "' | sudo tee /etc/dracut.conf.d/qcom-gpu-firmware.conf
 sudo dracut --force
 ```
+
+| Firmware | Path | Purpose |
+|----------|------|---------|
+| `gen71500_sqe.fw.xz` | `qcom/` | Shader Queue Engine |
+| `gen71500_gmu.bin.xz` | `qcom/` | Graphics Management Unit |
+| `gen71500_zap.mbn` | `qcom/x1p42100/` | ZAP shader (generic) |
+| `qcdxkmsucpurwa.mbn` | `qcom/x1p42100/ASUSTeK/zenbook-a14/` | ZAP shader (device-specific, referenced by DTB) |
 
 | Property | Value |
 |----------|-------|
 | **GPU** | Adreno X1-45 (freedreno / Mesa) |
 | **Driver** | `msm_dpu` (display), `adreno` (GPU) |
-| **Firmware** | `gen71500_sqe.fw` (shader), `gen71500_gmu.bin` (GMU), `gen71500_zap.mbn` (TrustZone) |
 | **Panel** | Samsung ATANA33XC20, eDP, 1920x1200@60Hz, 10-bit (XR30) |
+
+> **WARNING**: The `qcdxkmsucpurwa.mbn` ZAP shader is critical. Without it the MDT loader fails immediately with `gpu hw init failed: -2` and the GPU has no 3D acceleration.
 
 ## GRUB Configuration
 
