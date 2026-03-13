@@ -39,8 +39,9 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 10 | **Battery time in panel** | GNOME Shell extension `battery-time@wifiteste` | Hover over battery icon shows time remaining (weighted rolling average) |
 | 11 | **Touchpad right-click** | gsettings `click-method` → `areas` | Clickpad only reports BTN_LEFT; area-based mapping restores right-click |
 | 12 | **Audio working** | ALSA UCM2 regex fix for Vivobook 14 | Speaker, headphones, internal mic, headset mic, HDMI audio |
+| 13 | **Lid close = screen off** | logind `HandleLidSwitch=lock` + mask all suspend targets | S3 suspend crashes Snapdragon X → disabled suspend, lid just turns off screen |
 
-**5 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
+**5 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
 
 ## Current Status
 
@@ -59,6 +60,8 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **USB ports** | :white_check_mark: Working | USB-C, USB-A, HDMI |
 | **NVMe** | :white_check_mark: Working | PCIe 4.0 |
 | **Audio** | :white_check_mark: Working | UCM2 regex fix (see [Audio Fix](#12-audio-fix)) |
+| **Lid close** | :white_check_mark: Working | Lid close = screen off only, no suspend (see [Lid Close Fix](#13-lid-close-fix)) |
+| **Suspend (S3)** | :warning: Broken | S3 deep suspend crashes → cold reboot. Disabled via masked systemd targets. `s2idle` untested |
 | **Camera** | :x: Not working | 4 sensors identified, needs kernel patches (see [Camera Research](#camera-research)) |
 
 ---
@@ -200,7 +203,7 @@ wpctl status | grep -A5 Sinks
 
 ## Complete Setup Script
 
-The `setup-all.sh` script applies all 12 fixes in the correct order. It assumes firmware has already been extracted (Step 4).
+The `setup-all.sh` script applies all 13 fixes in the correct order. It assumes firmware has already been extracted (Step 4).
 
 ```bash
 #!/bin/bash
@@ -324,10 +327,26 @@ log "11/12 — Configurando touchpad (click-method: areas)..."
 sudo -u "${REAL_USER}" gsettings set org.gnome.desktop.peripherals.touchpad click-method 'areas'
 
 # ─── 12. Audio — UCM2 regex fix ──────────────────────────────────────────
-log "12/12 — Corrigindo ALSA UCM2 para áudio (Vivobook 14)..."
+log "12/13 — Corrigindo ALSA UCM2 para áudio (Vivobook 14)..."
 sed -i 's/Vivobook S 15)/Vivobook S 15|Vivobook 14)/' \
     /usr/share/alsa/ucm2/conf.d/x1e80100/x1e80100.conf \
     /usr/share/alsa/ucm2/Qualcomm/x1e80100/x1e80100.conf
+
+# ─── Fix 13: Lid close = screen off, disable suspend ─────────────────────
+log "13/13 — Desabilitando suspend (S3 crasha no Snapdragon X)..."
+mkdir -p /etc/systemd/logind.conf.d/
+cat > /etc/systemd/logind.conf.d/no-suspend.conf << 'LOGIND'
+[Login]
+HandleLidSwitch=lock
+HandleLidSwitchExternalPower=lock
+HandleLidSwitchDocked=lock
+IdleAction=ignore
+LOGIND
+systemctl mask suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target sleep.target 2>/dev/null || true
+sudo -u "${REAL_USER}" gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing' 2>/dev/null || true
+sudo -u "${REAL_USER}" gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing' 2>/dev/null || true
+sudo -u "${REAL_USER}" gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout 0 2>/dev/null || true
+sudo -u "${REAL_USER}" gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-timeout 0 2>/dev/null || true
 
 # ─── Disable auto updates ────────────────────────────────────────────────
 log "Desabilitando auto-updates (previne quebra dos módulos DKMS)..."
@@ -765,6 +784,52 @@ systemctl --user restart pipewire pipewire-pulse wireplumber
 
 ---
 
+### 13. Lid Close Fix
+
+**Problem:** Closing the laptop lid triggers S3 suspend (`PM: suspend entry (deep)`), but the Snapdragon X firmware (INSYDE) fails to save/restore power domain state. Instead of waking up, the system cold reboots — losing all open work.
+
+**Root cause:** The kernel defaults to `mem_sleep=deep` (S3 suspend-to-RAM). On Qualcomm X1E/X1P platforms, the firmware doesn't properly handle S3 power domain save/restore, causing a crash during suspend. The system has `s2idle` available but untested, and S3 is unreliable.
+
+**Solution:** Disable all suspend paths and configure lid close to only lock the screen (turns off display via DPMS):
+
+```bash
+# 1. logind: lid close = lock screen only (no suspend)
+sudo mkdir -p /etc/systemd/logind.conf.d/
+sudo tee /etc/systemd/logind.conf.d/no-suspend.conf > /dev/null << 'EOF'
+[Login]
+HandleLidSwitch=lock
+HandleLidSwitchExternalPower=lock
+HandleLidSwitchDocked=lock
+IdleAction=ignore
+EOF
+
+# 2. Mask all suspend/hibernate systemd targets
+sudo systemctl mask suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target sleep.target
+
+# 3. Disable GNOME idle suspend (AC and battery)
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing'
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout 0
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-timeout 0
+```
+
+**Behavior after fix:**
+- **Lid close** → screen turns off + session locks (lock screen on open)
+- **Lid open** → screen turns on, shows lock screen
+- **Idle timeout** → no suspend, screen stays on
+- **Power button** → interactive dialog (unchanged)
+
+| Property | Value |
+|----------|-------|
+| **Lid switch device** | `gpio-keys` (`/dev/input/event0`), capability `SW_LID` |
+| **Lid sensor type** | Hall effect (magnetic), exposed via GPIO in DTB |
+| **Suspend mode that crashes** | `deep` (S3 suspend-to-RAM) |
+| **Alternative available** | `s2idle` (S0ix) — untested, may work in future kernels |
+| **Config location** | `/etc/systemd/logind.conf.d/no-suspend.conf` |
+| **Systemd targets masked** | `suspend.target`, `hibernate.target`, `hybrid-sleep.target`, `suspend-then-hibernate.target`, `sleep.target` |
+
+---
+
 ## System Configuration Summary
 
 ### Files modified on the system
@@ -814,6 +879,13 @@ systemctl --user restart pipewire pipewire-pulse wireplumber
     Regex: added "Vivobook 14" to ASUS match group
 /usr/share/alsa/ucm2/Qualcomm/x1e80100/x1e80100.conf
     Regex: added "Vivobook 14" to ASUS match group (same change)
+
+/etc/systemd/logind.conf.d/
+    no-suspend.conf            → HandleLidSwitch=lock, IdleAction=ignore
+
+systemd masked targets:
+    suspend.target, hibernate.target, hybrid-sleep.target,
+    suspend-then-hibernate.target, sleep.target
 
 /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/
     qcadsp8380.mbn, adsp_dtbs.elf, adspr.jsn, adsps.jsn, adspua.jsn, battmgr.jsn
@@ -1013,6 +1085,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **GPU**: Firmware must be in initramfs for early loading. SELinux may block `.xz` firmware (`setenforce 0` as workaround)
 - **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
 - **Camera**: 4 sensors (2× OV02C10 RGB + 2× IR) identified but not functional — CAMSS/CCI/CSIPHY nodes missing from DTB, patches in review upstream (see [Camera Research](#camera-research))
+- **Suspend (S3)**: `PM: suspend entry (deep)` crashes → cold reboot. Firmware fails to save/restore Snapdragon X power domains. All suspend targets masked as workaround. `s2idle` (S0ix) available but untested
 - **1 unknown I2C device** on bus 4: address `0x5b` (0x43 and 0x76 not responding — may be camera sensors on CCI, not regular I2C)
 
 ## Upstream References
