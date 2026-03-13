@@ -46,14 +46,14 @@ if [[ ! -f /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcadsp8380.mbn ]]
 fi
 
 # ─── 1. Kernel parameters (GRUB) ────────────────────────────────────────
-log "1/11 — Configurando parâmetros de kernel no GRUB..."
+log "1/12 — Configurando parâmetros de kernel no GRUB..."
 if ! grep -q "clk_ignore_unused" /etc/default/grub 2>/dev/null; then
     sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet rhgb clk_ignore_unused pd_ignore_unused rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"/' /etc/default/grub
 fi
 grubby --update-kernel=ALL --args="clk_ignore_unused pd_ignore_unused rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"
 
 # ─── 2. WiFi — DKMS wcn_regulator_fix ───────────────────────────────────
-log "2/11 — Instalando módulo WiFi (wcn_regulator_fix)..."
+log "2/12 — Instalando módulo WiFi (wcn_regulator_fix)..."
 if [[ -d /usr/src/wcn-regulator-fix-1.0 ]]; then
     if ! dkms status 2>/dev/null | grep -q "wcn-regulator-fix.*installed"; then
         dkms add /usr/src/wcn-regulator-fix-1.0 2>/dev/null || true
@@ -68,7 +68,7 @@ else
 fi
 
 # ─── 3. Keyboard — DKMS vivobook_kbd_fix ─────────────────────────────────
-log "3/11 — Instalando módulo teclado (vivobook_kbd_fix)..."
+log "3/12 — Instalando módulo teclado (vivobook_kbd_fix)..."
 if [[ -d /usr/src/vivobook-kbd-fix-1.0 ]]; then
     if ! dkms status 2>/dev/null | grep -q "vivobook-kbd-fix.*installed"; then
         dkms add /usr/src/vivobook-kbd-fix-1.0 2>/dev/null || true
@@ -83,13 +83,13 @@ else
 fi
 
 # ─── 4. Battery — ADSP firmware in initramfs ─────────────────────────────
-log "4/11 — Adicionando firmware ADSP ao initramfs..."
+log "4/12 — Adicionando firmware ADSP ao initramfs..."
 cat > /etc/dracut.conf.d/qcom-adsp-firmware.conf << 'EOF'
 install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcadsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsp_dtbs.elf /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspr.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsps.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspua.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/battmgr.jsn "
 EOF
 
 # ─── 5. Brightness — DKMS vivobook_bl_fix ────────────────────────────────
-log "5/11 — Instalando módulo brilho (vivobook_bl_fix)..."
+log "5/12 — Instalando módulo brilho (vivobook_bl_fix)..."
 if [[ -d /usr/src/vivobook-bl-fix-1.0 ]]; then
     if ! dkms status 2>/dev/null | grep -q "vivobook-bl-fix.*installed"; then
         dkms add /usr/src/vivobook-bl-fix-1.0 2>/dev/null || true
@@ -103,7 +103,7 @@ else
 fi
 
 # ─── 6. Fn Hotkeys — DKMS vivobook_hotkey_fix ───────────────────────────
-log "6/11 — Instalando módulo hotkeys (vivobook_hotkey_fix)..."
+log "6/12 — Instalando módulo hotkeys (vivobook_hotkey_fix)..."
 if [[ -d /usr/src/vivobook-hotkey-fix-1.0 ]]; then
     if ! dkms status 2>/dev/null | grep -q "vivobook-hotkey-fix.*installed"; then
         dkms add /usr/src/vivobook-hotkey-fix-1.0 2>/dev/null || true
@@ -117,19 +117,19 @@ else
 fi
 
 # ─── 7. GPU — Firmware in initramfs ──────────────────────────────────────
-log "7/11 — Adicionando firmware GPU ao initramfs..."
+log "7/12 — Adicionando firmware GPU ao initramfs..."
 cat > /etc/dracut.conf.d/qcom-gpu-firmware.conf << 'EOF'
 install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/gen71500_zap.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcdxkmsucpurwa.mbn "
 EOF
 
 # ─── 8. Boot time — Mask phantom TPM ─────────────────────────────────────
-log "8/11 — Otimizando boot time (masking TPM fantasma)..."
+log "8/12 — Otimizando boot time (masking TPM fantasma)..."
 systemctl mask dev-tpm0.device dev-tpmrm0.device 2>/dev/null || true
 echo 'omit_dracutmodules+=" tpm2-tss systemd-pcrphase "' > /etc/dracut.conf.d/no-tpm.conf
 echo 'omit_dracutmodules+=" nfs "' > /etc/dracut.conf.d/no-nfs.conf
 
 # ─── 9. Terminal flicker — Vulkan pool fix ───────────────────────────────
-log "9/11 — Instalando fix Vulkan (vk_pool_fix.so)..."
+log "9/12 — Instalando fix Vulkan (vk_pool_fix.so)..."
 mkdir -p /usr/local/lib64
 
 if [[ -f "${SCRIPT_DIR}/vk_pool_fix.c" ]]; then
@@ -171,7 +171,7 @@ fi
 chown -R "${REAL_USER}:${REAL_USER}" "${REAL_HOME}/.local/share/dbus-1" "${REAL_HOME}/.local/share/applications"
 
 # ─── 10. Battery time extension ──────────────────────────────────────────
-log "10/11 — Instalando extensão GNOME (battery-time)..."
+log "10/12 — Instalando extensão GNOME (battery-time)..."
 if [[ -f "${SCRIPT_DIR}/install-battery-time-ext.sh" ]]; then
     sudo -u "${REAL_USER}" bash "${SCRIPT_DIR}/install-battery-time-ext.sh"
 else
@@ -179,8 +179,14 @@ else
 fi
 
 # ─── 11. Touchpad right-click ────────────────────────────────────────────
-log "11/11 — Configurando touchpad (click-method: areas)..."
+log "11/12 — Configurando touchpad (click-method: areas)..."
 sudo -u "${REAL_USER}" gsettings set org.gnome.desktop.peripherals.touchpad click-method 'areas' 2>/dev/null || warn "  gsettings falhou (sem sessão gráfica?)"
+
+# ─── 12. CPU frequency scaling — autoload scmi_cpufreq ──────────────────
+log "12/12 — Habilitando CPU frequency scaling (scmi_cpufreq)..."
+echo "scmi_cpufreq" > /etc/modules-load.d/scmi-cpufreq.conf
+modprobe scmi_cpufreq 2>/dev/null || true
+log "  cpufreq module configured for autoload"
 
 # ─── Disable auto updates ────────────────────────────────────────────────
 log "Desabilitando auto-updates (previne quebra dos módulos DKMS)..."
@@ -199,7 +205,7 @@ grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || grub2-mkconfig -o /boot/ef
 
 echo ""
 echo "============================================"
-echo "  INSTALAÇÃO COMPLETA — 11/11 FIXES"
+echo "  INSTALAÇÃO COMPLETA — 12/12 FIXES"
 echo "============================================"
 echo ""
 echo "  Reboot para aplicar: sudo reboot"
@@ -211,6 +217,7 @@ echo "    Bateria:  cat /sys/class/power_supply/qcom-battmgr-bat/capacity"
 echo "    Brilho:   ls /sys/class/backlight/vivobook-backlight/"
 echo "    GPU:      glxinfo | grep renderer"
 echo "    Boot:     systemd-analyze"
+echo "    cpufreq:  cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor"
 echo ""
 echo "  ATENÇÃO: Faça logout/login para ativar a extensão de bateria"
 echo ""

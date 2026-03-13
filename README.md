@@ -40,8 +40,9 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 11 | **Touchpad right-click** | gsettings `click-method` → `areas` | Clickpad only reports BTN_LEFT; area-based mapping restores right-click |
 | 12 | **Audio working** | ALSA UCM2 regex fix for Vivobook 14 | Speaker, headphones, internal mic, headset mic, HDMI audio |
 | 13 | **Lid close = screen off** | logind `HandleLidSwitch=lock` + mask all suspend targets | S3 suspend crashes Snapdragon X → disabled suspend, lid just turns off screen |
+| 14 | **CPU frequency scaling** | Autoload in-tree `scmi_cpufreq` module | CPU scales 710MHz–2.96GHz, battery savings + thermal protection |
 
-**5 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
+**5 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
 
 ## Current Status
 
@@ -62,7 +63,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **Audio** | :white_check_mark: Working | UCM2 regex fix (see [Audio Fix](#12-audio-fix)) |
 | **Lid close** | :white_check_mark: Working | Lid close = screen off only, no suspend (see [Lid Close Fix](#13-lid-close-fix)) |
 | **Suspend (S3)** | :warning: Broken | S3 deep suspend crashes → cold reboot. Disabled via masked targets. `s2idle` untested ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4)) |
-| **cpufreq** | :x: Not working | No CPU frequency scaling — SCMI OPP table fails to register. Thermal risk ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2)) |
+| **cpufreq** | :white_check_mark: Working | SCMI cpufreq via autoload — 710MHz–2.96GHz, schedutil governor (see [CPU Frequency Fix](#14-cpu-frequency-fix)) |
 | **CDSP / NPU** | :x: Offline | Firmware `qccdsp8380.mbn` not extracted from Windows ([#3](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/3)) |
 | **Charge control** | :x: Not working | Battery tech "OOD" unknown, thresholds stuck at 0 ([#5](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/5)) |
 | **USB-C DP alt-mode** | :grey_question: Untested | pmic_glink device link failures on both ports ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
@@ -835,6 +836,50 @@ gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-tim
 
 ---
 
+### 14. CPU Frequency Fix
+
+**Problem:** No CPU frequency scaling — `ls /sys/devices/system/cpu/cpufreq/` is empty, no `scaling_governor`, no frequency control. CPU runs at whatever frequency the firmware decides.
+
+**Root cause:** The in-tree `scmi_cpufreq` module is not auto-loaded at boot. The SCMI firmware has a cosmetic bug (duplicate OPP entry at 2956800 for NCC1), but it doesn't prevent the module from working — it just doesn't get triggered automatically via device modalias matching.
+
+**Evidence from dmesg:**
+```
+arm-scmi arm-scmi.0.auto: [Firmware Bug]: Failed to add opps_by_lvl at 2956800 for NCC1 - ret:-16
+```
+
+**Solution:** Autoload the existing in-tree `scmi_cpufreq` module at boot:
+
+```bash
+echo "scmi_cpufreq" | sudo tee /etc/modules-load.d/scmi-cpufreq.conf
+```
+
+**Result:** Two cpufreq policies created — efficiency cluster (CPUs 0-3) and performance cluster (CPUs 4-7):
+
+```
+policy0: CPUs 0-3, 710MHz–2.96GHz, governor schedutil
+policy4: CPUs 4-7, 710MHz–2.96GHz, governor schedutil
+```
+
+**Verify:**
+```bash
+cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor    # → schedutil
+cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_frequencies
+# → 710400 806400 998400 1190400 1440000 1670400 1920000 2188800 2380800 2611200 2956800
+```
+
+| Property | Value |
+|----------|-------|
+| **SCMI protocol** | v2.0, Qualcomm firmware |
+| **Perf domains** | 3 (2 CPU clusters + 1 unknown NCC1) |
+| **Efficiency cluster** | CPUs 0-3, policy0 |
+| **Performance cluster** | CPUs 4-7, policy4 |
+| **Frequency range** | 710.4 MHz – 2956.8 MHz (11 OPPs) |
+| **Default governor** | `schedutil` (frequency follows CPU utilization) |
+| **Firmware bug** | Duplicate OPP 2956800 for NCC1 — cosmetic, `EEXIST` logged but non-fatal |
+| **Config file** | `/etc/modules-load.d/scmi-cpufreq.conf` |
+
+---
+
 ## System Configuration Summary
 
 ### Files modified on the system
@@ -857,6 +902,7 @@ gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-tim
     vivobook-kbd-fix.conf      → vivobook_kbd_fix
     vivobook-bl-fix.conf       → vivobook_bl_fix
     vivobook-hotkey-fix.conf   → vivobook_hotkey_fix
+    scmi-cpufreq.conf          → scmi_cpufreq
 
 /usr/src/
     wcn-regulator-fix-1.0/     → DKMS module source
