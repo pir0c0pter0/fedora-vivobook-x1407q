@@ -2,9 +2,9 @@
 
 ## O que é este projeto
 
-Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com Snapdragon X. Tudo feito em runtime — 5 módulos DKMS, 1 fix Vulkan (LD_PRELOAD), 1 extensão GNOME, 0 patches de kernel.
+Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com Snapdragon X. Tudo feito em runtime — 5 módulos DKMS, 1 fix Vulkan (LD_PRELOAD), 1 extensão GNOME, 1 fix UCM2 áudio, 0 patches de kernel.
 
-## Conquistas (11/11)
+## Conquistas (12/12)
 
 1. **Boot** — Custom ISO + Zenbook A14 DTB (mesmo die Qualcomm "Purwa")
 2. **WiFi** — DKMS `wcn_regulator_fix` + board.bin (PCIe race condition + regulador)
@@ -17,6 +17,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 9. **Terminal flicker** — `vk_pool_fix.so` (LD_PRELOAD que aumenta pool Vulkan 50x)
 10. **Tempo bateria** — Extensão GNOME `battery-time@wifiteste` (média ponderada)
 11. **Touchpad botão direito** — gsettings `click-method: areas` (clickpad só reporta BTN_LEFT)
+12. **Áudio** — UCM2 regex fix (Vivobook 14 não estava no match do alsa-ucm-conf)
 
 ## Regras — SEMPRE fazer
 
@@ -47,6 +48,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 | Extensão GNOME | `~/.local/share/gnome-shell/extensions/<uuid>/`, ESM modules, GNOME 50 |
 | GRUB | Entry custom em `/etc/grub.d/08_vivobook` com `clk_ignore_unused pd_ignore_unused` |
 | Bateria sysfs | `/sys/class/power_supply/qcom-battmgr-bat/` (energy_now, power_now em µW) |
+| UCM2 áudio | `/usr/share/alsa/ucm2/conf.d/x1e80100/x1e80100.conf` — regex DMI matching |
 
 ## Hardware chave
 
@@ -59,9 +61,12 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 | Brilho | PMK8550 LPG ch0 → DTEST3 → GPIO5, 12-bit PWM (4096 níveis) |
 | Bateria | X321-42 50Wh, driver qcom_battmgr via pmic_glink |
 | Painel | Samsung ATANA33XC20, eDP, 1920x1200@60Hz |
+| Áudio codec | WCD938x (WCD9385) via SoundWire |
+| Áudio speakers | WSA884x × 2 via SoundWire |
+| Áudio DSP | ADSP via Q6APM, LPASS macros (rx, tx, wsa, va) |
 
 ## TODO
 
-- **Áudio** — ADSP boota mas sem codec mapeado (WCD938x/WSA883x)
 - **Câmera** — Sem driver
 - **3 devices I2C desconhecidos** — bus 4: 0x43, 0x5b, 0x76
+- **UCM2 upstream** — PR para alsa-ucm-conf adicionando Vivobook 14 ao regex
