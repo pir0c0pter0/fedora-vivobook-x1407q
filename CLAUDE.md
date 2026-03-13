@@ -2,9 +2,9 @@
 
 ## O que é este projeto
 
-Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com Snapdragon X. Tudo feito em runtime — 5 módulos DKMS, 1 fix Vulkan (LD_PRELOAD), 1 extensão GNOME, 1 fix UCM2 áudio, 0 patches de kernel.
+Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com Snapdragon X. Tudo feito em runtime — 5 módulos DKMS, 1 fix Vulkan (LD_PRELOAD), 1 extensão GNOME, 1 fix UCM2 áudio, 1 fix suspend/lid, 0 patches de kernel.
 
-## Conquistas (12/12)
+## Conquistas (13/13)
 
 1. **Boot** — Custom ISO + Zenbook A14 DTB (mesmo die Qualcomm "Purwa")
 2. **WiFi** — DKMS `wcn_regulator_fix` + board.bin (PCIe race condition + regulador)
@@ -18,6 +18,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 10. **Tempo bateria** — Extensão GNOME `battery-time@wifiteste` (média ponderada)
 11. **Touchpad botão direito** — gsettings `click-method: areas` (clickpad só reporta BTN_LEFT)
 12. **Áudio** — UCM2 regex fix (Vivobook 14 não estava no match do alsa-ucm-conf)
+13. **Lid close** — Suspend S3 crasha no Snapdragon X → desabilitado, tampa só desliga tela (logind lock + mask targets)
 
 ## Regras — SEMPRE fazer
 
