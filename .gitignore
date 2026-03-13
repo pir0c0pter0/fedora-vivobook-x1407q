@@ -4,3 +4,4 @@
 # Temporary build artifacts
 /tmp/
 *.bak
+.claude/

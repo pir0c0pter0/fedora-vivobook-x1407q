@@ -19,7 +19,7 @@
 | Feature | Status | Notes |
 |---------|--------|-------|
 | **Boot** | :white_check_mark: Working | Fedora 44 via Zenbook A14 DTB (same die "Purwa") |
-| **Display** | :white_check_mark: Working | Adreno X1-45 GPU |
+| **Display** | :white_check_mark: Working | Adreno X1-45 GPU (firmware in initramfs, see [GPU Firmware Fix](#gpu-firmware-fix)) |
 | **Touchpad** | :white_check_mark: Working | Works out-of-the-box with Zenbook DTB |
 | **USB ports** | :white_check_mark: Working | USB-C, USB-A, HDMI |
 | **NVMe** | :white_check_mark: Working | PCIe 4.0 |
@@ -211,6 +211,78 @@ echo "vivobook_hotkey_fix" | sudo tee /etc/modules-load.d/vivobook-hotkey-fix.co
 | Airplane | `0xFF31:0x88` | `KEY_RFKILL` |
 | Kbd backlight | `0xFF31:0xc7` | `KEY_KBDILLUMTOGGLE` |
 
+## GPU Firmware Fix
+
+GPU firmware included in initramfs for early loading.
+
+### Problem
+
+The Adreno X1-45 GPU requires three firmware files (`gen71500_sqe.fw`, `gen71500_gmu.bin`, `gen71500_zap.mbn`) to initialize properly. These are only available as compressed `.xz` files in `/lib/firmware/qcom/`, and the kernel's direct firmware loader fails to find them during early boot. The GPU starts without shader firmware and only loads it ~105 seconds later via userspace fallback, causing rendering issues (terminal flickering during rapid text updates).
+
+### Fix
+
+Include GPU firmware in initramfs via dracut:
+
+```bash
+echo 'install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/gen71500_zap.mbn "' | sudo tee /etc/dracut.conf.d/qcom-gpu-firmware.conf
+sudo dracut --force
+```
+
+| Property | Value |
+|----------|-------|
+| **GPU** | Adreno X1-45 (freedreno / Mesa) |
+| **Driver** | `msm_dpu` (display), `adreno` (GPU) |
+| **Firmware** | `gen71500_sqe.fw` (shader), `gen71500_gmu.bin` (GMU), `gen71500_zap.mbn` (TrustZone) |
+| **Panel** | Samsung ATANA33XC20, eDP, 1920x1200@60Hz, 10-bit (XR30) |
+
+## GRUB Configuration
+
+Unified boot entry with all fixes.
+
+### Problem
+
+Fedora's default BLS boot entries don't support `devicetree` loading, which is required on this laptop because the INSYDE UEFI provides the wrong DTB. Multiple separate GRUB entries for different fixes caused confusion and required manual selection at every boot.
+
+### Fix
+
+Single custom GRUB entry at `/etc/grub.d/08_vivobook` that loads the correct DTB and all kernel parameters:
+
+```bash
+sudo cat > /etc/grub.d/08_vivobook << 'SCRIPT'
+#!/usr/bin/sh
+cat << 'GRUBENTRY'
+menuentry 'Fedora 6.19.6 - ASUS Vivobook' --class fedora {
+    insmod fdt
+    search --no-floppy --fs-uuid --set=root <your-boot-uuid>
+    linux /vmlinuz-6.19.6-300.fc44.aarch64 root=UUID=<your-root-uuid> ro rootflags=subvol=root quiet rhgb clk_ignore_unused pd_ignore_unused rd.driver.pre=wcn_regulator_fix
+    initrd /initramfs-6.19.6-300.fc44.aarch64.img
+    devicetree /dtb/qcom/x1p42100-asus-vivobook-x1407qa.dtb
+}
+GRUBENTRY
+SCRIPT
+chmod +x /etc/grub.d/08_vivobook
+sudo grub2-mkconfig -o /boot/grub2/grub.cfg
+sudo grub2-set-default "Fedora 6.19.6 - ASUS Vivobook"
+```
+
+| Parameter | Purpose |
+|-----------|---------|
+| `clk_ignore_unused` | Prevents kernel from disabling Qualcomm clocks needed by firmware |
+| `pd_ignore_unused` | Prevents kernel from disabling power domains needed by firmware |
+| `rd.driver.pre=wcn_regulator_fix` | Loads WiFi regulator fix before PCIe scan |
+| `devicetree` | Loads Vivobook-specific DTB instead of UEFI-provided Zenbook DTB |
+
+### Disable Auto Updates
+
+To prevent kernel/mesa updates from breaking the custom setup:
+
+```bash
+sudo systemctl disable --now dnf-makecache.timer
+sudo systemctl mask packagekit.service
+gsettings set org.gnome.software download-updates false
+gsettings set org.gnome.software download-updates-notify false
+```
+
 ## Scripts
 
 | Script | Purpose |
@@ -234,7 +306,7 @@ Key paths:
 - **DTB override impossible** on INSYDE firmware — all hardware fixes must use kernel modules
 - **Battery**: Requires ADSP firmware in initramfs — without it, `qcom-battmgr` reads fail with EAGAIN
 - **Audio**: ADSP firmware present but no codec mapping in DTB
-- **GPU**: `setenforce 0` needed for firmware loading (SELinux blocks `.xz` firmware)
+- **GPU**: Firmware must be in initramfs for early loading (see [GPU Firmware Fix](#gpu-firmware-fix)). SELinux may block `.xz` firmware (`setenforce 0` as workaround)
 - **3 unknown I2C devices** on bus 4: addresses `0x43`, `0x5b`, `0x76`
 
 ## Upstream References
