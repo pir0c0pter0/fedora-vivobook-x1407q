@@ -37,8 +37,9 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 9 | **Terminal flicker fixed** | LD_PRELOAD Vulkan pool fix (`vk_pool_fix.so`) | GTK4/turnip descriptor pool fragmentation → 952 errors eliminated |
 | 10 | **Battery time in panel** | GNOME Shell extension `battery-time@wifiteste` | Hover over battery icon shows time remaining (weighted rolling average) |
 | 11 | **Touchpad right-click** | gsettings `click-method` → `areas` | Clickpad only reports BTN_LEFT; area-based mapping restores right-click |
+| 12 | **Audio working** | ALSA UCM2 regex fix for Vivobook 14 | Speaker, headphones, internal mic, headset mic, HDMI audio |
 
-**5 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
+**5 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
 
 ## Current Status
 
@@ -56,7 +57,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **Brightness keys** | :white_check_mark: Working | DKMS module (see [Hotkey Fix](#6-fn-hotkey-fix)) |
 | **USB ports** | :white_check_mark: Working | USB-C, USB-A, HDMI |
 | **NVMe** | :white_check_mark: Working | PCIe 4.0 |
-| **Audio** | :x: Not working | ADSP codec not mapped in DTB |
+| **Audio** | :white_check_mark: Working | UCM2 regex fix (see [Audio Fix](#12-audio-fix)) |
 | **Camera** | :x: Not working | No driver support |
 
 ---
@@ -189,13 +190,16 @@ dmesg | grep vivobook_hotkey
 
 # Boot time
 systemd-analyze
+
+# Audio
+wpctl status | grep -A5 Sinks
 ```
 
 ---
 
 ## Complete Setup Script
 
-The `setup-all.sh` script applies all 11 fixes in the correct order. It assumes firmware has already been extracted (Step 4).
+The `setup-all.sh` script applies all 12 fixes in the correct order. It assumes firmware has already been extracted (Step 4).
 
 ```bash
 #!/bin/bash
@@ -212,14 +216,14 @@ err() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 [[ $EUID -eq 0 ]] || err "Execute como root: sudo bash setup-all.sh"
 
 # ─── 1. Kernel parameters (GRUB) ────────────────────────────────────────
-log "1/11 — Configurando parâmetros de kernel no GRUB..."
+log "1/12 — Configurando parâmetros de kernel no GRUB..."
 if ! grep -q "clk_ignore_unused" /etc/default/grub; then
     sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet rhgb clk_ignore_unused pd_ignore_unused rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"/' /etc/default/grub
 fi
 grubby --update-kernel=ALL --args="clk_ignore_unused pd_ignore_unused rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"
 
 # ─── 2. WiFi — DKMS wcn_regulator_fix ───────────────────────────────────
-log "2/11 — Instalando módulo WiFi (wcn_regulator_fix)..."
+log "2/12 — Instalando módulo WiFi (wcn_regulator_fix)..."
 if ! dkms status | grep -q "wcn-regulator-fix"; then
     dkms add /usr/src/wcn-regulator-fix-1.0
     dkms build wcn-regulator-fix/1.0
@@ -229,7 +233,7 @@ echo "wcn_regulator_fix" > /etc/modules-load.d/wcn-regulator-fix.conf
 echo 'force_drivers+=" wcn_regulator_fix "' > /etc/dracut.conf.d/wcn-regulator-fix.conf
 
 # ─── 3. Keyboard — DKMS vivobook_kbd_fix ─────────────────────────────────
-log "3/11 — Instalando módulo teclado (vivobook_kbd_fix)..."
+log "3/12 — Instalando módulo teclado (vivobook_kbd_fix)..."
 if ! dkms status | grep -q "vivobook-kbd-fix"; then
     dkms add /usr/src/vivobook-kbd-fix-1.0
     dkms build vivobook-kbd-fix/1.0
@@ -239,13 +243,13 @@ echo "vivobook_kbd_fix" > /etc/modules-load.d/vivobook-kbd-fix.conf
 echo 'force_drivers+=" vivobook_kbd_fix "' > /etc/dracut.conf.d/vivobook-kbd-fix.conf
 
 # ─── 4. Battery — ADSP firmware in initramfs ─────────────────────────────
-log "4/11 — Adicionando firmware ADSP ao initramfs..."
+log "4/12 — Adicionando firmware ADSP ao initramfs..."
 cat > /etc/dracut.conf.d/qcom-adsp-firmware.conf << 'EOF'
 install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcadsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsp_dtbs.elf /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspr.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsps.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspua.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/battmgr.jsn "
 EOF
 
 # ─── 5. Brightness — DKMS vivobook_bl_fix ────────────────────────────────
-log "5/11 — Instalando módulo brilho (vivobook_bl_fix)..."
+log "5/12 — Instalando módulo brilho (vivobook_bl_fix)..."
 if ! dkms status | grep -q "vivobook-bl-fix"; then
     dkms add /usr/src/vivobook-bl-fix-1.0
     dkms build vivobook-bl-fix/1.0
@@ -254,7 +258,7 @@ fi
 echo "vivobook_bl_fix" > /etc/modules-load.d/vivobook-bl-fix.conf
 
 # ─── 6. Fn Hotkeys — DKMS vivobook_hotkey_fix ───────────────────────────
-log "6/11 — Instalando módulo hotkeys (vivobook_hotkey_fix)..."
+log "6/12 — Instalando módulo hotkeys (vivobook_hotkey_fix)..."
 if ! dkms status | grep -q "vivobook-hotkey-fix"; then
     dkms add /usr/src/vivobook-hotkey-fix-1.0
     dkms build vivobook-hotkey-fix/1.0
@@ -263,19 +267,19 @@ fi
 echo "vivobook_hotkey_fix" > /etc/modules-load.d/vivobook-hotkey-fix.conf
 
 # ─── 7. GPU — Firmware in initramfs ──────────────────────────────────────
-log "7/11 — Adicionando firmware GPU ao initramfs..."
+log "7/12 — Adicionando firmware GPU ao initramfs..."
 cat > /etc/dracut.conf.d/qcom-gpu-firmware.conf << 'EOF'
 install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/gen71500_zap.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcdxkmsucpurwa.mbn "
 EOF
 
 # ─── 8. Boot time — Mask phantom TPM ─────────────────────────────────────
-log "8/11 — Otimizando boot time (masking TPM fantasma)..."
+log "8/12 — Otimizando boot time (masking TPM fantasma)..."
 systemctl mask dev-tpm0.device dev-tpmrm0.device 2>/dev/null || true
 echo 'omit_dracutmodules+=" tpm2-tss systemd-pcrphase "' > /etc/dracut.conf.d/no-tpm.conf
 echo 'omit_dracutmodules+=" nfs "' > /etc/dracut.conf.d/no-nfs.conf
 
 # ─── 9. Terminal flicker — Vulkan pool fix ───────────────────────────────
-log "9/11 — Instalando fix Vulkan (vk_pool_fix.so)..."
+log "9/12 — Instalando fix Vulkan (vk_pool_fix.so)..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Build if source exists
@@ -311,12 +315,18 @@ sed -i 's|^Exec=ptyxis|Exec=/usr/local/bin/ptyxis-fixed|g' \
 chown -R "${REAL_USER}:${REAL_USER}" "${REAL_HOME}/.local/share/dbus-1" "${REAL_HOME}/.local/share/applications"
 
 # ─── 10. Battery time extension ──────────────────────────────────────────
-log "10/11 — Instalando extensão GNOME (battery-time)..."
+log "10/12 — Instalando extensão GNOME (battery-time)..."
 sudo -u "${REAL_USER}" bash "${SCRIPT_DIR}/install-battery-time-ext.sh"
 
 # ─── 11. Touchpad right-click ────────────────────────────────────────────
-log "11/11 — Configurando touchpad (click-method: areas)..."
+log "11/12 — Configurando touchpad (click-method: areas)..."
 sudo -u "${REAL_USER}" gsettings set org.gnome.desktop.peripherals.touchpad click-method 'areas'
+
+# ─── 12. Audio — UCM2 regex fix ──────────────────────────────────────────
+log "12/12 — Corrigindo ALSA UCM2 para áudio (Vivobook 14)..."
+sed -i 's/Vivobook S 15)/Vivobook S 15|Vivobook 14)/' \
+    /usr/share/alsa/ucm2/conf.d/x1e80100/x1e80100.conf \
+    /usr/share/alsa/ucm2/Qualcomm/x1e80100/x1e80100.conf
 
 # ─── Disable auto updates ────────────────────────────────────────────────
 log "Desabilitando auto-updates (previne quebra dos módulos DKMS)..."
@@ -688,6 +698,70 @@ gsettings set org.gnome.desktop.peripherals.touchpad click-method 'areas'
 | **Resolution** | 3905×2382 @ 31 units/mm (126×77mm) |
 | **Fix** | `click-method: areas` — bottom-left = left click, bottom-right = right click |
 
+### 12. Audio Fix
+
+ALSA UCM2 regex fix — adds Vivobook 14 to the X1E80100 machine matching table.
+
+**Problem:** The audio hardware is fully functional at the kernel level — WCD938x codec, 2x WSA884x speaker amplifiers, all LPASS macros (rx, tx, wsa, va), SoundWire bus, and Q6APM DSP are loaded and running. However, PipeWire shows only "Dummy Output" because ALSA UCM2 (Use Case Manager) doesn't recognize the machine.
+
+**Root cause:** The UCM2 config at `/usr/share/alsa/ucm2/conf.d/x1e80100/x1e80100.conf` uses DMI info to match machines. The regex includes `Zenbook A14` and `Vivobook S 15` but **not** `Vivobook 14`:
+
+```
+# DMI string constructed as: board_vendor-product_family-board_name
+# Vivobook 14: "ASUSTeK COMPUTER INC.-ASUS Vivobook 14-X1407QA"
+
+# Before (doesn't match):
+Regex "...ASUSTeK COMPUTER.*ASUS (Zenbook A14|Vivobook S 15)..."
+
+# After (matches):
+Regex "...ASUSTeK COMPUTER.*ASUS (Zenbook A14|Vivobook S 15|Vivobook 14)..."
+```
+
+Without UCM2 profile matching, WirePlumber cannot configure the ALSA mixer routing (`RX_CODEC_DMA_RX_0`, `WSA_CODEC_DMA_RX_0`, etc.) and falls back to a dummy sink.
+
+**Fix:**
+
+```bash
+# Add "Vivobook 14" to the UCM2 regex (both copies)
+sudo sed -i 's/Vivobook S 15/Vivobook S 15|Vivobook 14/' \
+    /usr/share/alsa/ucm2/conf.d/x1e80100/x1e80100.conf \
+    /usr/share/alsa/ucm2/Qualcomm/x1e80100/x1e80100.conf
+
+# Restart audio services
+systemctl --user restart pipewire pipewire-pulse wireplumber
+```
+
+**UCM2 profile used:** `LENOVO-T14s.conf` → `T14s-HiFi.conf` (2 WSA884x speakers, WCD938x codec) — the same profile shared by ThinkPad T14s Gen 6, HP Omnibook X, Zenbook A14, Vivobook S 15, Microsoft Surface Laptop 7th Edition, and now Vivobook 14.
+
+**Audio devices enabled:**
+
+| Device | Type | PCM | Details |
+|--------|------|-----|---------|
+| Speaker | Playback | `hw:0,1` | 2ch, WSA884x × 2, WSA_CODEC_DMA_RX_0 |
+| Headphones | Playback | `hw:0,0` | WCD938x, RX_CODEC_DMA_RX_0 |
+| HDMI 0/1/2 | Playback | `hw:0,0` | DisplayPort audio, DISPLAY_PORT_RX_0/1/2 |
+| Internal Mic | Capture | `hw:0,3` | DMIC0 + DMIC1, VA_CODEC_DMA_TX_0 |
+| Headset Mic | Capture | `hw:0,2` | WCD938x ADC2, TX_CODEC_DMA_TX_3 |
+
+**SoundWire topology:**
+
+| Master | Bus address | Device | Driver | DT node |
+|--------|-------------|--------|--------|---------|
+| sdw-master-1 | `soundwire@6b10000` | WSA884x × 2 | `wsa884x-codec` | `speaker@0,0` / `speaker@0,1` |
+| sdw-master-2 | `soundwire@6ad0000` | WCD938x | `wcd9380-codec` | `codec@0,4` |
+| sdw-master-3 | `soundwire@6d30000` | WCD938x | `wcd9380-codec` | `codec@0,3` |
+
+| Property | Value |
+|----------|-------|
+| **Codec** | WCD938x (WCD9385), SoundWire, headphone/mic codec |
+| **Amplifier** | WSA884x × 2, SoundWire, speaker amplifiers |
+| **DSP** | ADSP via Q6APM (AudioReach), LPASS macros (rx, tx, wsa, va) |
+| **ALSA card** | `X1E80100ASUSZen` (`snd_soc_x1e80100` driver) |
+| **UCM2 files** | `x1e80100.conf` (matcher), `LENOVO-T14s.conf` (profile), `T14s-HiFi.conf` (HiFi verb) |
+| **Fix location** | `/usr/share/alsa/ucm2/conf.d/x1e80100/x1e80100.conf` and `/usr/share/alsa/ucm2/Qualcomm/x1e80100/x1e80100.conf` |
+
+> **WARNING**: This fix modifies system files owned by `alsa-ucm` package. It will be overwritten on `alsa-ucm` updates. The proper fix is a PR to [alsa-ucm-conf](https://github.com/alsa-project/alsa-ucm-conf) upstream to add `Vivobook 14` to the regex permanently.
+
 ---
 
 ## System Configuration Summary
@@ -735,6 +809,11 @@ gsettings set org.gnome.desktop.peripherals.touchpad click-method 'areas'
 ~/.local/share/applications/
     org.gnome.Ptyxis.desktop   → Desktop entry override
 
+/usr/share/alsa/ucm2/conf.d/x1e80100/x1e80100.conf
+    Regex: added "Vivobook 14" to ASUS match group
+/usr/share/alsa/ucm2/Qualcomm/x1e80100/x1e80100.conf
+    Regex: added "Vivobook 14" to ASUS match group (same change)
+
 /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/
     qcadsp8380.mbn, adsp_dtbs.elf, adspr.jsn, adsps.jsn, adspua.jsn, battmgr.jsn
     qcdxkmsucpurwa.mbn
@@ -768,16 +847,7 @@ See [GUIA-POS-INSTALACAO.md](GUIA-POS-INSTALACAO.md) for details.
 
 ## Future Development
 
-### Audio (priority 1)
-
-The ADSP firmware boots successfully, but there is no codec node mapped in the DTB. The audio hardware uses WCD938x (headphone/speaker codec) and WSA883x (smart amplifier). Fixing this requires:
-
-1. **Identify the codec I2C/SoundWire addresses** — probe I2C bus for WCD938x, check SoundWire bus for WSA883x
-2. **Create a DKMS module** that registers the codec devices at the correct bus/address (same approach as the keyboard fix)
-3. **Route ADSP → codec** via the audio DSP path (qcom_q6v5_pas → APR/GPR services)
-4. Three unknown I2C devices on bus 4 (`0x43`, `0x5b`, `0x76`) may include audio codec components
-
-### Camera (priority 2)
+### Camera (priority 1)
 
 No driver support exists yet. Needs:
 
@@ -792,6 +862,14 @@ Current WiFi works with a fallback `board.bin` from a similar WCN6855 variant. F
 
 1. **Extract device-specific board data** from the Windows ath11k driver (subsystem `105b:e130`)
 2. **Create a proper `board-2.bin`** entry for this specific hardware
+
+### Upstream Audio UCM2
+
+Submit PR to [alsa-ucm-conf](https://github.com/alsa-project/alsa-ucm-conf) to add `Vivobook 14` to the X1E80100 machine regex permanently:
+
+1. **File**: `ucm2/conf.d/x1e80100/x1e80100.conf` and `ucm2/Qualcomm/x1e80100/x1e80100.conf`
+2. **Change**: Add `Vivobook 14` to the ASUS regex group: `(Zenbook A14|Vivobook S 15)` → `(Zenbook A14|Vivobook S 15|Vivobook 14)`
+3. **Profile**: Uses existing `LENOVO-T14s.conf` (2 WSA884x speakers, WCD938x codec) — same audio topology as Zenbook A14
 
 ### Upstream DTB
 
@@ -809,6 +887,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 | PCIe race condition | 15-patch series by Konrad Dybcio | ~6.21 |
 | Zenbook A14 DTB | Patches by Alex Vinarskis | Merged in 6.19 |
 | Vivobook X1407QA DTB | Not submitted yet | TBD |
+| UCM2 Vivobook 14 audio | Not submitted yet | alsa-ucm-conf |
 
 ---
 
@@ -828,7 +907,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 ## Known Issues
 
 - **DTB override impossible** on INSYDE firmware — all hardware fixes must use kernel modules
-- **Audio**: ADSP firmware present but no codec mapping in DTB
+- **Audio**: UCM2 fix modifies system file — will be overwritten by `alsa-ucm` updates (needs upstream PR)
 - **GPU**: Firmware must be in initramfs for early loading. SELinux may block `.xz` firmware (`setenforce 0` as workaround)
 - **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
 - **3 unknown I2C devices** on bus 4: addresses `0x43`, `0x5b`, `0x76`
