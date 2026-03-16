@@ -2,7 +2,7 @@
 
 ## Summary
 
-The **ASUS Vivobook 14 X1407QA** with **Qualcomm Snapdragon X (X1-26-100)** is now fully functional as a Linux daily driver on **Fedora 44 aarch64** — 16 out of 16 hardware features working (camera pending upstream kernel patches). Every fix was reverse-engineered from scratch with **zero kernel patches** — all done via DKMS modules, initramfs firmware injection, and userspace fixes.
+The **ASUS Vivobook 14 X1407QA** with **Qualcomm Snapdragon X (X1-26-100)** is now fully functional as a Linux daily driver on **Fedora 44 aarch64** — **17 out of 17 hardware features working** (IR camera blocked by absent PMIC hardware). Every fix was reverse-engineered from scratch with **zero kernel patches** — all done via DKMS modules, initramfs firmware injection, and userspace fixes.
 
 This issue documents what works, what needed fixing, and what Fedora could integrate to make Snapdragon X laptops work out-of-the-box.
 
@@ -18,11 +18,13 @@ This issue documents what works, what needed fixing, and what Fedora could integ
 | **WiFi** | Qualcomm QCNFA765 (WCN6855 hw2.1) — ath11k_pci, PCI `17cb:1103` |
 | **Audio** | WCD938x codec + WSA884x speakers via SoundWire, ADSP via Q6APM |
 | **Keyboard** | ASUS I2C-HID, bus 4 (`b94000`), addr `0x3a` |
+| **Camera RGB** | OV02C10 (2MP) on CCI1 bus 1 (AON), addr `0x36`, MCLK4 19.2MHz |
+| **Camera IR** | 1× IR sensor — pm8010 PMIC physically absent, not functional |
 | **Battery** | 50Wh Li-ion X321-42, driver `qcom_battmgr` via `pmic_glink` |
 
 ---
 
-## Detailed breakdown — 16 issues found and fixed
+## Detailed breakdown — 17 issues found and fixed
 
 ### 1. Boot — no DTB for this laptop in the kernel
 
@@ -287,7 +289,13 @@ systemctl --user restart pipewire pipewire-pulse wireplumber
 
 **Problem:** Closing the lid triggers S3 suspend (`PM: suspend entry (deep)`), but the system never wakes — it cold reboots, losing all open work.
 
-**Root cause:** The kernel defaults to `mem_sleep=deep` (S3 suspend-to-RAM). On Qualcomm X1E/X1P platforms, the INSYDE firmware doesn't properly save/restore power domain state during S3. The system crashes during the suspend sequence. `s2idle` (S0ix) is available but untested on this platform.
+**Root cause:** Both S3 deep and s2idle crash. Detailed testing shows the problem is in the CPU idle phase — device suspend/resume works fine (`pm_test=devices` passes), but when CPUs enter the idle loop, no IRQ can wake them. Three interrelated causes:
+
+1. **PDC wakeup mapping disabled** — `pinctrl-x1e80100.c` has `nwakeirq_map = 0` with a TODO comment. GPIO IRQs (lid, keyboard, touchpad) are not routed through the PDC for wakeup.
+2. **PDC mode wrong** — PDC may be in "secondary controller" mode instead of "pass-through" mode.
+3. **No system power domain idle state** — DTB lacks `domain-idle-states` for the system power domain, so PSCI firmware doesn't configure the wake path.
+
+Qualcomm has posted a 5-patch series (Maulik Shah, March 2026) to fix all three issues — currently in review on LKML.
 
 **How it was fixed:** Disable all suspend paths, configure lid close to lock screen only (display turns off via DPMS):
 
@@ -297,7 +305,7 @@ systemctl --user restart pipewire pipewire-pulse wireplumber
 
 **Behavior:** Lid close → screen off + session locks. Lid open → screen on, lock screen. No suspend, no data loss.
 
-**What Fedora could do:** Default to `s2idle` (or disable suspend) on Snapdragon X platforms until S3 support is fixed upstream. Qualcomm/Linaro are working on s2idle support.
+**What Fedora could do:** Default to disable suspend on Snapdragon X platforms until Qualcomm's PDC patches are merged (~6.21/7.0). Applies to all X1E/X1P devices.
 
 ---
 
@@ -356,6 +364,33 @@ SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-bat", ATTR{charge_control_end_t
 
 ---
 
+### 17. RGB Camera — no CAMSS/CCI nodes in DTB, pm8010 PMIC absent
+
+**Problem:** Camera doesn't work. The Zenbook A14 DTB has no CAMSS, CAMCC, CCI, or CSIPHY device tree nodes. The dedicated camera PMIC (pm8010) is not physically present on the board.
+
+**Root cause:** 7 problems solved iteratively:
+1. No DT nodes → runtime DT overlay via `of_overlay_fdt_apply()` in DKMS module
+2. Overlay -22 (EINVAL) on CCI child nodes → two-phase overlay (CCI disabled in phase 1, enabled in phase 2)
+3. CCI crash `list_add corruption` → added empty `i2c-bus@0` (master[0] was uninitialized)
+4. RPMH regulator not registering → separate `regulators-9` block (parent already probed)
+5. pm8010 absent → power from PM8550B: AVDD/DVDD `vreg_l7b_2p8` (2.8V), DOVDD `vreg_l3m_1p8` (RPMH fire-and-forget)
+6. PLL8 enable timeout → `pm_runtime_get_sync(camcc_dev)` holds CAMCC awake (prevents MMCX power-off)
+7. Image upside down → `rotation = <180>` in DT node
+
+**How it was fixed:** DKMS module `vivobook_cam_fix` v2.0 with two-phase DT overlay, loaded on-demand:
+```bash
+vivobook-camera start   # loads module + restarts wireplumber
+vivobook-camera status  # checks if camera is active
+```
+
+**Why on-demand:** CCI adapters create dynamic I2C buses that shift Geni I2C numbering. Auto-loading at boot breaks keyboard and touchpad. The privacy shutter is purely mechanical (no GPIO/HID event — confirmed by monitoring dmesg during open/close).
+
+**Result:** OV02C10 RGB camera fully working — libcamera, GNOME Snapshot, any PipeWire camera app. IR camera blocked (pm8010 absent, no one upstream has IR working on Snapdragon X Linux).
+
+**What Fedora could do:** Upstream CAMSS patches (Bryan O'Donoghue, Linaro) would eliminate the overlay approach. A proper Vivobook DTB with camera nodes would make this work at boot.
+
+---
+
 ## What Fedora could do upstream — summary
 
 ### High impact (fixes Snapdragon X out-of-the-box)
@@ -368,7 +403,7 @@ SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-bat", ATTR{charge_control_end_t
 ### Medium impact
 
 5. **Mask phantom TPM** on INSYDE Snapdragon X — fixes #8, saves 90s boot time.
-6. **Default to `s2idle` on Snapdragon X** — fixes #13, prevents data-loss crash.
+6. **Disable suspend on Snapdragon X** — fixes #13, prevents data-loss crash (s2idle also broken until PDC patches merge).
 7. **GTK4 Vulkan pool size** — fixes #9, upstream GTK4/Mesa issue.
 
 ### Model-specific
@@ -378,11 +413,11 @@ SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-bat", ATTR{charge_control_end_t
 
 ## Full documentation and code
 
-All fixes, 5 DKMS module source code, setup scripts, and detailed reverse-engineering notes:
+All fixes, 6 DKMS module source code, setup scripts, and detailed reverse-engineering notes:
 
 **https://github.com/pir0c0pter0/fedora-vivobook-x1407q**
 
-- `setup-vivobook.sh` — one-command setup applying all 16 fixes
+- `setup-vivobook.sh` — one-command setup applying all 17 fixes
 - `build-vivobook-iso.sh` — builds pre-patched ISO with everything baked in
 
 ## System info
@@ -396,7 +431,8 @@ Mesa: 25.3.6
 
 ## Related upstream work
 
-- **Camera (CCI/CAMSS):** Bryan O'Donoghue (Linaro) v8 patches in LKML review (Feb 2026). 4 sensors identified (2x OV02C10 RGB + 2x IR). Expected merge ~6.21/6.22.
-- **Suspend:** Qualcomm/Linaro working on s2idle support for X1P platforms.
+- **Camera RGB:** Working via DKMS two-phase DT overlay. IR camera blocked (pm8010 absent).
+- **Camera (upstream):** Bryan O'Donoghue (Linaro) v8 patches in LKML review (Feb 2026). Expected merge ~6.21/6.22.
+- **Suspend (s2idle):** Both S3 and s2idle crash — PDC wakeup disabled in kernel. Qualcomm 5-patch series (Maulik Shah, March 2026) in LKML review. Custom kernel with fix prepared but not built yet.
 - **PCIe race condition:** Upstream fix expected ~6.21, would eliminate WiFi DKMS module.
 - **DTB:** Vivobook X1407QA DTB not yet submitted — depends on camera/sensor patches.
