@@ -83,20 +83,20 @@ header() {
 
 prompt_yn() {
     local msg="$1" default="${2:-S}"
-    local choice
+    local choice=""
     if [[ "$default" == "S" ]]; then
-        read -rp "$(echo -e "$msg [${BOLD}S${NC}/n]: ")" choice </dev/tty
+        read -rp "$(echo -e "$msg [${BOLD}S${NC}/n]: ")" choice </dev/tty || choice=""
         [[ -z "$choice" || "$choice" =~ ^[Ss]$ ]]
     else
-        read -rp "$(echo -e "$msg [S/${BOLD}n${NC}]: ")" choice </dev/tty
+        read -rp "$(echo -e "$msg [S/${BOLD}n${NC}]: ")" choice </dev/tty || choice=""
         [[ "$choice" =~ ^[Ss]$ ]]
     fi
 }
 
 prompt_snd() {
     local msg="$1"
-    local choice
-    read -rp "$(echo -e "$msg [${BOLD}S${NC}/n/d]: ")" choice </dev/tty
+    local choice=""
+    read -rp "$(echo -e "$msg [${BOLD}S${NC}/n/d]: ")" choice </dev/tty || choice="n"
     echo "${choice:-S}"
 }
 
