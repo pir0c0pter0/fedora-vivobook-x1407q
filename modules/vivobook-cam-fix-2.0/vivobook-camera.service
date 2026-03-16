@@ -1,0 +1,26 @@
+[Unit]
+Description=ASUS Vivobook X1407QA RGB Camera (OV02C10)
+# One-shot: load camera module on demand, never at boot
+# WARNING: Do NOT enable this service — camera overlay shifts I2C numbering
+# Use: sudo systemctl start vivobook-camera
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# Load dependencies + camera module
+ExecStart=/sbin/modprobe camcc_x1e80100
+ExecStart=/sbin/modprobe i2c_qcom_cci
+ExecStart=/sbin/modprobe qcom_camss
+ExecStart=/sbin/modprobe ov02c10
+ExecStart=/sbin/modprobe vivobook_cam_fix
+
+# Give sensor time to probe, then restart wireplumber for pipewire to see it
+ExecStartPost=/bin/sleep 3
+ExecStartPost=/bin/sh -c 'loginctl list-sessions --no-legend | while read id rest; do user=$(loginctl show-session "$id" -p Name --value); uid=$(id -u "$user" 2>/dev/null) && XDG_RUNTIME_DIR="/run/user/$uid" su "$user" -c "systemctl --user restart wireplumber" 2>/dev/null; done'
+
+# NOTE: rmmod is dangerous (CAMCC GDSC corruption) — stop = no-op, reboot to unload
+ExecStop=/bin/true
+
+[Install]
+# WantedBy intentionally omitted — NEVER auto-start

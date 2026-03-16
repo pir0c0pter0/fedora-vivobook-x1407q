@@ -1,0 +1,21 @@
+/*
+ * vivobook_cam_phase2.dts — Enable CCI0 and CCI1 (triggers camera probe)
+ *
+ * Applied after phase 1 subsystems (CAMCC, CAMSS) have probed.
+ * Changing status to "okay" triggers CCI driver probe, which creates
+ * I2C adapters and the OV02C10 sensor driver probes automatically.
+ *
+ * Copyright (c) 2026 Pir0c0pter0
+ * SPDX-License-Identifier: GPL-2.0
+ */
+
+/dts-v1/;
+/plugin/;
+
+&{/soc@0/cci@ac15000} {
+	status = "okay";
+};
+
+&{/soc@0/cci@ac16000} {
+	status = "okay";
+};

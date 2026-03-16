@@ -321,6 +321,30 @@ udevadm control --reload-rules 2>/dev/null || true
 echo 80 > /sys/class/power_supply/qcom-battmgr-bat/charge_control_end_threshold 2>/dev/null || true
 log "  Charge limit 80%"
 
+# ─── 17. Câmera RGB — DKMS + systemd on-demand ──────────────────────────────
+log "Câmera RGB (vivobook_cam_fix — on-demand)..."
+# Camera module is version 2.0
+CAM_SRC="/usr/src/vivobook-cam-fix-2.0"
+if [[ -d "$CAM_SRC" ]]; then
+    if ! dkms status 2>/dev/null | grep -q "vivobook-cam-fix.*installed"; then
+        dkms add "$CAM_SRC" 2>/dev/null || true
+        dkms build "vivobook-cam-fix/2.0" && dkms install "vivobook-cam-fix/2.0" && \
+            log "  vivobook-cam-fix compilado e instalado" || \
+            warn "  vivobook-cam-fix FALHOU"
+    else
+        log "  vivobook-cam-fix já instalado"
+    fi
+fi
+
+# Install systemd service (on-demand only, never enabled)
+cp "${SCRIPT_DIR}/modules/vivobook-cam-fix-2.0/vivobook-camera.service" /etc/systemd/system/ 2>/dev/null || true
+systemctl daemon-reload 2>/dev/null || true
+
+# Install user command
+cp "${SCRIPT_DIR}/modules/vivobook-cam-fix-2.0/vivobook-camera" /usr/local/bin/vivobook-camera 2>/dev/null || true
+chmod +x /usr/local/bin/vivobook-camera 2>/dev/null || true
+log "  vivobook-camera command instalado (use: vivobook-camera start)"
+
 # ─── Extras ──────────────────────────────────────────────────────────────────
 
 # Disable auto-updates
@@ -400,6 +424,7 @@ echo "    cpufreq:  cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
 echo "    CDSP:     cat /sys/class/remoteproc/remoteproc1/state"
 echo "    Carga:    cat /sys/class/power_supply/qcom-battmgr-bat/charge_control_end_threshold"
 echo "    Suspend:  systemctl is-enabled suspend.target"
+echo "    Câmera:   vivobook-camera start  (on-demand, não auto-load)"
 echo ""
 info "Fazer logout/login para ativar a extensão de bateria"
 echo ""
@@ -407,4 +432,5 @@ info "Scripts atuais:"
 echo "    build-vivobook-iso.sh  — Criar ISO customizada"
 echo "    setup-vivobook.sh      — Este script (setup pós-install)"
 echo "    vivobook-update        — Updates seguros (sudo vivobook-update)"
+echo "    vivobook-camera        — Ligar câmera RGB sob demanda"
 echo ""

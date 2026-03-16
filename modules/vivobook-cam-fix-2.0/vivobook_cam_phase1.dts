@@ -1,0 +1,453 @@
+/*
+ * vivobook_cam_phase1.dts — Phase 1 DT overlay for ASUS Vivobook X1407QA camera
+ *
+ * Adds camera subsystem nodes with CCI1 DISABLED (phase 2 enables it).
+ * Two-phase approach avoids -22 EINVAL from OF changeset notifier when
+ * CCI driver probes during overlay application.
+ *
+ * Nodes added:
+ *   - vreg_l7b_2p8: PM8550B LDO7 (2.8V) — AVDD + DVDD for OV02C10
+ *   - vreg_l3m_1p8: pm8010 RPMH LDO3 (1.8V) — DOVDD for OV02C10
+ *   - Pinctrl: CCI1 AON (GPIOs 235/236), MCLK4 (GPIO 100), reset (GPIO 237)
+ *   - CAMCC: Camera Clock Controller at 0xade0000
+ *   - CCI1: Camera I2C at 0xac16000 (DISABLED) with OV02C10 on bus 1
+ *   - CAMSS: Camera Subsystem at 0xacb7000 with CSIPHY4 endpoint
+ *
+ * Power topology from decompiled AeoB firmware files (Zenbook A14 patch
+ * by Aleksandrs Vinarskis). Camera module has internal LDO for DVDD 1.2V
+ * from the 2.8V rail — both AVDD and DVDD use vreg_l7b_2p8.
+ *
+ * pm8010 is physically absent (SPMI scan confirms) but RPMH regulators
+ * work fire-and-forget — firmware ARM TF-A handles the request.
+ *
+ * Copyright (c) 2026 Pir0c0pter0
+ * SPDX-License-Identifier: GPL-2.0
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/clock/qcom,x1e80100-camcc.h>
+#include <dt-bindings/clock/qcom,x1e80100-gcc.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/interconnect/qcom,icc.h>
+#include <dt-bindings/interconnect/qcom,x1e80100-rpmh.h>
+#include <dt-bindings/power/qcom,rpmhpd.h>
+#include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+
+/* ------------------------------------------------------------------ */
+/* 1. Regulators                                                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * vreg_l7b_2p8 as real RPMH regulator:
+ * Cannot add ldo7 to existing regulators-0 block because the PM8550B
+ * RPMH driver already probed at boot and won't re-probe for new children.
+ * Creating a separate RPMH regulator instance (regulators-9) with the
+ * same pmic-id "b" — the driver probes it as a new platform device and
+ * registers LDO7. RPMH firmware handles the actual enable/voltage commands.
+ */
+&apps_rsc {
+	regulators-9 {
+		compatible = "qcom,pm8550-rpmh-regulators";
+		qcom,pmic-id = "b";
+
+		vdd-l6-l7-supply = <&vreg_bob1>;
+
+		vreg_l7b_2p8: ldo7 {
+			regulator-name = "vreg_l7b_2p8";
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <2800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+
+	/* pm8010 RPMH regulators — fire-and-forget to firmware */
+	regulators-8 {
+		compatible = "qcom,pm8010-rpmh-regulators";
+		qcom,pmic-id = "m";
+
+		vdd-l3-l4-supply = <&vreg_s4c_1p8>;
+
+		vreg_l3m_1p8: ldo3 {
+			regulator-name = "vreg_l3m_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		/* IR camera DOVDD — 1.8V (kept for future IR probe) */
+		vreg_l4m_1p8: ldo4 {
+			regulator-name = "vreg_l4m_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		/*
+		 * vreg_l7m_2p9 (LDO7 pm8010 "m", 2.9V IR AVDD) REMOVED:
+		 * RPMH returns -ENOTRECOVERABLE on voltage read, killing
+		 * the entire regulators-8 block (including l3m/l4m).
+		 * IR camera AVDD needs separate investigation.
+		 */
+	};
+};
+
+/* ------------------------------------------------------------------ */
+/* 2. Pinctrl states                                                   */
+/* ------------------------------------------------------------------ */
+&tlmm {
+	cci0_default: cci0-default-state {
+		/* CCI0 I2C bus 0 — GPIOs 101/102 */
+		sda0-pins {
+			pins = "gpio101";
+			function = "cci_i2c";
+			bias-pull-up;
+			drive-strength = <2>;
+		};
+		scl0-pins {
+			pins = "gpio102";
+			function = "cci_i2c";
+			bias-pull-up;
+			drive-strength = <2>;
+		};
+		/* CCI0 I2C bus 1 — GPIOs 103/104 */
+		sda1-pins {
+			pins = "gpio103";
+			function = "cci_i2c";
+			bias-pull-up;
+			drive-strength = <2>;
+		};
+		scl1-pins {
+			pins = "gpio104";
+			function = "cci_i2c";
+			bias-pull-up;
+			drive-strength = <2>;
+		};
+	};
+
+	cci1_default: cci1-default-state {
+		/* CCI1 I2C bus 0 — GPIOs 105/106 */
+		sda0-pins {
+			pins = "gpio105";
+			function = "cci_i2c";
+			bias-pull-up;
+			drive-strength = <2>;
+		};
+		scl0-pins {
+			pins = "gpio106";
+			function = "cci_i2c";
+			bias-pull-up;
+			drive-strength = <2>;
+		};
+		/* CCI1 I2C bus 1 (AON) — GPIOs 235/236 */
+		sda1-pins {
+			pins = "gpio235";
+			function = "aon_cci";
+			bias-pull-up;
+			drive-strength = <2>;
+		};
+		scl1-pins {
+			pins = "gpio236";
+			function = "aon_cci";
+			bias-pull-up;
+			drive-strength = <2>;
+		};
+	};
+
+	cam_ir_default: cam-ir-default-state {
+		mclk-pins {
+			pins = "gpio96";
+			function = "cam_mclk";
+			drive-strength = <16>;
+			bias-disable;
+		};
+		reset-n-pins {
+			pins = "gpio109";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-disable;
+		};
+	};
+
+	cam_rgb_default: cam-rgb-default-state {
+		mclk-pins {
+			pins = "gpio100";
+			function = "cam_aon";
+			drive-strength = <16>;
+			bias-disable;
+		};
+		reset-n-pins {
+			pins = "gpio237";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-disable;
+		};
+	};
+};
+
+/* ------------------------------------------------------------------ */
+/* 3-5. CAMCC + CCI1 (disabled) + CAMSS under /soc@0                  */
+/* ------------------------------------------------------------------ */
+&{/soc@0} {
+	#address-cells = <2>;
+	#size-cells = <2>;
+	interrupt-parent = <&intc>;
+
+	/* 3. Camera Clock Controller */
+	camcc: clock-controller@ade0000 {
+		compatible = "qcom,x1e80100-camcc";
+		reg = <0x00 0x0ade0000 0x00 0x20000>;
+		clocks = <&gcc GCC_CAMERA_AHB_CLK>,
+			 <&bi_tcxo_div2>,
+			 <&bi_tcxo_ao_div2>,
+			 <&sleep_clk>;
+		power-domains = <&rpmhpd RPMHPD_MXC>,
+				<&rpmhpd RPMHPD_MMCX>;
+		required-opps = <&rpmhpd_opp_low_svs>,
+				<&rpmhpd_opp_low_svs>;
+		#clock-cells = <1>;
+		#reset-cells = <1>;
+		#power-domain-cells = <1>;
+	};
+
+	/* 4a. CCI0 — for scanning remaining sensors */
+	cci0: cci@ac15000 {
+		compatible = "qcom,x1e80100-cci", "qcom,msm8996-cci";
+		reg = <0x00 0x0ac15000 0x00 0x1000>;
+		interrupts = <GIC_SPI 460 IRQ_TYPE_EDGE_RISING>;
+		clocks = <&camcc CAM_CC_CAMNOC_AXI_RT_CLK>,
+			 <&camcc CAM_CC_CPAS_AHB_CLK>,
+			 <&camcc CAM_CC_CCI_0_CLK>;
+		clock-names = "camnoc_axi", "cpas_ahb", "cci";
+		power-domains = <&camcc CAM_CC_TITAN_TOP_GDSC>;
+		pinctrl-0 = <&cci0_default>;
+		pinctrl-names = "default";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "disabled";
+
+		cci0_i2c0: i2c-bus@0 {
+			reg = <0>;
+			clock-frequency = <1000000>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			/* IR camera: blocked — pm8010 LDO7 (AVDD 2.9V) not
+			 * physically available. RPMH CMD-DB has ldom7 entry but
+			 * write has no effect (pm8010 absent from SPMI). Sensor
+			 * model unknown (QCOM0C99 = ISP auxiliary sensor).
+			 * Needs upstream ISP/camera support or pm8010 enablement. */
+		};
+
+		cci0_i2c1: i2c-bus@1 {
+			reg = <1>;
+			clock-frequency = <1000000>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+	};
+
+	/* 4b. CCI1 — DISABLED (phase 2 enables) */
+	cci1: cci@ac16000 {
+		compatible = "qcom,x1e80100-cci", "qcom,msm8996-cci";
+		reg = <0x00 0x0ac16000 0x00 0x1000>;
+		interrupts = <GIC_SPI 271 IRQ_TYPE_EDGE_RISING>;
+		clocks = <&camcc CAM_CC_CAMNOC_AXI_RT_CLK>,
+			 <&camcc CAM_CC_CPAS_AHB_CLK>,
+			 <&camcc CAM_CC_CCI_1_CLK>;
+		clock-names = "camnoc_axi", "cpas_ahb", "cci";
+		power-domains = <&camcc CAM_CC_TITAN_TOP_GDSC>;
+		pinctrl-0 = <&cci1_default>;
+		pinctrl-names = "default";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "disabled";
+
+		/* i2c-bus@0 required: cci_reset() uses master[0].irq_complete.
+		 * Without this node, master[0] never gets init_completion()
+		 * and the driver crashes with "list_add corruption. prev is NULL".
+		 */
+		cci1_i2c0: i2c-bus@0 {
+			reg = <0>;
+			clock-frequency = <1000000>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+
+		cci1_i2c1: i2c-bus@1 {
+			reg = <1>;
+			clock-frequency = <1000000>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/* OV02C10 RGB front camera */
+			camera@36 {
+				compatible = "ovti,ov02c10";
+				reg = <0x36>;
+
+				reset-gpios = <&tlmm 237 GPIO_ACTIVE_LOW>;
+				pinctrl-0 = <&cam_rgb_default>;
+				pinctrl-names = "default";
+
+				clocks = <&camcc CAM_CC_MCLK4_CLK>;
+				assigned-clocks = <&camcc CAM_CC_MCLK4_CLK>;
+				assigned-clock-rates = <19200000>;
+
+				orientation = <0>; /* front-facing */
+				rotation = <180>;
+
+				avdd-supply = <&vreg_l7b_2p8>;
+				dvdd-supply = <&vreg_l7b_2p8>;
+				dovdd-supply = <&vreg_l3m_1p8>;
+
+				port {
+					ov02c10_ep: endpoint {
+						data-lanes = <1 2>;
+						link-frequencies = /bits/ 64 <400000000>;
+						remote-endpoint = <&csiphy4_ep>;
+					};
+				};
+			};
+		};
+	};
+
+	/* 5. CAMSS — Camera Subsystem (ISP pipeline) */
+	camss: isp@acb7000 {
+		compatible = "qcom,x1e80100-camss";
+
+		reg = <0x00 0x0acb7000 0x00 0x2000>,
+		      <0x00 0x0acb9000 0x00 0x2000>,
+		      <0x00 0x0acbb000 0x00 0x2000>,
+		      <0x00 0x0acc6000 0x00 0x1000>,
+		      <0x00 0x0acca000 0x00 0x1000>,
+		      <0x00 0x0acb6000 0x00 0x1000>,
+		      <0x00 0x0ace4000 0x00 0x1000>,
+		      <0x00 0x0ace6000 0x00 0x1000>,
+		      <0x00 0x0ace8000 0x00 0x1000>,
+		      <0x00 0x0acec000 0x00 0x4000>,
+		      <0x00 0x0acf6000 0x00 0x1000>,
+		      <0x00 0x0acf7000 0x00 0x1000>,
+		      <0x00 0x0acf8000 0x00 0x1000>,
+		      <0x00 0x0ac62000 0x00 0x4000>,
+		      <0x00 0x0ac71000 0x00 0x4000>,
+		      <0x00 0x0acc7000 0x00 0x2000>,
+		      <0x00 0x0accb000 0x00 0x2000>;
+
+		reg-names = "csid0", "csid1", "csid2",
+			    "csid_lite0", "csid_lite1", "csid_wrapper",
+			    "csiphy0", "csiphy1", "csiphy2", "csiphy4",
+			    "csitpg0", "csitpg1", "csitpg2",
+			    "vfe0", "vfe1", "vfe_lite0", "vfe_lite1";
+
+		interrupts = <GIC_SPI 464 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 466 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 431 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 468 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 359 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 477 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 478 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 479 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 122 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 465 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 467 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 469 IRQ_TYPE_EDGE_RISING>,
+			     <GIC_SPI 360 IRQ_TYPE_EDGE_RISING>;
+
+		interrupt-names = "csid0", "csid1", "csid2",
+				  "csid_lite0", "csid_lite1",
+				  "csiphy0", "csiphy1", "csiphy2", "csiphy4",
+				  "vfe0", "vfe1", "vfe_lite0", "vfe_lite1";
+
+		clocks = <&camcc CAM_CC_CAMNOC_AXI_NRT_CLK>,
+			 <&camcc CAM_CC_CAMNOC_AXI_RT_CLK>,
+			 <&camcc CAM_CC_CORE_AHB_CLK>,
+			 <&camcc CAM_CC_CPAS_AHB_CLK>,
+			 <&camcc CAM_CC_CPAS_FAST_AHB_CLK>,
+			 <&camcc CAM_CC_CPAS_IFE_0_CLK>,
+			 <&camcc CAM_CC_CPAS_IFE_1_CLK>,
+			 <&camcc CAM_CC_CPAS_IFE_LITE_CLK>,
+			 <&camcc CAM_CC_CPHY_RX_CLK_SRC>,
+			 <&camcc CAM_CC_CSID_CLK>,
+			 <&camcc CAM_CC_CSID_CSIPHY_RX_CLK>,
+			 <&camcc CAM_CC_CSIPHY0_CLK>,
+			 <&camcc CAM_CC_CSI0PHYTIMER_CLK>,
+			 <&camcc CAM_CC_CSIPHY1_CLK>,
+			 <&camcc CAM_CC_CSI1PHYTIMER_CLK>,
+			 <&camcc CAM_CC_CSIPHY2_CLK>,
+			 <&camcc CAM_CC_CSI2PHYTIMER_CLK>,
+			 <&camcc CAM_CC_CSIPHY4_CLK>,
+			 <&camcc CAM_CC_CSI4PHYTIMER_CLK>,
+			 <&gcc GCC_CAMERA_HF_AXI_CLK>,
+			 <&gcc GCC_CAMERA_SF_AXI_CLK>,
+			 <&camcc CAM_CC_IFE_0_CLK>,
+			 <&camcc CAM_CC_IFE_0_FAST_AHB_CLK>,
+			 <&camcc CAM_CC_IFE_1_CLK>,
+			 <&camcc CAM_CC_IFE_1_FAST_AHB_CLK>,
+			 <&camcc CAM_CC_IFE_LITE_CLK>,
+			 <&camcc CAM_CC_IFE_LITE_AHB_CLK>,
+			 <&camcc CAM_CC_IFE_LITE_CPHY_RX_CLK>,
+			 <&camcc CAM_CC_IFE_LITE_CSID_CLK>;
+
+		clock-names = "camnoc_nrt_axi", "camnoc_rt_axi", "core_ahb",
+			      "cpas_ahb", "cpas_fast_ahb",
+			      "cpas_vfe0", "cpas_vfe1", "cpas_vfe_lite",
+			      "cphy_rx_clk_src", "csid", "csid_csiphy_rx",
+			      "csiphy0", "csiphy0_timer",
+			      "csiphy1", "csiphy1_timer",
+			      "csiphy2", "csiphy2_timer",
+			      "csiphy4", "csiphy4_timer",
+			      "gcc_axi_hf", "gcc_axi_sf",
+			      "vfe0", "vfe0_fast_ahb",
+			      "vfe1", "vfe1_fast_ahb",
+			      "vfe_lite", "vfe_lite_ahb",
+			      "vfe_lite_cphy_rx", "vfe_lite_csid";
+
+		interconnects = <&gem_noc MASTER_APPSS_PROC QCOM_ICC_TAG_ACTIVE_ONLY
+				 &config_noc SLAVE_CAMERA_CFG QCOM_ICC_TAG_ACTIVE_ONLY>,
+				<&mmss_noc MASTER_CAMNOC_HF QCOM_ICC_TAG_ALWAYS
+				 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>,
+				<&mmss_noc MASTER_CAMNOC_SF QCOM_ICC_TAG_ALWAYS
+				 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>,
+				<&mmss_noc MASTER_CAMNOC_ICP QCOM_ICC_TAG_ALWAYS
+				 &mc_virt SLAVE_EBI1 QCOM_ICC_TAG_ALWAYS>;
+		interconnect-names = "ahb", "hf_mnoc", "sf_mnoc", "sf_icp_mnoc";
+
+		iommus = <&apps_smmu 0x800 0x60>,
+			 <&apps_smmu 0x860 0x60>,
+			 <&apps_smmu 0x1860 0x60>,
+			 <&apps_smmu 0x18e0 0x00>,
+			 <&apps_smmu 0x19a0 0x20>;
+
+		power-domains = <&camcc CAM_CC_IFE_0_GDSC>,
+				<&camcc CAM_CC_IFE_1_GDSC>,
+				<&camcc CAM_CC_TITAN_TOP_GDSC>;
+		power-domain-names = "ife0", "ife1", "top";
+
+		vdd-csiphy-0p8-supply = <&vreg_l2c_0p8>;
+		vdd-csiphy-1p2-supply = <&vreg_l1c_1p2>;
+
+		status = "okay";
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			/* CSIPHY0 for IR camera — blocked (see cci0_i2c0 comment) */
+
+			/* CSIPHY4 — connected to OV02C10 RGB */
+			port@3 {
+				reg = <3>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				csiphy4_ep: endpoint@4 {
+					reg = <4>;
+					clock-lanes = <7>;
+					data-lanes = <0 1>;
+					remote-endpoint = <&ov02c10_ep>;
+				};
+			};
+		};
+	};
+};

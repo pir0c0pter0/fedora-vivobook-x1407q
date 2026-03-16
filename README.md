@@ -18,12 +18,14 @@
 | **Bluetooth** | FastConnect 6900 (UART) |
 | **Keyboard** | ASUS I2C-HID, VID `0x0b05`, PID `0x4543`, bus 4 (`b94000`), addr `0x3a` |
 | **Touchpad** | ELAN I2C-HID clickpad, VID `0x04f3`, PID `0x3313`, bus 1 (`b80000`), addr `0x15` |
-| **Camera** | FHD IR module: 2× OV02C10 RGB (2MP) + 2× IR sensors (Windows Hello), CCI1, CSIPHY4 |
+| **Camera RGB** | OV02C10 (2MP, 1080p) on CCI1 bus 1 (AON), addr `0x36`, CSIPHY4, MCLK4 19.2MHz |
+| **Camera IR** | 1× IR sensor (Windows Hello), pm8010 PMIC absent — not functional |
+| **Privacy shutter** | Mechanical slide cover — no electronic switch, no GPIO event |
 | **Battery** | 50Wh Li-ion X321-42, driver `qcom_battmgr` via `pmic_glink` |
 
 ## Achievements
 
-Starting from a laptop that **refused to boot** Linux, every fix was reverse-engineered from scratch — no upstream support, no documentation, no community guides for this model.
+Starting from a laptop that **refused to boot** Linux, every fix was reverse-engineered from scratch — no upstream support, no documentation, no community guides for this model. **17 achievements** and counting.
 
 | # | Achievement | Method | Impact |
 |---|------------|--------|--------|
@@ -43,8 +45,9 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 14 | **CPU frequency scaling** | Autoload in-tree `scmi_cpufreq` module | CPU scales 710MHz–2.96GHz, battery savings + thermal protection |
 | 15 | **CDSP / NPU online** | CDSP firmware in initramfs | Hexagon Compute DSP boots at early boot — fastrpc compute contexts available |
 | 16 | **Battery charge limit** | udev rule sets 80% threshold | Charge stops at 80%, starts at 50% — extends battery lifespan |
+| 17 | **RGB camera working** | DKMS module `vivobook_cam_fix` (two-phase DT overlay) | OV02C10 on CCI1 — libcamera + Snapshot working, on-demand via `vivobook-camera start` |
 
-**5 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
+**6 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
 
 ## Current Status
 
@@ -64,12 +67,13 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **NVMe** | :white_check_mark: Working | PCIe 4.0 |
 | **Audio** | :white_check_mark: Working | UCM2 regex fix (see [Audio Fix](#12-audio-fix)) |
 | **Lid close** | :white_check_mark: Working | Lid close = screen off only, no suspend (see [Lid Close Fix](#13-lid-close-fix)) |
-| **Suspend (S3)** | :warning: Broken | S3 deep suspend crashes → cold reboot. Disabled via masked targets. `s2idle` untested ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4)) |
+| **Suspend (S3/s2idle)** | :warning: Broken | S3 deep and s2idle both crash — PDC wakeup mapping disabled in kernel, Qualcomm patches in review. Custom kernel with fix prepared but not yet built ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4)) |
 | **cpufreq** | :white_check_mark: Working | SCMI cpufreq via autoload — 710MHz–2.96GHz, schedutil governor (see [CPU Frequency Fix](#14-cpu-frequency-fix)) |
 | **CDSP / NPU** | :white_check_mark: Working | CDSP firmware in initramfs — Hexagon compute online (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
 | **Charge control** | :white_check_mark: Working | Charge limit 80% via udev rule (see [Charge Control Fix](#16-battery-charge-control-fix)) |
 | **USB-C DP alt-mode** | :white_check_mark: Working | Both ports, tested DP-2 up to 2560×1600. Device link errors at boot are cosmetic ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
-| **Camera** | :x: Not working | 4 sensors identified, needs kernel patches (see [Camera Research](#camera-research)) |
+| **Camera RGB** | :white_check_mark: Working | OV02C10 via DKMS overlay, on-demand `vivobook-camera start` (see [Camera Fix](#17-rgb-camera-fix)) |
+| **Camera IR** | :x: Not working | pm8010 PMIC physically absent — sensor has no power (see [Camera Research](#camera-research)) |
 
 ---
 
@@ -816,6 +820,59 @@ cat /sys/class/power_supply/qcom-battmgr-bat/charge_control_start_threshold  # �
 
 ---
 
+### 17. RGB Camera Fix
+
+**Problem:** The Zenbook A14 DTB has no CAMSS, CAMCC, CCI, or CSIPHY device tree nodes. INSYDE firmware blocks all DTB override methods. Without these subsystems, the OV02C10 camera sensor has no I2C bus, no clocks, no ISP pipeline, and no power.
+
+**Root cause:** 7 problems solved iteratively:
+
+1. **No DT nodes** — overlay via `of_overlay_fdt_apply()` in a DKMS module
+2. **Overlay -22 (EINVAL)** on CCI child nodes — solved with two-phase overlay (CCI disabled in phase 1, enabled in phase 2)
+3. **CCI crash `list_add corruption`** — CCI1 only had `i2c-bus@1`, master[0] never initialized — added empty `i2c-bus@0`
+4. **Regulator not registering** — RPMH parent already probed, overlay child ignored — created separate `regulators-9` block
+5. **pm8010 absent** — camera PMIC doesn't exist physically. Power topology from AeoB firmware: AVDD/DVDD via `vreg_l7b_2p8` (PM8550B), DOVDD via `vreg_l3m_1p8` (RPMH fire-and-forget)
+6. **`cam_cc_pll8 failed to enable!`** — runtime PM suspends CAMCC after probe, MMCX powers off, all PLL registers lost (L=0). Fix: `pm_runtime_get_sync(camcc_dev)` holds CAMCC awake
+7. **Image upside down** — added `rotation = <180>` to sensor DT node
+
+**Solution:** DKMS module `vivobook_cam_fix` v2.0 with two-phase DT overlay, loaded on-demand:
+
+```bash
+# Load camera (creates /dev/video0, /dev/media0, etc.)
+vivobook-camera start
+
+# Or manually:
+sudo systemctl start vivobook-camera
+
+# Check status
+vivobook-camera status
+```
+
+**Why on-demand (not auto-load):** CCI adapters create dynamic I2C buses that shift Geni I2C bus numbering. Auto-loading at boot could break keyboard and touchpad modules. The privacy shutter is purely mechanical (no GPIO/HID event), so software detection of open/close is not possible.
+
+**What works:**
+- `cam --capture=1` (libcamera direct)
+- GNOME Snapshot app (via PipeWire/WirePlumber)
+- Any V4L2/libcamera/PipeWire app
+
+**What doesn't work:**
+- `rmmod vivobook_cam_fix` — CAMCC GDSC corruption on re-probe, kernel crash. Unload only via reboot
+- IR camera — pm8010 PMIC physically absent, sensor has no power (see [Camera Research](#camera-research))
+
+| Property | Value |
+|----------|-------|
+| **Sensor** | OmniVision OV02C10, 2MP, 1920×1080 |
+| **Bus** | CCI1 bus 1 (AON), GPIOs 235/236, addr `0x36` |
+| **Clock** | `cam_cc_mclk4_clk` 19.2MHz, GPIO 100 |
+| **Reset** | GPIO 237 (active low) |
+| **Power** | AVDD/DVDD: `vreg_l7b_2p8` (2.8V), DOVDD: `vreg_l3m_1p8` (1.8V) |
+| **Privacy LED** | GPIO 110 |
+| **Privacy shutter** | Mechanical slide — no electronic event |
+| **DKMS module** | `vivobook-cam-fix` v2.0 in `/usr/src/vivobook-cam-fix-2.0/` |
+| **Service** | `vivobook-camera.service` (oneshot, on-demand, never enabled) |
+| **Command** | `vivobook-camera start\|status` |
+
+---
+
 ## System Configuration Summary
 
 ### Files modified on the system
@@ -846,12 +903,17 @@ cat /sys/class/power_supply/qcom-battmgr-bat/charge_control_start_threshold  # �
     vivobook-kbd-fix-1.0/      → DKMS module source
     vivobook-bl-fix-1.0/       → DKMS module source
     vivobook-hotkey-fix-1.0/   → DKMS module source
+    vivobook-cam-fix-2.0/      → DKMS camera module (on-demand, NOT auto-loaded)
+
+/etc/systemd/system/
+    vivobook-camera.service    → On-demand camera loader (never enabled)
 
 /usr/local/lib64/
     vk_pool_fix.so             → Vulkan pool fix library
 
 /usr/local/bin/
     ptyxis-fixed               → Wrapper script with LD_PRELOAD
+    vivobook-camera            → Camera on-demand start/status command
 
 ~/.local/share/gnome-shell/extensions/battery-time@wifiteste/
     extension.js               → Battery time GNOME extension
@@ -912,83 +974,77 @@ See [GUIA-POS-INSTALACAO.md](GUIA-POS-INSTALACAO.md) for details.
 
 ## Camera Research
 
-### Hardware — 4 Sensors
+### Hardware — Sensors
 
-The Vivobook 14 X1407QA has an FHD IR camera module with **4 sensors**:
+The Vivobook 14 X1407QA has an FHD IR camera module. DSDT analysis (Zenbok A14 ACPI tables) shows **2 active camera devices** (CAMF + CAMI). The 4 physical lenses are: RGB, IR flood, IR dot projector, and auxiliary lens (same PCB, single controller).
 
-| Sensor | Type | Purpose | I2C Address | Status |
-|--------|------|---------|-------------|--------|
-| **OV02C10** | RGB | Main webcam (2MP, 1080p) | `0x36` on CCI1 | Driver exists in kernel (`ov02c10.ko`) |
-| **OV02C10** | RGB | Secondary (likely wide-angle or depth) | TBD | Same driver |
-| **IR sensor** | IR | Windows Hello flood illuminator | TBD | No Linux driver |
-| **IR sensor** | IR | Windows Hello dot projector | TBD | No Linux driver |
+| Sensor | Type | Status | Details |
+|--------|------|--------|---------|
+| **OV02C10** | RGB | :white_check_mark: **Working** | CCI1 bus 1 (AON), addr `0x36`, MCLK4, libcamera + Snapshot OK |
+| **IR sensor** | IR | :x: **Blocked** | pm8010 PMIC physically absent — AVDD (LDO7_M 2.9V) has no power source |
 
-### Camera Pipeline (what's needed)
+**Privacy shutter:** Mechanical slide cover only — no GPIO, no HID event, no software detection possible. Confirmed by monitoring dmesg/journalctl during open/close cycles.
 
-The camera uses Qualcomm's CAMSS (Camera Subsystem), NOT regular I2C/USB. The full pipeline:
+### Camera Pipeline (working)
 
 ```
-OV02C10 sensor → CCI1 (I2C control) → CSIPHY4 (MIPI CSI-2 PHY) → CSID (decoder) → VFE/IFE (image front-end) → V4L2 → libcamera → PipeWire
+OV02C10 → CCI1 bus 1 (I2C) → CSIPHY4 (MIPI CSI-2) → CSID → VFE/IFE → V4L2 → libcamera → PipeWire → App
 ```
 
-**Required kernel components:**
+All components loaded via DKMS two-phase DT overlay (`vivobook_cam_fix` v2.0):
 
-| Component | Module | Compatible | Status in kernel 6.19 |
-|-----------|--------|------------|----------------------|
-| Camera Clock Controller | `camcc-x1e80100.ko` | `qcom,x1e80100-camcc` | Module exists, no DT node |
-| Camera Subsystem | `qcom-camss.ko` | `qcom,x1e80100-camss` | Module exists, no DT node |
-| CCI (I2C for camera) | `v4l2-cci.ko` | — | Module exists |
-| OV02C10 sensor | `ov02c10.ko` | `ovti,ov02c10` | Module exists |
-| CSIPHY | (part of camss) | — | 4x CSIPHY (DPHY mode, 2.5Gbps, 4-lane) |
+| Component | Module | Status |
+|-----------|--------|--------|
+| Camera Clock Controller | `camcc-x1e80100` | Probes OK, held awake via `pm_runtime_get_sync` |
+| Camera Subsystem | `qcom-camss` | Probes OK — CSID, VFE, CSIPHY registered |
+| CCI (camera I2C) | `i2c-qcom-cci` | Probes OK — CCI1 bus 1 active |
+| OV02C10 sensor | `ov02c10` | Probes OK — `/dev/video0`, `/dev/media0` |
 
-### What was tested (DKMS DT overlay approach)
+### Problems solved (v1.0 → v2.0)
 
-A DKMS module (`vivobook_cam_fix`) applies a DT overlay via `of_overlay_fdt_apply()` at runtime. Results:
+| # | Problem | Root cause | Fix |
+|---|---------|-----------|-----|
+| 1 | No DT nodes for camera | Zenbook A14 DTB has no CAMSS/CCI | Runtime DT overlay via `of_overlay_fdt_apply()` |
+| 2 | Overlay -22 (EINVAL) | CCI probe during overlay apply conflicts with changeset | Two-phase overlay: CCI disabled in phase 1, enabled in phase 2 |
+| 3 | CCI crash `list_add corruption` | CCI1 only had `i2c-bus@1`, master[0] uninitialized | Added empty `i2c-bus@0` |
+| 4 | Regulator not registering | RPMH parent already probed, ignores overlay children | Separate `regulators-9` block |
+| 5 | Sensor no power | pm8010 absent | Power from PM8550B: AVDD/DVDD `vreg_l7b_2p8`, DOVDD `vreg_l3m_1p8` (RPMH fire-and-forget) |
+| 6 | PLL8 enable timeout (-110) | Runtime PM suspends CAMCC → MMCX off → PLL registers lost | `pm_runtime_get_sync(camcc_dev)` holds CAMCC awake |
+| 7 | Image upside down | Sensor mounted 180° | `rotation = <180>` in DT node |
 
-| Component | Status |
-|-----------|--------|
-| CAMCC (camera clocks) | Probes OK — all clocks registered |
-| CCI0 + CCI1 (camera I2C) | Probes OK — 4 buses created, but overlay fails -22 on `i2c-bus` child nodes |
-| CAMSS (ISP pipeline) | Probes OK — CSID, VFE, CSIPHY registered, IOMMU group |
-| pm8010 RPMH regulators | Register via overlay under `&apps_rsc`, report correct voltages, but pm8010 is physically absent |
-| OV02C10 sensor | **I2C timeout** — sensor doesn't respond on any CCI bus |
+### IR Camera — Blocked
 
-**Key finding:** Even with all subsystems probing successfully, the OV02C10 sensor at 0x36 never responds. The pm8010 camera PMIC is not physically present (SPMI scan confirms), so RPMH regulator commands go nowhere.
+| Test | Result |
+|------|--------|
+| Replace AVDD with `vreg_l7b_2p8` (PM8550B) | Regulator OK but wrong physical wire — sensor NACK (-ENXIO) |
+| RPMH direct write via `cmd_db_read_addr("ldom7")` | Write accepted (addr 0x41600) but no real voltage — pm8010 doesn't exist |
+| `regulator-fixed` dummy + scan all CCI buses | All buses empty at all addresses |
 
-**Side effect:** CCI adapters create dynamic I2C buses (i2c-0 to i2c-3) that shift all Geni I2C bus numbers. The keyboard module was updated to find its adapter by DT path instead of fixed bus number.
+**Conclusion:** pm8010 is in CMD-DB (from reference design) but not physically on the board. No one upstream has IR camera working on Snapdragon X Linux.
 
-### Why it doesn't work
+**Future paths:** (a) wait for upstream ISP support (Spectra 695), (b) find alternative LDO on the board, (c) extract DSDT from Windows laptop with same SoC.
 
-1. **No camera nodes in DTB** — The Zenbook A14 DTB we use has NO CAMSS, CAMCC, CCI, or CSIPHY device tree nodes
-2. **INSYDE blocks DTB override** — Can't add nodes via GRUB/EFI (7 methods tested, all failed)
-3. **pm8010 camera PMIC absent** — The dedicated camera PMIC is not physically present on the Vivobook (confirmed via SPMI bus scan). Power topology for the camera is unknown
-4. **Overlay apply error -22** — DT overlay changeset notifier returns EINVAL on CCI `i2c-bus` child nodes
-5. **Patches not merged upstream** — Bryan O'Donoghue (Linaro) has a [v8 patch series (18 patches)](https://lkml.org/lkml/2026/2/25/1157) adding x1e80100 CAMSS to the kernel, still in review on LKML as of Feb 2026
+### AeoB Firmware Data
 
-### Zenbook A14 camera status (same die)
+**CAMF (RGB Front — Purwa variant):**
 
-From [alexVinarskis/linux-x1e80100-zenbook-a14](https://github.com/alexVinarskis/linux-x1e80100-zenbook-a14):
+| Property | Value |
+|----------|-------|
+| AVDD + DVDD | `vreg_l7b_2p8` (PM8550B LDO7, 2.8V) — module has internal LDO for DVDD 1.2V |
+| DOVDD | `vreg_l3m_1p8` (pm8010 LDO3, 1.8V) — RPMH fire-and-forget works |
+| Clock | `cam_cc_mclk4_clk` (MCLK4, GPIO 100) |
+| Reset | GPIO 237 (active low) |
+| CCI | Bus 1 AON (GPIOs 235/236) |
+| LED | GPIO 110 |
 
-- Patch: `0015-arm64-dts-qcom-x1-asus-zenbook-a14-Add-on-OV02C10-RG.patch`
-- **Stable on Hamoa (X1E variant)**
-- **NOT fully working on Purwa (X1P variant)** ← our die!
-- Needs Bryan/Linaro's custom kernel tree (not mainline)
-- RGB sensor only (IR sensors not supported in Linux yet)
+**CAMI (IR Camera — generic MTP, not Purwa-specific):**
 
-### Sensor connection map (from Zenbook A14 patch)
-
-```
-OV02C10 RGB sensor
-├── I2C: CCI1, address 0x36
-├── MIPI CSI: CSIPHY4, data lanes 1+2
-├── Clock: CAM_CC_MCLK4_CLK @ 19.2 MHz
-├── Reset: GPIO 237 (active low)
-├── MCLK pin: GPIO 100
-├── Power: AVDD/DVDD 2.8V (vreg_l7b_2p8) + DOVDD 1.8V (vreg_l3m_1p8)
-├── CSIPHY power: 0.8V (vreg_l2c_0p8) + 1.2V (vreg_l1c_1p2)
-├── Link frequency: 400 MHz
-└── Privacy LED: GPIO 110
-```
+| Property | Value |
+|----------|-------|
+| AVDD | `vreg_l7m` (pm8010 LDO7, 2.9V) — **BLOCKED: pm8010 absent** |
+| DOVDD | `vreg_l4m` (pm8010 LDO4, 1.8V) |
+| Clock | `cam_cc_mclk0_clk` (MCLK0, GPIO 96) |
+| Reset | GPIO 109 (active low) |
 
 ### Upstream patch status
 
@@ -998,22 +1054,6 @@ OV02C10 RGB sensor
 | [x1e/Hamoa camera DTSI](https://lkml.org/lkml/2026/2/26/1238) | Bryan O'Donoghue | v1 (11 patches) | linux-next | In review (Feb 2026) |
 | [CAMSS driver for X1 Elite](https://lore.kernel.org/all/20250314-b4-media-comitters-next-25-03-13-x1e80100-camss-driver-v2-7-d163d66fcc0d@linaro.org/T/) | Bryan O'Donoghue | v2 (7 patches) | media-committers/next | In review |
 | [ov08x40 on x1e80100 CRD](https://lwn.net/Articles/992466/) | Bryan O'Donoghue | — | — | Merged/WIP |
-
-### What we can do
-
-| Option | Effort | Risk | Notes |
-|--------|--------|------|-------|
-| **Wait for upstream merge** | None | Low | Patches at v8, likely kernel ~6.21 or 6.22. Purwa (X1P) support may take longer |
-| **Build custom kernel** | High | Medium | Apply Bryan/Linaro patches to Fedora's kernel source. Purwa still "not fully working" |
-| **Extract camera firmware from Windows** | Medium | N/A | Windows was erased. Would need reinstall or another X1407QA with Windows |
-| **DKMS approach** | Very High | High | Would need to register entire CAMSS pipeline from a module — technically possible but extremely complex |
-
-### Missing info (need Windows or hardware inspection)
-
-- Exact sensor models for IR cameras (likely OmniVision or Samsung IR sensors)
-- CCI bus assignment for 2nd RGB sensor and IR sensors
-- CSIPHY connections for non-primary sensors
-- Camera firmware requirements (OV02C10 doesn't need external firmware, but IR sensors might)
 
 ---
 
@@ -1054,6 +1094,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 | x1e80100 CAMSS (camera subsystem) | v8 by Bryan O'Donoghue (Linaro), 18 patches | ~6.21/6.22 |
 | x1e/Hamoa camera DTSI | v1 by Bryan O'Donoghue, 11 patches | ~6.21/6.22 |
 | OV02C10 sensor driver | Merged (Hans de Goede) | 6.19 (available) |
+| PDC wakeup + s2idle | v1 by Maulik Shah (Qualcomm), 5 patches | ~6.21/7.0 |
 
 ---
 
@@ -1062,7 +1103,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 ```
 .
 ├── build-vivobook-iso.sh          # ISO builder — download, patch, flash
-├── setup-vivobook.sh              # Post-install — apply all 16 fixes
+├── setup-vivobook.sh              # Post-install — apply all 17 fixes
 ├── vivobook-update.sh             # Safe update manager
 ├── extract-qcom-firmware.sh       # Extract firmware from Windows
 ├── install-battery-time-ext.sh    # GNOME battery time extension
@@ -1075,7 +1116,17 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 │   └── research/                  # Hardware research notes
 │       ├── BRIGHTNESS-FIX-STATUS.md
 │       ├── BRIGHTNESS-RESEARCH.md
-│       └── CAMERA_STATUS.md
+│       ├── CAMERA_STATUS.md
+│       └── 2026-03-16-s2idle-suspend-fix.md
+├── modules/
+│   └── vivobook-cam-fix-2.0/     # Camera DKMS module + systemd service
+│       ├── vivobook_cam_fix.c
+│       ├── vivobook_cam_phase1.dts
+│       ├── vivobook_cam_phase2.dts
+│       ├── vivobook-camera.service
+│       ├── vivobook-camera
+│       ├── Makefile
+│       └── dkms.conf
 └── CLAUDE.md                      # AI assistant project rules
 ```
 
@@ -1085,8 +1136,9 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **Audio**: UCM2 fix modifies system file — will be overwritten by `alsa-ucm-conf` updates (needs upstream PR)
 - **GPU**: Firmware must be in initramfs for early loading. SELinux may block `.xz` firmware (`setenforce 0` as workaround)
 - **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
-- **Camera**: 4 sensors (2x OV02C10 RGB + 2x IR) identified but not functional — CAMSS/CCI/CSIPHY nodes missing from DTB, patches in review upstream (see [Camera Research](#camera-research))
-- **Suspend (S3)**: Deep suspend crashes — cold reboot required. All suspend targets masked, lid close = screen off only. `s2idle` untested ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
+- **Camera RGB**: Working on-demand (`vivobook-camera start`). Not auto-loaded at boot to avoid I2C bus renumbering. `rmmod` causes CAMCC GDSC corruption — reboot to unload (see [Camera Fix](#17-rgb-camera-fix))
+- **Camera IR**: pm8010 PMIC physically absent — sensor has no power. No one upstream has IR camera working on Snapdragon X Linux (see [Camera Research](#camera-research))
+- **Suspend (S3/s2idle)**: Both crash — PDC wakeup mapping disabled in kernel (`nwakeirq_map = 0`), system power domain has no idle state. Qualcomm patches (Maulik Shah, 5-patch series) in review on LKML. Custom kernel with fix prepared but build incomplete ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
 - **~~cpufreq~~**: Fixed — `scmi_cpufreq` autoload via `/etc/modules-load.d/` ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
 - **~~CDSP/NPU offline~~**: Fixed — firmware in initramfs (see [CDSP/NPU Fix](#15-cdspnpu-fix))
 - **~~Battery charge control~~**: Fixed — udev rule sets 80% charge limit (see [Charge Control Fix](#16-battery-charge-control-fix))

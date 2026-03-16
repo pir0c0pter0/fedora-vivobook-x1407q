@@ -1,0 +1,33 @@
+#!/bin/bash
+# vivobook-camera — Start/check RGB camera on ASUS Vivobook X1407QA
+# Usage: vivobook-camera [start|status]
+
+case "${1:-start}" in
+    start)
+        if lsmod | grep -q vivobook_cam_fix; then
+            echo "Camera already loaded. Use 'snapshot' or any camera app."
+            exit 0
+        fi
+        echo "Loading camera module (OV02C10)..."
+        sudo systemctl start vivobook-camera.service
+        if [ $? -eq 0 ] && ls /dev/video* &>/dev/null; then
+            echo "Camera ready. Open Snapshot or any camera app."
+        else
+            echo "Error loading camera. Check: sudo dmesg | grep vivobook_cam"
+            exit 1
+        fi
+        ;;
+    status)
+        if lsmod | grep -q vivobook_cam_fix; then
+            echo "Camera: LOADED"
+            ls /dev/video* /dev/media* 2>/dev/null
+            cam -l 2>/dev/null
+        else
+            echo "Camera: NOT LOADED (run 'vivobook-camera start')"
+        fi
+        ;;
+    *)
+        echo "Usage: vivobook-camera [start|status]"
+        exit 1
+        ;;
+esac
