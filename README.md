@@ -68,7 +68,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **cpufreq** | :white_check_mark: Working | SCMI cpufreq via autoload — 710MHz–2.96GHz, schedutil governor (see [CPU Frequency Fix](#14-cpu-frequency-fix)) |
 | **CDSP / NPU** | :white_check_mark: Working | CDSP firmware in initramfs — Hexagon compute online (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
 | **Charge control** | :white_check_mark: Working | Charge limit 80% via udev rule (see [Charge Control Fix](#16-battery-charge-control-fix)) |
-| **USB-C DP alt-mode** | :white_check_mark: Working | Working on both usb c |
+| **USB-C DP alt-mode** | :white_check_mark: Working | Both ports, tested DP-2 up to 2560×1600. Device link errors at boot are cosmetic ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
 | **Camera** | :x: Not working | 4 sensors identified, needs kernel patches (see [Camera Research](#camera-research)) |
 
 ---
@@ -1219,7 +1219,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **cpufreq**: No CPU frequency scaling — SCMI perf domain fails to register OPP table (`Failed to add opps_by_lvl at 2956800 for NCC1`). CPU runs at fixed frequency, no kernel thermal throttling ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
 - **~~CDSP/NPU offline~~**: Fixed — firmware in initramfs, CDSP boots at early boot (see [CDSP/NPU Fix](#15-cdspnpu-fix))
 - **~~Battery charge control~~**: Fixed — udev rule sets 80% charge limit, firmware accepts writes (see [Charge Control Fix](#16-battery-charge-control-fix)). Technology string "OOD" is cosmetic.
-- **USB-C device links**: pmic_glink fails to link with PTN3222 retimers and USB controllers. Data/charging works, DP alt-mode untested ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6))
+- **~~USB-C device links~~**: Cosmetic — pmic_glink logs `Failed to create device link (0x180)` for PS8833 retimers and USB controllers at boot. Flag `0x180` = `DL_FLAG_INFERRED | DL_FLAG_SYNC_STATE_ONLY` (fw_devlink proxy links). All functionality works: USB data, charging, DP alt-mode on both ports. Upstream fix expected with proper PS8830/PS8833 retimer driver ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6))
 - **1 unknown I2C device** on bus 4: address `0x5b` (0x43 and 0x76 not responding — may be camera sensors on CCI, not regular I2C)
 
 ## Upstream References
