@@ -209,6 +209,16 @@ systemctl mask packagekit.service 2>/dev/null || true
 sudo -u "${REAL_USER}" gsettings set org.gnome.software download-updates false 2>/dev/null || true
 sudo -u "${REAL_USER}" gsettings set org.gnome.software download-updates-notify false 2>/dev/null || true
 
+# ─── Install vivobook-update ──────────────────────────────────────────────────
+log "Instalando vivobook-update..."
+if [[ -f "${SCRIPT_DIR}/vivobook-update.sh" ]]; then
+    cp "${SCRIPT_DIR}/vivobook-update.sh" /usr/local/bin/vivobook-update
+    chmod +x /usr/local/bin/vivobook-update
+    log "  vivobook-update instalado em /usr/local/bin/"
+else
+    warn "  vivobook-update.sh não encontrado — pulando"
+fi
+
 # ─── Rebuild initramfs ───────────────────────────────────────────────────
 log "Regenerando initramfs com todos os firmwares e módulos..."
 dracut --force
