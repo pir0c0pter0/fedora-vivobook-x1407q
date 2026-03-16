@@ -105,13 +105,13 @@ sudo dd if=Fedora-Workstation-Live-aarch64-44-1.1.iso of=/dev/sdX bs=4M status=p
 sync
 ```
 
-Or use the custom ISO builder script from this repo:
+Or use the ISO builder from this repo:
 
 ```bash
-bash prepare-fedora-snapdragon.sh
+sudo bash build-vivobook-iso.sh
 ```
 
-This script modifies the ISO to include `clk_ignore_unused pd_ignore_unused` kernel parameters and a GRUB DTB selection menu.
+This script downloads the ISO, injects all 16 patches (firmware, DKMS, configs, GRUB params), and optionally flashes to USB.
 
 ### Step 2 — Boot from USB
 
@@ -139,7 +139,7 @@ This script modifies the ISO to include `clk_ignore_unused pd_ignore_unused` ker
 
 The Qualcomm firmware is proprietary and must be extracted from the Windows partition. BitLocker prevents direct access from Linux, so run this **from Windows** (PowerShell as Administrator):
 
-See [GUIA-EXTRAIR-FIRMWARE.md](GUIA-EXTRAIR-FIRMWARE.md) for the full PowerShell scripts.
+See [docs/GUIA-EXTRAIR-FIRMWARE.md](docs/GUIA-EXTRAIR-FIRMWARE.md) for the full PowerShell scripts.
 
 Quick version — copy the extracted firmware to a USB drive, then on the Linux side:
 
@@ -154,21 +154,23 @@ sudo cp /mnt/qcom-firmware/*.mbn /mnt/qcom-firmware/*.elf \
     /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/
 
 # WiFi board data
-sudo mkdir -p /lib/firmware/ath11k/WCN6855/hw2.1/
-sudo cp /mnt/qcom-firmware/board*.bin /lib/firmware/ath11k/WCN6855/hw2.1/board.bin
+sudo mkdir -p /usr/usr/lib/firmware/ath11k/WCN6855/hw2.1/
+sudo cp /mnt/qcom-firmware/board*.bin /usr/usr/lib/firmware/ath11k/WCN6855/hw2.1/board.bin
 
 sudo umount /mnt
 ```
 
 ### Step 5 — Apply All Fixes (Automated)
 
-Clone this repo and run the complete setup script:
+Clone this repo and run the setup script:
 
 ```bash
 git clone https://github.com/pir0c0pter0/fedora-vivobook-x1407q.git
 cd fedora-vivobook-x1407q
-sudo bash setup-all.sh
+sudo bash setup-vivobook.sh
 ```
+
+This applies all 16 fixes: 4 DKMS modules, firmware initramfs configs, GRUB params, suspend/lid, UCM2 audio, Vulkan fix, GNOME extension, charge control, cpufreq, dconf defaults, and cleans up old scripts.
 
 Or apply each fix manually — see [Detailed Fix Guide](#detailed-fix-guide) below.
 
@@ -208,186 +210,46 @@ wpctl status | grep -A5 Sinks
 
 ---
 
-## Complete Setup Script
+## Setup Scripts
 
-The `setup-all.sh` script applies all 13 fixes in the correct order. It assumes firmware has already been extracted (Step 4).
+### Option A — Custom ISO (recommended for new installs)
 
 ```bash
-#!/bin/bash
-# setup-all.sh — Apply all ASUS Vivobook X1407QA fixes
-# Run as root after firmware extraction
-set -euo pipefail
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-NC='\033[0m'
-log() { echo -e "${GREEN}[+]${NC} $1"; }
-err() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
-
-[[ $EUID -eq 0 ]] || err "Execute como root: sudo bash setup-all.sh"
-
-# ─── 1. Kernel parameters (GRUB) ────────────────────────────────────────
-log "1/12 — Configurando parâmetros de kernel no GRUB..."
-if ! grep -q "clk_ignore_unused" /etc/default/grub; then
-    sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet rhgb clk_ignore_unused pd_ignore_unused rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"/' /etc/default/grub
-fi
-grubby --update-kernel=ALL --args="clk_ignore_unused pd_ignore_unused rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"
-
-# ─── 2. WiFi — DKMS wcn_regulator_fix ───────────────────────────────────
-log "2/12 — Instalando módulo WiFi (wcn_regulator_fix)..."
-if ! dkms status | grep -q "wcn-regulator-fix"; then
-    dkms add /usr/src/wcn-regulator-fix-1.0
-    dkms build wcn-regulator-fix/1.0
-    dkms install wcn-regulator-fix/1.0
-fi
-echo "wcn_regulator_fix" > /etc/modules-load.d/wcn-regulator-fix.conf
-echo 'force_drivers+=" wcn_regulator_fix "' > /etc/dracut.conf.d/wcn-regulator-fix.conf
-
-# ─── 3. Keyboard — DKMS vivobook_kbd_fix ─────────────────────────────────
-log "3/12 — Instalando módulo teclado (vivobook_kbd_fix)..."
-if ! dkms status | grep -q "vivobook-kbd-fix"; then
-    dkms add /usr/src/vivobook-kbd-fix-1.0
-    dkms build vivobook-kbd-fix/1.0
-    dkms install vivobook-kbd-fix/1.0
-fi
-echo "vivobook_kbd_fix" > /etc/modules-load.d/vivobook-kbd-fix.conf
-echo 'force_drivers+=" vivobook_kbd_fix "' > /etc/dracut.conf.d/vivobook-kbd-fix.conf
-
-# ─── 4. Battery — ADSP firmware in initramfs ─────────────────────────────
-log "4/12 — Adicionando firmware ADSP ao initramfs..."
-cat > /etc/dracut.conf.d/qcom-adsp-firmware.conf << 'EOF'
-install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcadsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsp_dtbs.elf /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspr.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsps.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspua.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/battmgr.jsn "
-EOF
-
-# ─── 5. Brightness — DKMS vivobook_bl_fix ────────────────────────────────
-log "5/12 — Instalando módulo brilho (vivobook_bl_fix)..."
-if ! dkms status | grep -q "vivobook-bl-fix"; then
-    dkms add /usr/src/vivobook-bl-fix-1.0
-    dkms build vivobook-bl-fix/1.0
-    dkms install vivobook-bl-fix/1.0
-fi
-echo "vivobook_bl_fix" > /etc/modules-load.d/vivobook-bl-fix.conf
-
-# ─── 6. Fn Hotkeys — DKMS vivobook_hotkey_fix ───────────────────────────
-log "6/12 — Instalando módulo hotkeys (vivobook_hotkey_fix)..."
-if ! dkms status | grep -q "vivobook-hotkey-fix"; then
-    dkms add /usr/src/vivobook-hotkey-fix-1.0
-    dkms build vivobook-hotkey-fix/1.0
-    dkms install vivobook-hotkey-fix/1.0
-fi
-echo "vivobook_hotkey_fix" > /etc/modules-load.d/vivobook-hotkey-fix.conf
-
-# ─── 7. GPU — Firmware in initramfs ──────────────────────────────────────
-log "7/12 — Adicionando firmware GPU ao initramfs..."
-cat > /etc/dracut.conf.d/qcom-gpu-firmware.conf << 'EOF'
-install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/gen71500_zap.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcdxkmsucpurwa.mbn "
-EOF
-
-# ─── 8. Boot time — Mask phantom TPM ─────────────────────────────────────
-log "8/12 — Otimizando boot time (masking TPM fantasma)..."
-systemctl mask dev-tpm0.device dev-tpmrm0.device 2>/dev/null || true
-echo 'omit_dracutmodules+=" tpm2-tss systemd-pcrphase "' > /etc/dracut.conf.d/no-tpm.conf
-echo 'omit_dracutmodules+=" nfs "' > /etc/dracut.conf.d/no-nfs.conf
-
-# ─── 9. Terminal flicker — Vulkan pool fix ───────────────────────────────
-log "9/12 — Instalando fix Vulkan (vk_pool_fix.so)..."
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Build if source exists
-if [[ -f "${SCRIPT_DIR}/vk_pool_fix.c" ]]; then
-    gcc -shared -fPIC -o /usr/local/lib64/vk_pool_fix.so "${SCRIPT_DIR}/vk_pool_fix.c" -ldl
-elif [[ -f "${SCRIPT_DIR}/vk_pool_fix.so" ]]; then
-    cp "${SCRIPT_DIR}/vk_pool_fix.so" /usr/local/lib64/vk_pool_fix.so
-fi
-
-# Wrapper script (needed because Ptyxis uses D-Bus activation)
-cat > /usr/local/bin/ptyxis-fixed << 'WRAPPER'
-#!/bin/sh
-export LD_PRELOAD=/usr/local/lib64/vk_pool_fix.so
-exec /usr/bin/ptyxis "$@"
-WRAPPER
-chmod +x /usr/local/bin/ptyxis-fixed
-
-# D-Bus service override (this is what actually launches Ptyxis)
-REAL_USER="${SUDO_USER:-$USER}"
-REAL_HOME=$(eval echo "~${REAL_USER}")
-mkdir -p "${REAL_HOME}/.local/share/dbus-1/services"
-cat > "${REAL_HOME}/.local/share/dbus-1/services/org.gnome.Ptyxis.service" << 'DBUS'
-[D-BUS Service]
-Name=org.gnome.Ptyxis
-Exec=/usr/local/bin/ptyxis-fixed --gapplication-service
-DBUS
-
-# Desktop entry override
-mkdir -p "${REAL_HOME}/.local/share/applications"
-cp /usr/share/applications/org.gnome.Ptyxis.desktop "${REAL_HOME}/.local/share/applications/" 2>/dev/null || true
-sed -i 's|^Exec=ptyxis|Exec=/usr/local/bin/ptyxis-fixed|g' \
-    "${REAL_HOME}/.local/share/applications/org.gnome.Ptyxis.desktop" 2>/dev/null || true
-chown -R "${REAL_USER}:${REAL_USER}" "${REAL_HOME}/.local/share/dbus-1" "${REAL_HOME}/.local/share/applications"
-
-# ─── 10. Battery time extension ──────────────────────────────────────────
-log "10/12 — Instalando extensão GNOME (battery-time)..."
-sudo -u "${REAL_USER}" bash "${SCRIPT_DIR}/install-battery-time-ext.sh"
-
-# ─── 11. Touchpad right-click ────────────────────────────────────────────
-log "11/12 — Configurando touchpad (click-method: areas)..."
-sudo -u "${REAL_USER}" gsettings set org.gnome.desktop.peripherals.touchpad click-method 'areas'
-
-# ─── 12. Audio — UCM2 regex fix ──────────────────────────────────────────
-log "12/13 — Corrigindo ALSA UCM2 para áudio (Vivobook 14)..."
-sed -i 's/Vivobook S 15)/Vivobook S 15|Vivobook 14)/' \
-    /usr/share/alsa/ucm2/conf.d/x1e80100/x1e80100.conf \
-    /usr/share/alsa/ucm2/Qualcomm/x1e80100/x1e80100.conf
-
-# ─── Fix 13: Lid close = screen off, disable suspend ─────────────────────
-log "13/13 — Desabilitando suspend (S3 crasha no Snapdragon X)..."
-mkdir -p /etc/systemd/logind.conf.d/
-cat > /etc/systemd/logind.conf.d/no-suspend.conf << 'LOGIND'
-[Login]
-HandleLidSwitch=lock
-HandleLidSwitchExternalPower=lock
-HandleLidSwitchDocked=lock
-IdleAction=ignore
-LOGIND
-systemctl mask suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target sleep.target 2>/dev/null || true
-sudo -u "${REAL_USER}" gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing' 2>/dev/null || true
-sudo -u "${REAL_USER}" gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing' 2>/dev/null || true
-sudo -u "${REAL_USER}" gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout 0 2>/dev/null || true
-sudo -u "${REAL_USER}" gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-timeout 0 2>/dev/null || true
-
-# ─── Disable auto updates ────────────────────────────────────────────────
-log "Desabilitando auto-updates (previne quebra dos módulos DKMS)..."
-systemctl disable --now dnf-makecache.timer 2>/dev/null || true
-systemctl mask packagekit.service 2>/dev/null || true
-sudo -u "${REAL_USER}" gsettings set org.gnome.software download-updates false 2>/dev/null || true
-sudo -u "${REAL_USER}" gsettings set org.gnome.software download-updates-notify false 2>/dev/null || true
-
-# ─── Rebuild initramfs ───────────────────────────────────────────────────
-log "Regenerando initramfs com todos os firmwares e módulos..."
-dracut --force
-
-# ─── Update GRUB ─────────────────────────────────────────────────────────
-log "Atualizando GRUB..."
-grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || true
-
-echo ""
-echo "============================================"
-echo " INSTALAÇÃO COMPLETA"
-echo "============================================"
-echo ""
-echo " Reboot para aplicar: sudo reboot"
-echo ""
-echo " Após o reboot, verificar:"
-echo "   - WiFi: ip link show wlP4p1s0"
-echo "   - Teclado: dmesg | grep vivobook-kbd"
-echo "   - Bateria: cat /sys/class/power_supply/qcom-battmgr-bat/capacity"
-echo "   - Brilho: ls /sys/class/backlight/vivobook-backlight/"
-echo "   - GPU: glxinfo | grep renderer"
-echo "   - Boot time: systemd-analyze"
-echo ""
-echo " ATENÇÃO: Faça logout e login para ativar a extensão de bateria"
-echo ""
+sudo bash build-vivobook-iso.sh
 ```
+
+Interactive menu: downloads Fedora ISO, injects all 16 patches into the squashfs, creates a ready-to-flash ISO. First boot runs DKMS build + initramfs automatically.
+
+### Option B — Post-install on existing Fedora
+
+```bash
+sudo bash setup-vivobook.sh
+```
+
+Applies all 16 fixes on an already-installed system: DKMS modules, firmware initramfs, GRUB params, suspend/lid, UCM2 audio, Vulkan fix, GNOME extension, charge control, cpufreq, dconf defaults. Also cleans up deprecated scripts.
+
+### Safe updates
+
+```bash
+sudo vivobook-update
+```
+
+Analyzes kernel, mesa, GNOME, firmware, and other sensitive updates for compatibility before applying. Checks DKMS module APIs, UCM2 regex, Vulkan symbols, and extension metadata.
+
+---
+
+### Deprecated scripts (removed)
+
+The following scripts have been removed and replaced:
+
+| Removed | Replaced by |
+|---------|-------------|
+| `setup-all.sh` | `setup-vivobook.sh` (all 16 fixes) |
+| `prepare-fedora-snapdragon.sh` | `build-vivobook-iso.sh` |
+| `build-v3-iso.sh` | `build-vivobook-iso.sh` |
+| `build-v4-iso.sh` | `build-vivobook-iso.sh` |
+| `fix.sh` | `setup-vivobook.sh` |
+| `test-brightness.sh` | No longer needed (brightness fix stable) |
 
 ---
 
@@ -429,7 +291,7 @@ DKMS module `wcn_regulator_fix` + custom `board.bin`.
 - Patches DT with `regulator-always-on`
 - Schedules delayed PCIe bus rescans (device found ~6s after boot)
 
-**Board data**: fallback `board.bin` from similar WCN6855 variant at `/lib/firmware/ath11k/WCN6855/hw2.1/board.bin`
+**Board data**: fallback `board.bin` from similar WCN6855 variant at `/usr/lib/firmware/ath11k/WCN6855/hw2.1/board.bin`
 
 ```bash
 sudo dkms add /usr/src/wcn-regulator-fix-1.0
@@ -1021,7 +883,7 @@ systemd masked targets:
     qccdsp8380.mbn, cdsp_dtbs.elf, cdspr.jsn
     qcdxkmsucpurwa.mbn
 
-/lib/firmware/ath11k/WCN6855/hw2.1/
+/usr/lib/firmware/ath11k/WCN6855/hw2.1/
     board.bin
 ```
 
@@ -1195,32 +1057,41 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 
 ---
 
-## Scripts
+## Repository Structure
 
-| Script | Purpose |
-|--------|---------|
-| `setup-all.sh` | **Complete setup** — applies all 11 fixes in correct order |
-| `prepare-fedora-snapdragon.sh` | Creates custom ISO with GRUB DTB menu + firmware |
-| `build-v3-iso.sh` | Rebuilds ISO with firmware in correct path |
-| `build-v4-iso.sh` | ISO with patched DTB (regulator fix) |
-| `extract-qcom-firmware.sh` | Extracts firmware from Windows partition |
-| `post-install-protect.sh` | Protects boot against kernel updates |
-| `install-battery-time-ext.sh` | Installs GNOME Shell battery time extension |
-| `vk_pool_fix.c` | Source for Vulkan descriptor pool fix |
+```
+.
+├── build-vivobook-iso.sh          # ISO builder — download, patch, flash
+├── setup-vivobook.sh              # Post-install — apply all 16 fixes
+├── vivobook-update.sh             # Safe update manager
+├── extract-qcom-firmware.sh       # Extract firmware from Windows
+├── install-battery-time-ext.sh    # GNOME battery time extension
+├── post-install-protect.sh        # Kernel update boot protection
+├── vk_pool_fix.c                  # Vulkan descriptor pool fix (source)
+├── x1p42100-asus-zenbook-a14-wifi-fix.dtb  # Custom DTB with WiFi regulator
+├── docs/
+│   ├── GUIA-EXTRAIR-FIRMWARE.md   # Firmware extraction guide (PowerShell)
+│   ├── GUIA-POS-INSTALACAO.md     # Post-install kernel protection guide
+│   └── research/                  # Hardware research notes
+│       ├── BRIGHTNESS-FIX-STATUS.md
+│       ├── BRIGHTNESS-RESEARCH.md
+│       └── CAMERA_STATUS.md
+└── CLAUDE.md                      # AI assistant project rules
+```
 
 ## Known Issues
 
 - **DTB override impossible** on INSYDE firmware — all hardware fixes must use kernel modules
-- **Audio**: UCM2 fix modifies system file — will be overwritten by `alsa-ucm` updates (needs upstream PR)
+- **Audio**: UCM2 fix modifies system file — will be overwritten by `alsa-ucm-conf` updates (needs upstream PR)
 - **GPU**: Firmware must be in initramfs for early loading. SELinux may block `.xz` firmware (`setenforce 0` as workaround)
 - **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
-- **Camera**: 4 sensors (2× OV02C10 RGB + 2× IR) identified but not functional — CAMSS/CCI/CSIPHY nodes missing from DTB, patches in review upstream (see [Camera Research](#camera-research))
-- **Suspend (S3)**: `PM: suspend entry (deep)` crashes → cold reboot. Firmware fails to save/restore Snapdragon X power domains. All suspend targets masked as workaround. `s2idle` (S0ix) available but untested ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
-- **cpufreq**: No CPU frequency scaling — SCMI perf domain fails to register OPP table (`Failed to add opps_by_lvl at 2956800 for NCC1`). CPU runs at fixed frequency, no kernel thermal throttling ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
-- **~~CDSP/NPU offline~~**: Fixed — firmware in initramfs, CDSP boots at early boot (see [CDSP/NPU Fix](#15-cdspnpu-fix))
-- **~~Battery charge control~~**: Fixed — udev rule sets 80% charge limit, firmware accepts writes (see [Charge Control Fix](#16-battery-charge-control-fix)). Technology string "OOD" is cosmetic.
-- **~~USB-C device links~~**: Cosmetic — pmic_glink logs `Failed to create device link (0x180)` for PS8833 retimers and USB controllers at boot. Flag `0x180` = `DL_FLAG_INFERRED | DL_FLAG_SYNC_STATE_ONLY` (fw_devlink proxy links). All functionality works: USB data, charging, DP alt-mode on both ports. Upstream fix expected with proper PS8830/PS8833 retimer driver ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6))
-- **1 unknown I2C device** on bus 4: address `0x5b` (0x43 and 0x76 not responding — may be camera sensors on CCI, not regular I2C)
+- **Camera**: 4 sensors (2x OV02C10 RGB + 2x IR) identified but not functional — CAMSS/CCI/CSIPHY nodes missing from DTB, patches in review upstream (see [Camera Research](#camera-research))
+- **Suspend (S3)**: Deep suspend crashes — cold reboot required. All suspend targets masked, lid close = screen off only. `s2idle` untested ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
+- **~~cpufreq~~**: Fixed — `scmi_cpufreq` autoload via `/etc/modules-load.d/` ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
+- **~~CDSP/NPU offline~~**: Fixed — firmware in initramfs (see [CDSP/NPU Fix](#15-cdspnpu-fix))
+- **~~Battery charge control~~**: Fixed — udev rule sets 80% charge limit (see [Charge Control Fix](#16-battery-charge-control-fix))
+- **~~USB-C device links~~**: Cosmetic — `pmic_glink` logs `Failed to create device link (0x180)` for PS8833 retimers at boot. All functionality works ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6))
+- **1 unknown I2C device** on bus 4: address `0x5b` (may be camera sensor on CCI, not regular I2C)
 
 ## Upstream References
 

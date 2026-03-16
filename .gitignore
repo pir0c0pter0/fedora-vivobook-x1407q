@@ -5,3 +5,14 @@
 /tmp/
 *.bak
 .claude/
+docs/superpowers/
+
+# Source tarballs and SRPMs (downloaded for analysis, not part of project)
+*.tar.xz
+*.tar.gz
+*.src.rpm
+gtk-4.21.6/
+mesa-25.3.6/
+
+# Pre-built binaries (compile from vk_pool_fix.c instead)
+vk_pool_fix.so
