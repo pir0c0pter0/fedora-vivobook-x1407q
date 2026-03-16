@@ -18,7 +18,7 @@ set -uo pipefail
 
 VERSION="1.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORK_DIR="/tmp/vivobook-iso-build"
+WORK_DIR=""  # set to unique mktemp dir in build_complete()
 
 # Fedora download settings (override via env: FEDORA_VERSION=44 ./build-vivobook-iso.sh)
 FEDORA_VERSION="${FEDORA_VERSION:-44}"
@@ -81,13 +81,13 @@ prompt_yn() {
 # ─── Dependencies ────────────────────────────────────────────────────────────
 check_deps() {
     local missing=()
-    for cmd in xorriso unsquashfs mksquashfs sha256sum curl; do
+    for cmd in xorriso unsquashfs mksquashfs sha256sum curl e2fsck resize2fs; do
         command -v "$cmd" &>/dev/null || missing+=("$cmd")
     done
     if [[ ${#missing[@]} -gt 0 ]]; then
         warn "Dependências faltando: ${missing[*]}"
         if prompt_yn "Instalar automaticamente?"; then
-            sudo dnf install -y xorriso squashfs-tools coreutils curl
+            sudo dnf install -y xorriso squashfs-tools coreutils curl e2fsprogs
         else
             err "Instale manualmente e tente novamente."
             exit 1
@@ -416,8 +416,8 @@ inject_patches() {
     fi
 
     # WiFi board.bin (ath11k WCN6855)
-    local wifi_src="/lib/firmware/ath11k/WCN6855/hw2.1"
-    local wifi_dst="${ROOTFS}/lib/firmware/ath11k/WCN6855/hw2.1"
+    local wifi_src="/usr/lib/firmware/ath11k/WCN6855/hw2.1"
+    local wifi_dst="${ROOTFS}/usr/lib/firmware/ath11k/WCN6855/hw2.1"
     if [[ -d "$wifi_src" ]]; then
         sudo mkdir -p "$wifi_dst"
         sudo cp -a "$wifi_src"/* "$wifi_dst/" 2>/dev/null || true
@@ -540,6 +540,30 @@ exec /usr/bin/ptyxis "$@"
 WRAPPER
     sudo chmod +x "${ROOTFS}/usr/local/bin/ptyxis-fixed"
 
+    # .desktop override so GNOME launcher uses LD_PRELOAD wrapper
+    sudo mkdir -p "${ROOTFS}/usr/share/applications"
+    if [[ -f "${ROOTFS}/usr/share/applications/org.gnome.Ptyxis.desktop" ]]; then
+        sudo cp "${ROOTFS}/usr/share/applications/org.gnome.Ptyxis.desktop" \
+            "${ROOTFS}/usr/share/applications/org.gnome.Ptyxis.desktop.bak"
+        sudo sed -i 's|^Exec=ptyxis|Exec=/usr/local/bin/ptyxis-fixed|' \
+            "${ROOTFS}/usr/share/applications/org.gnome.Ptyxis.desktop"
+        log "  .desktop override para ptyxis criado"
+    else
+        # Create override for when Ptyxis is installed
+        sudo tee "${ROOTFS}/etc/xdg/autostart/.placeholder" >/dev/null <<< ""
+        sudo mkdir -p "${ROOTFS}/usr/local/share/applications"
+        sudo tee "${ROOTFS}/usr/local/share/applications/org.gnome.Ptyxis.desktop" >/dev/null << 'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Terminal
+Comment=Terminal with Vulkan pool fix
+Exec=/usr/local/bin/ptyxis-fixed
+Icon=org.gnome.Ptyxis
+Categories=System;TerminalEmulator;
+DESKTOP
+        log "  .desktop override para ptyxis (fallback) criado"
+    fi
+
     # --- 8. Setup scripts ---
     ((n++)); step $n $total "Scripts de setup..."
     sudo mkdir -p "${ROOTFS}/opt/vivobook-fixes"
@@ -573,14 +597,23 @@ echo "=== Vivobook First Boot Setup — $(date) ==="
 echo "Kernel: $(uname -r)"
 
 # DKMS build
+dkms_ok=0
+dkms_fail=0
+dkms_failed_list=""
 for mod_dir in /usr/src/wcn-regulator-fix-1.0 /usr/src/vivobook-kbd-fix-1.0 \
                /usr/src/vivobook-bl-fix-1.0 /usr/src/vivobook-hotkey-fix-1.0; do
     [[ -d "$mod_dir" ]] || continue
     mod_name=$(basename "$mod_dir" | sed 's/-1.0$//')
     echo "DKMS build: $mod_name"
     dkms add "$mod_dir" 2>/dev/null || true
-    dkms build "${mod_name}/1.0" || true
-    dkms install "${mod_name}/1.0" || true
+    if dkms build "${mod_name}/1.0" && dkms install "${mod_name}/1.0"; then
+        echo "  OK: $mod_name"
+        ((dkms_ok++))
+    else
+        echo "  FALHOU: $mod_name"
+        ((dkms_fail++))
+        dkms_failed_list="${dkms_failed_list} ${mod_name}"
+    fi
 done
 
 # GRUB params
@@ -606,6 +639,20 @@ systemctl mask packagekit.service 2>/dev/null || true
 systemctl disable vivobook-first-boot.service 2>/dev/null || true
 
 echo "=== First Boot Setup Complete — $(date) ==="
+echo "DKMS: ${dkms_ok} OK, ${dkms_fail} falhas"
+
+# Report DKMS failures visibly via MOTD
+if [[ $dkms_fail -gt 0 ]]; then
+    cat > /etc/motd << MOTD
+*** VIVOBOOK FIRST-BOOT: ${dkms_fail} módulo(s) DKMS falharam:${dkms_failed_list}
+*** Verifique: /var/log/vivobook-first-boot.log
+*** Instale kernel-devel e gcc, depois: dkms autoinstall && dracut --force
+MOTD
+    echo "AVISO: ${dkms_fail} módulo(s) DKMS falharam:${dkms_failed_list}"
+    echo "Verifique se kernel-devel e gcc estão instalados."
+    exit 1
+fi
+
 echo "Reboot recomendado para ativar módulos DKMS."
 FIRSTBOOT
     sudo chmod +x "${ROOTFS}/opt/vivobook-fixes/first-boot.sh"
@@ -639,7 +686,7 @@ UNIT
   "uuid": "battery-time@wifiteste",
   "name": "Battery Time Remaining",
   "description": "Shows battery time remaining in the panel with improved estimation (rolling average)",
-  "shell-version": ["50", "50.rc", "51"],
+  "shell-version": ["50", "50.rc"],
   "version": 1
 }
 META
@@ -660,9 +707,15 @@ META
                 sudo cp "$user_ext" "${ext_dir}/extension.js"
                 log "  Extensão copiada da instalação local"
             else
-                warn "  extension.js não extraído — usar install-battery-time-ext.sh pós-boot"
+                warn "  extension.js não extraído — removendo diretório incompleto"
+                sudo rm -rf "${ext_dir}"
+                warn "  Usar install-battery-time-ext.sh pós-boot"
             fi
         fi
+    else
+        warn "  install-battery-time-ext.sh não encontrado — removendo diretório incompleto"
+        sudo rm -rf "${ext_dir}"
+        warn "  Usar install-battery-time-ext.sh pós-boot"
     fi
 
     # --- 11. UCM2 Audio ---
@@ -736,7 +789,12 @@ rebuild_squashfs() {
 
     if [[ "$ROOTFS_TYPE" == "mounted" ]]; then
         log "Desmontando rootfs.img..."
-        sudo umount "$ROOTFS"
+        if ! sudo umount "$ROOTFS"; then
+            err "Falha ao desmontar rootfs! Verificando processos..."
+            sudo fuser -vm "$ROOTFS" 2>&1 || true
+            err "Abortando — rootfs ainda montado, squashfs ficaria corrompido."
+            exit 1
+        fi
         # Remove from cleanup
         local new_mounts=()
         for mnt in "${CLEANUP_MOUNTS[@]}"; do
@@ -819,10 +877,33 @@ flash_usb() {
     read -rp "Dispositivo (ex: sda, Enter para cancelar): " usb_dev </dev/tty || return
     [[ -z "$usb_dev" ]] && return
 
+    # Validate input: only alphanumeric device names
+    if ! [[ "$usb_dev" =~ ^[a-z][a-z0-9]*$ ]]; then
+        err "Nome de dispositivo inválido: ${usb_dev}"
+        return 1
+    fi
+
     usb_dev="/dev/${usb_dev}"
     if [[ ! -b "$usb_dev" ]]; then
         err "${usb_dev} não existe!"
         return 1
+    fi
+
+    # Safety: refuse to write to mounted devices
+    if grep -q "^${usb_dev}" /proc/mounts 2>/dev/null; then
+        err "${usb_dev} está montado! Desmonte antes de gravar."
+        return 1
+    fi
+
+    # Safety: verify it's a USB device
+    local dev_tran
+    dev_tran=$(lsblk -ndo TRAN "$usb_dev" 2>/dev/null)
+    if [[ "$dev_tran" != "usb" ]]; then
+        warn "${usb_dev} não é USB (tipo: ${dev_tran:-desconhecido})"
+        if ! prompt_yn "Tem certeza que quer gravar neste dispositivo?" "n"; then
+            info "Cancelado."
+            return
+        fi
     fi
 
     warn "TODOS os dados em ${usb_dev} serão APAGADOS!"
@@ -884,7 +965,7 @@ build_complete() {
         return
     fi
 
-    mkdir -p "$WORK_DIR"
+    WORK_DIR=$(mktemp -d /tmp/vivobook-iso-build.XXXXXX)
     CLEANUP_DIRS+=("$WORK_DIR")
 
     extract_iso
