@@ -59,17 +59,6 @@ OUR_FIRMWARE=(
     "gen71500_zap.mbn" "qcdxkmsucpurwa.mbn"
 )
 
-# System config files that must survive updates
-SYSTEM_CONFIGS=(
-    "/etc/systemd/logind.conf.d/no-suspend.conf"
-    "/etc/udev/rules.d/99-battery-charge-limit.rules"
-    "/etc/modules-load.d/wcn-regulator-fix.conf"
-    "/etc/modules-load.d/vivobook-kbd-fix.conf"
-    "/etc/modules-load.d/vivobook-bl-fix.conf"
-    "/etc/modules-load.d/vivobook-hotkey-fix.conf"
-    "/etc/modules-load.d/scmi-cpufreq.conf"
-)
-
 # ─── Utility functions ───────────────────────────────────────────────────────
 log()  { echo -e "${GREEN}[+]${NC} $*" | tee -a "$LOG_FILE"; }
 warn() { echo -e "${YELLOW}[!]${NC} $*" | tee -a "$LOG_FILE"; }
@@ -101,6 +90,10 @@ prompt_snd() {
 }
 
 cleanup() {
+    # Strip ANSI escape codes from log file for clean post-mortem reading
+    if [[ -n "$LOG_FILE" && -f "$LOG_FILE" ]]; then
+        sed -i 's/\x1b\[[0-9;]*m//g' "$LOG_FILE"
+    fi
     [[ ${#CLEANUP_DIRS[@]} -eq 0 ]] && return
     for dir in "${CLEANUP_DIRS[@]}"; do
         rm -rf "$dir" 2>/dev/null
@@ -373,17 +366,17 @@ check_kernel_compat() {
         if [[ -n "$headers_dir" ]]; then
             local kernel_headers
             kernel_headers=$(find "$headers_dir" -maxdepth 1 -type d | tail -1)
-            if [[ -n "$kernel_headers" && -d "$kernel_headers/include" ]]; then
+            if [[ -n "$kernel_headers" && -f "$kernel_headers/Module.symvers" ]]; then
                 local missing_apis=()
                 for func in "${KERNEL_APIS[@]}"; do
-                    if ! grep -rq "$func" "$kernel_headers/include/" 2>/dev/null; then
+                    if ! grep -q "$func" "$kernel_headers/Module.symvers" 2>/dev/null; then
                         missing_apis+=("$func")
                     fi
                 done
                 if [[ ${#missing_apis[@]} -eq 0 ]]; then
-                    results+=("$(echo -e "  ${GREEN}✅${NC} APIs: todas funções usadas presentes nos headers")")
+                    results+=("$(echo -e "  ${GREEN}✅${NC} APIs: todas funções exportadas presentes em Module.symvers")")
                 else
-                    results+=("$(echo -e "  ${RED}❌${NC} APIs removidas: ${missing_apis[*]}")")
+                    results+=("$(echo -e "  ${RED}❌${NC} APIs ausentes em Module.symvers: ${missing_apis[*]}")")
                     results+=("$(echo -e "     ${YELLOW}Módulos DKMS provavelmente NÃO compilam${NC}")")
                 fi
             fi
@@ -470,7 +463,7 @@ check_gnome_compat() {
     local major="${new_ver%%.*}"
     local real_user="${SUDO_USER:-$USER}"
     local real_home
-    real_home=$(eval echo "~${real_user}")
+    real_home=$(getent passwd "$real_user" | cut -d: -f6)
     local metadata="${real_home}/.local/share/gnome-shell/extensions/battery-time@wifiteste/metadata.json"
 
     if [[ -f "$metadata" ]]; then
