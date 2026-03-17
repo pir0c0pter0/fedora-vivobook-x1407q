@@ -25,7 +25,7 @@
 
 ## Achievements
 
-Starting from a laptop that **refused to boot** Linux, every fix was reverse-engineered from scratch — no upstream support, no documentation, no community guides for this model. **17 achievements** and counting.
+Starting from a laptop that **refused to boot** Linux, every fix was reverse-engineered from scratch — no upstream support, no documentation, no community guides for this model. **18 achievements** and counting.
 
 | # | Achievement | Method | Impact |
 |---|------------|--------|--------|
@@ -46,8 +46,9 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 15 | **CDSP / NPU online** | CDSP firmware in initramfs | Hexagon Compute DSP boots at early boot — fastrpc compute contexts available |
 | 16 | **Battery charge limit** | udev rule sets 80% threshold | Charge stops at 80%, starts at 50% — extends battery lifespan |
 | 17 | **RGB camera working** | DKMS module `vivobook_cam_fix` (two-phase DT overlay) | OV02C10 on CCI1 — libcamera + Snapshot working, on-demand via `vivobook-camera start` |
+| 18 | **Claude Code flicker-free** | PTY proxy `sync_render` with Mode 2026 synchronized output | Coalesces rapid terminal writes into atomic frames — zero flicker on ARM/Wayland |
 
-**6 custom kernel modules**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
+**6 custom kernel modules**, **1 Vulkan driver fix**, **1 PTY sync proxy**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
 
 ## Current Status
 
@@ -500,7 +501,7 @@ LD_PRELOAD fix for GTK4/turnip Vulkan descriptor pool fragmentation.
 .descriptorCount = 100,
 ```
 
-**Fix:** LD_PRELOAD library that intercepts `vkCreateDescriptorPool` and increases pool sizes by 50x (100 → 5000 sets), eliminating fragmentation:
+**Fix:** LD_PRELOAD library that intercepts `vkCreateDescriptorPool` and increases pool sizes by 200x (100 → 20000 sets), eliminating fragmentation. Also intercepts `vkGetDeviceProcAddr`/`vkGetInstanceProcAddr` to ensure the hook works even when apps resolve function pointers directly:
 
 ```bash
 # Build
@@ -543,7 +544,7 @@ update-desktop-database ~/.local/share/applications/
 | **Affected app** | Ptyxis (GNOME Terminal) and any GTK4 Vulkan app on turnip |
 | **Root cause** | GTK4 GSK `maxSets=100` + turnip pool fragmentation |
 | **Error** | `VK_ERROR_OUT_OF_POOL_MEMORY` at `tu_descriptor_set.cc:649` |
-| **Fix** | `vk_pool_fix.so` — increases pool size 50x via LD_PRELOAD |
+| **Fix** | `vk_pool_fix.so` — increases pool size 200x via LD_PRELOAD + ProcAddr interception |
 | **Alternative** | `GSK_RENDERER=ngl` (forces GL, avoids Vulkan entirely) |
 
 > **Note**: This is an interaction bug between GTK4 and Mesa/turnip — GTK4 creates pools too small for turnip's linear allocator. May be fixed upstream in future GTK4 or Mesa releases. To check: remove the LD_PRELOAD and monitor with `journalctl -f | grep VK_ERROR`.
@@ -871,6 +872,41 @@ vivobook-camera status
 | **Service** | `vivobook-camera.service` (oneshot, on-demand, never enabled) |
 | **Command** | `vivobook-camera start\|status` |
 
+### 18. Claude Code Flicker Fix
+
+PTY proxy that eliminates terminal flicker from Claude Code on ARM/Wayland.
+
+**Problem:** Claude Code does erase+rewrite on every streamed token. On ARM/Wayland (Adreno GPU, Ptyxis/VTE), the redraw gap between erase and rewrite is visible — causing constant flicker during long conversations. The Vulkan pool fix (#9) eliminates GPU-level fragmentation, but the terminal-level erase+rewrite pattern still produces flicker under sustained streaming.
+
+**Root cause:** Each token from Claude Code triggers a sequence of terminal escape codes: cursor movement, erase line, write new content. At streaming speed (~50 tokens/sec), these arrive as separate write syscalls. The terminal renders each write immediately, making the erase visible for 1-2 frames before the new content arrives.
+
+**Fix:** `sync_render` — a PTY proxy that creates a pseudo-terminal pair, runs the target command on the slave pty, and coalesces rapid writes within a 5ms window. The coalesced output is wrapped with Mode 2026 synchronized output markers (`\e[?2026h ... \e[?2026l`), which tells the terminal to buffer all changes and render them as a single atomic frame:
+
+```bash
+# Build
+gcc -o sync_render sync_render.c -lutil
+
+# Use
+./sync_render claude
+./sync_render -- claude -p "hello"
+
+# Install system-wide (optional)
+sudo cp sync_render /usr/local/bin/
+```
+
+**Result:** Zero flicker. Terminal renders each update atomically instead of showing intermediate erase states.
+
+| Property | Value |
+|----------|-------|
+| **Affected app** | Claude Code (and any CLI that does rapid erase+rewrite) |
+| **Root cause** | Per-token erase+rewrite visible on ARM/Wayland due to GPU render gap |
+| **Fix** | `sync_render` — PTY proxy with 5ms coalescing + Mode 2026 sync markers |
+| **Protocol** | [Mode 2026 synchronized output](https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797) |
+| **Terminal support** | GNOME Terminal/VTE, kitty, foot, WezTerm (not alacritty) |
+| **Latency** | 5ms coalescing window — imperceptible |
+
+> **Note**: Mode 2026 is supported by VTE-based terminals (Ptyxis, GNOME Terminal, kgx). Combined with the Vulkan pool fix (#9), this eliminates both GPU-level and terminal-level flicker.
+
 ---
 
 ## System Configuration Summary
@@ -910,6 +946,7 @@ vivobook-camera status
 
 /usr/local/lib64/
     vk_pool_fix.so             → Vulkan pool fix library
+    sync_render                → PTY sync proxy for flicker-free Claude Code
 
 /usr/local/bin/
     ptyxis-fixed               → Wrapper script with LD_PRELOAD
@@ -1103,12 +1140,14 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 ```
 .
 ├── build-vivobook-iso.sh          # ISO builder — download, patch, flash
-├── setup-vivobook.sh              # Post-install — apply all 17 fixes
+├── setup-vivobook.sh              # Post-install — apply all 18 fixes
 ├── vivobook-update.sh             # Safe update manager
 ├── extract-qcom-firmware.sh       # Extract firmware from Windows
 ├── install-battery-time-ext.sh    # GNOME battery time extension
 ├── post-install-protect.sh        # Kernel update boot protection
 ├── vk_pool_fix.c                  # Vulkan descriptor pool fix (source)
+├── sync_render.c                  # PTY proxy for flicker-free terminal (source)
+├── sync_render                    # PTY proxy binary
 ├── x1p42100-asus-zenbook-a14-wifi-fix.dtb  # Custom DTB with WiFi regulator
 ├── docs/
 │   ├── GUIA-EXTRAIR-FIRMWARE.md   # Firmware extraction guide (PowerShell)

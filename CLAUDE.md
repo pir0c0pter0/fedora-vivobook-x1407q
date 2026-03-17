@@ -2,9 +2,9 @@
 
 ## O que é este projeto
 
-Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com Snapdragon X. Tudo feito em runtime — 5 módulos DKMS, 1 fix Vulkan (LD_PRELOAD), 1 extensão GNOME, 1 fix UCM2 áudio, 1 fix suspend/lid, 1 fix cpufreq, 1 fix CDSP/NPU, 1 fix charge control, 0 patches de kernel.
+Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com Snapdragon X. Tudo feito em runtime — 6 módulos DKMS, 1 fix Vulkan (LD_PRELOAD), 1 PTY sync proxy, 1 extensão GNOME, 1 fix UCM2 áudio, 1 fix suspend/lid, 1 fix cpufreq, 1 fix CDSP/NPU, 1 fix charge control, 0 patches de kernel.
 
-## Conquistas (16/16)
+## Conquistas (18/18)
 
 1. **Boot** — Custom ISO + Zenbook A14 DTB (mesmo die Qualcomm "Purwa")
 2. **WiFi** — DKMS `wcn_regulator_fix` + board.bin (PCIe race condition + regulador)
@@ -22,6 +22,8 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 14. **cpufreq** — Módulo `scmi_cpufreq` in-tree autoload via `/etc/modules-load.d/` — CPU escala 710MHz–2.96GHz, governor schedutil
 15. **CDSP/NPU** — Firmware `qccdsp8380.mbn` no initramfs via dracut — Hexagon Compute DSP online, fastrpc contexts disponíveis
 16. **Charge control** — udev rule seta limite 80% via `charge_control_end_threshold` — firmware aceita escrita, start auto 50%
+17. **Câmera RGB** — DKMS `vivobook_cam_fix` (DT overlay two-phase) — OV02C10 no CCI1, libcamera + Snapshot, on-demand via `vivobook-camera start`
+18. **Claude Code flicker-free** — `sync_render` (PTY proxy com Mode 2026 synchronized output) — coalesce 5ms + render atômico, zero flicker no ARM/Wayland
 
 ## Regras — SEMPRE fazer
 
@@ -49,6 +51,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 | Módulos kernel | DKMS em `/usr/src/<nome>-1.0/`, auto-load via `/etc/modules-load.d/` |
 | Firmware | initramfs via `/etc/dracut.conf.d/`, depois `sudo dracut --force` |
 | Vulkan fix | LD_PRELOAD em `/usr/local/lib64/`, desktop entry override em `~/.local/share/applications/` |
+| Terminal sync | `sync_render` PTY proxy em `/usr/local/bin/`, Mode 2026 synchronized output |
 | Extensão GNOME | `~/.local/share/gnome-shell/extensions/<uuid>/`, ESM modules, GNOME 50 |
 | GRUB | Entry custom em `/etc/grub.d/08_vivobook` com `clk_ignore_unused pd_ignore_unused` |
 | Bateria sysfs | `/sys/class/power_supply/qcom-battmgr-bat/` (energy_now, power_now em µW) |
