@@ -35,12 +35,15 @@
 
 /* Coalescing window in milliseconds. Writes within this window
  * are batched into a single synchronized update.
- * 5ms is enough to catch erase+rewrite pairs (typically <1ms apart)
- * without adding perceptible latency. */
-#define COALESCE_MS 5
+ * 20ms catches full conversation redraws from Claude Code, which can
+ * arrive in multiple chunks with brief pauses between them.
+ * Still imperceptible as latency for interactive use. */
+#define COALESCE_MS 20
 
-/* Max buffer size (1MB should be plenty for terminal output) */
-#define BUF_MAX (1024 * 1024)
+/* Max buffer size. Claude Code full conversation redraws can exceed 1MB
+ * (long conversations with syntax highlighting). 16MB avoids mid-redraw
+ * buffer flushes that would expose intermediate terminal states. */
+#define BUF_MAX (16 * 1024 * 1024)
 
 /* Mode 2026 synchronized output escape sequences */
 static const char SYNC_START[] = "\033[?2026h";
