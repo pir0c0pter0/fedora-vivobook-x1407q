@@ -388,18 +388,18 @@ if [[ "$sync_render_installed" == false && -f "${SCRIPT_DIR}/sync_render" ]]; th
     sync_render_installed=true
     log "sync_render pre-built copiado"
 fi
-if [[ "$sync_render_installed" == true ]] && command -v claude &>/dev/null; then
-    CLAUDE_BIN=$(command -v claude)
-    if [[ "$CLAUDE_BIN" != "/usr/local/bin/sync_render" ]] && ! grep -q "sync_render" "$CLAUDE_BIN" 2>/dev/null; then
-        mv "$CLAUDE_BIN" /usr/local/bin/claude-real
-        cat > /usr/local/bin/claude << 'SHIM'
-#!/bin/sh
-exec /usr/local/bin/sync_render /usr/local/bin/claude-real "$@"
-SHIM
-        chmod +x /usr/local/bin/claude
-        log "claude shim instalado (auto-wraps com sync_render)"
+if [[ "$sync_render_installed" == true ]]; then
+    # Configure Ptyxis profile to use sync_render as shell wrapper
+    # This covers ALL apps launched from the terminal, not just claude
+    PTYXIS_UUID=$(sudo -u "${REAL_USER}" dconf read /org/gnome/Ptyxis/default-profile-uuid 2>/dev/null | tr -d "'")
+    if [[ -n "$PTYXIS_UUID" ]]; then
+        sudo -u "${REAL_USER}" dconf write "/org/gnome/Ptyxis/Profiles/${PTYXIS_UUID}/use-custom-command" true
+        sudo -u "${REAL_USER}" dconf write "/org/gnome/Ptyxis/Profiles/${PTYXIS_UUID}/custom-command" "'sync_render /bin/bash --login'"
+        log "Ptyxis profile: sync_render /bin/bash --login (todos os apps cobertos)"
     else
-        log "claude shim já presente"
+        warn "Ptyxis profile não encontrado — configurar manualmente"
+        info "  dconf write /org/gnome/Ptyxis/Profiles/<UUID>/use-custom-command true"
+        info "  dconf write /org/gnome/Ptyxis/Profiles/<UUID>/custom-command \"'sync_render /bin/bash --login'\""
     fi
 fi
 

@@ -907,29 +907,20 @@ sudo cp sync_render /usr/local/bin/
 
 **Result:** Zero flicker. Terminal renders each update atomically instead of showing intermediate erase states.
 
-The `claude` binary is wrapped automatically via a shim at `/usr/local/bin/claude`:
+The terminal profile runs every shell inside `sync_render` — so **all apps** launched from the terminal (claude, vim, any CLI) are automatically covered, with no per-app wrappers needed:
 
 ```bash
-# /usr/local/bin/claude — auto-wraps with sync_render
-#!/bin/sh
-exec /usr/local/bin/sync_render /usr/local/bin/claude-real "$@"
-```
-
-This means `claude`, `claude --dangerously-skip-permissions`, etc. all work as before — sync_render is completely transparent.
-
-```bash
-# Build and install
+# Build and install sync_render
 gcc -o sync_render sync_render.c -lutil
 sudo cp sync_render /usr/local/bin/sync_render
 
-# Wrap the claude binary (run once after installing claude-code)
-sudo mv /usr/local/bin/claude /usr/local/bin/claude-real
-sudo tee /usr/local/bin/claude << 'WRAPPER'
-#!/bin/sh
-exec /usr/local/bin/sync_render /usr/local/bin/claude-real "$@"
-WRAPPER
-sudo chmod +x /usr/local/bin/claude
+# Configure Ptyxis profile to use sync_render as shell wrapper
+UUID=$(dconf read /org/gnome/Ptyxis/default-profile-uuid | tr -d "'")
+dconf write /org/gnome/Ptyxis/Profiles/${UUID}/use-custom-command true
+dconf write /org/gnome/Ptyxis/Profiles/${UUID}/custom-command "'sync_render /bin/bash --login'"
 ```
+
+Every new terminal tab starts `bash` running inside `sync_render`'s PTY proxy. Any app launched from that shell writes through the slave PTY, which sync_render intercepts at the master level — coalescing and Mode 2026 markers apply to everything transparently.
 
 | Property | Value |
 |----------|-------|
@@ -939,7 +930,7 @@ sudo chmod +x /usr/local/bin/claude
 | **Protocol** | [Mode 2026 synchronized output](https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797) |
 | **Terminal support** | GNOME Terminal/VTE, kitty, foot, WezTerm (not alacritty) |
 | **Latency** | 5ms coalescing window — imperceptible |
-| **Activation** | Automatic — `claude` shim at `/usr/local/bin/claude` wraps `claude-real` |
+| **Activation** | Automatic — Ptyxis profile uses `sync_render /bin/bash --login` as shell |
 
 > **Note**: Mode 2026 is supported by VTE-based terminals (Ptyxis, GNOME Terminal, kgx). Combined with the Vulkan pool fix (#9) and hardware Vulkan (`VK_DRIVER_FILES`), this eliminates both GPU-level and terminal-level flicker on any Wayland compositor.
 
@@ -985,8 +976,6 @@ sudo chmod +x /usr/local/bin/claude
 
 /usr/local/bin/
     ptyxis-fixed               → Wrapper script with VK_DRIVER_FILES + LD_PRELOAD
-    claude                     → Shim that auto-wraps claude-real with sync_render
-    claude-real                → Original claude-code binary (symlink to cli.js)
     sync_render                → PTY proxy binary
     vivobook-camera            → Camera on-demand start/status command
 
