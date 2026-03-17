@@ -14,7 +14,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 6. **Hotkeys Fn** — DKMS `vivobook_hotkey_fix` (init ASUS vendor HID + key mapping)
 7. **GPU** — 4 firmwares no initramfs (ZAP shader MDT loader não faz retry)
 8. **Boot 1:47→8s** — Mask TPM fantasma + limpeza initrd
-9. **Terminal flicker** — `vk_pool_fix.so` (LD_PRELOAD que aumenta pool Vulkan 50x)
+9. **Terminal flicker** — `vk_pool_fix.so` (LD_PRELOAD pool Vulkan 200x) + `VK_DRIVER_FILES` (força turnip hardware, Niri usa Lavapipe sem isso)
 10. **Tempo bateria** — Extensão GNOME `battery-time@wifiteste` (média ponderada)
 11. **Touchpad botão direito** — gsettings `click-method: areas` (clickpad só reporta BTN_LEFT)
 12. **Áudio** — UCM2 regex fix (Vivobook 14 não estava no match do alsa-ucm-conf)
@@ -50,7 +50,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 |------|--------|
 | Módulos kernel | DKMS em `/usr/src/<nome>-1.0/`, auto-load via `/etc/modules-load.d/` |
 | Firmware | initramfs via `/etc/dracut.conf.d/`, depois `sudo dracut --force` |
-| Vulkan fix | LD_PRELOAD em `/usr/local/lib64/`, desktop entry override em `~/.local/share/applications/` |
+| Vulkan fix | LD_PRELOAD em `/usr/local/lib64/`, `VK_DRIVER_FILES` via `~/.config/environment.d/` (força freedreno, necessário no Niri) |
 | Terminal sync | `sync_render` PTY proxy em `/usr/local/bin/`, Mode 2026 synchronized output |
 | Extensão GNOME | `~/.local/share/gnome-shell/extensions/<uuid>/`, ESM modules, GNOME 50 |
 | GRUB | Entry custom em `/etc/grub.d/08_vivobook` com `clk_ignore_unused pd_ignore_unused` |

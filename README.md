@@ -512,12 +512,20 @@ sudo cp vk_pool_fix.so /usr/local/lib64/vk_pool_fix.so
 
 # Create wrapper script (needed because Ptyxis uses D-Bus activation,
 # which ignores Exec= in .desktop and LD_PRELOAD env vars)
+# Also forces hardware Vulkan (turnip) — see compositor note below
 sudo tee /usr/local/bin/ptyxis-fixed << 'WRAPPER'
 #!/bin/sh
+export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
 export LD_PRELOAD=/usr/local/lib64/vk_pool_fix.so
 exec /usr/bin/ptyxis "$@"
 WRAPPER
 sudo chmod +x /usr/local/bin/ptyxis-fixed
+
+# Force hardware Vulkan globally for ALL apps
+mkdir -p ~/.config/environment.d
+cat > ~/.config/environment.d/vulkan-hardware.conf << 'ENVD'
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
+ENVD
 
 # Override D-Bus service (this is what actually launches Ptyxis)
 mkdir -p ~/.local/share/dbus-1/services
@@ -537,6 +545,8 @@ update-desktop-database ~/.local/share/applications/
 
 > **Important**: Ptyxis uses `DBusActivatable=true` — the D-Bus service file override is required, not just the desktop entry. Without it, systemd launches `/usr/bin/ptyxis` directly, bypassing LD_PRELOAD.
 
+> **Compositor note**: On GNOME/Mutter, the `VkLayer_MESA_device_select` layer correctly picks turnip (hardware GPU). On Niri and other non-GNOME Wayland compositors, the device selection falls back to Lavapipe (software CPU Vulkan), making GTK4 apps render entirely on the CPU. Setting `VK_DRIVER_FILES` forces the Vulkan loader to only load the freedreno ICD (turnip), ensuring hardware rendering. The `environment.d` config applies this globally to all apps in the user session.
+
 **Result:** 952 errors → 0 errors. Vulkan renderer preserved (better performance than GL fallback).
 
 | Property | Value |
@@ -545,6 +555,7 @@ update-desktop-database ~/.local/share/applications/
 | **Root cause** | GTK4 GSK `maxSets=100` + turnip pool fragmentation |
 | **Error** | `VK_ERROR_OUT_OF_POOL_MEMORY` at `tu_descriptor_set.cc:649` |
 | **Fix** | `vk_pool_fix.so` — increases pool size 200x via LD_PRELOAD + ProcAddr interception |
+| **Compositor** | GNOME/Mutter: auto-selects turnip. Niri/others: needs `VK_DRIVER_FILES` to force freedreno |
 | **Alternative** | `GSK_RENDERER=ngl` (forces GL, avoids Vulkan entirely) |
 
 > **Note**: This is an interaction bug between GTK4 and Mesa/turnip — GTK4 creates pools too small for turnip's linear allocator. May be fixed upstream in future GTK4 or Mesa releases. To check: remove the LD_PRELOAD and monitor with `journalctl -f | grep VK_ERROR`.
@@ -896,6 +907,30 @@ sudo cp sync_render /usr/local/bin/
 
 **Result:** Zero flicker. Terminal renders each update atomically instead of showing intermediate erase states.
 
+The `claude` binary is wrapped automatically via a shim at `/usr/local/bin/claude`:
+
+```bash
+# /usr/local/bin/claude — auto-wraps with sync_render
+#!/bin/sh
+exec /usr/local/bin/sync_render /usr/local/bin/claude-real "$@"
+```
+
+This means `claude`, `claude --dangerously-skip-permissions`, etc. all work as before — sync_render is completely transparent.
+
+```bash
+# Build and install
+gcc -o sync_render sync_render.c -lutil
+sudo cp sync_render /usr/local/bin/sync_render
+
+# Wrap the claude binary (run once after installing claude-code)
+sudo mv /usr/local/bin/claude /usr/local/bin/claude-real
+sudo tee /usr/local/bin/claude << 'WRAPPER'
+#!/bin/sh
+exec /usr/local/bin/sync_render /usr/local/bin/claude-real "$@"
+WRAPPER
+sudo chmod +x /usr/local/bin/claude
+```
+
 | Property | Value |
 |----------|-------|
 | **Affected app** | Claude Code (and any CLI that does rapid erase+rewrite) |
@@ -904,8 +939,9 @@ sudo cp sync_render /usr/local/bin/
 | **Protocol** | [Mode 2026 synchronized output](https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797) |
 | **Terminal support** | GNOME Terminal/VTE, kitty, foot, WezTerm (not alacritty) |
 | **Latency** | 5ms coalescing window — imperceptible |
+| **Activation** | Automatic — `claude` shim at `/usr/local/bin/claude` wraps `claude-real` |
 
-> **Note**: Mode 2026 is supported by VTE-based terminals (Ptyxis, GNOME Terminal, kgx). Combined with the Vulkan pool fix (#9), this eliminates both GPU-level and terminal-level flicker.
+> **Note**: Mode 2026 is supported by VTE-based terminals (Ptyxis, GNOME Terminal, kgx). Combined with the Vulkan pool fix (#9) and hardware Vulkan (`VK_DRIVER_FILES`), this eliminates both GPU-level and terminal-level flicker on any Wayland compositor.
 
 ---
 
@@ -946,15 +982,20 @@ sudo cp sync_render /usr/local/bin/
 
 /usr/local/lib64/
     vk_pool_fix.so             → Vulkan pool fix library
-    sync_render                → PTY sync proxy for flicker-free Claude Code
 
 /usr/local/bin/
-    ptyxis-fixed               → Wrapper script with LD_PRELOAD
+    ptyxis-fixed               → Wrapper script with VK_DRIVER_FILES + LD_PRELOAD
+    claude                     → Shim that auto-wraps claude-real with sync_render
+    claude-real                → Original claude-code binary (symlink to cli.js)
+    sync_render                → PTY proxy binary
     vivobook-camera            → Camera on-demand start/status command
 
 ~/.local/share/gnome-shell/extensions/battery-time@wifiteste/
     extension.js               → Battery time GNOME extension
     metadata.json
+
+~/.config/environment.d/
+    vulkan-hardware.conf       → Force freedreno ICD (hardware Vulkan for all apps)
 
 ~/.local/share/dbus-1/services/
     org.gnome.Ptyxis.service   → D-Bus override for LD_PRELOAD

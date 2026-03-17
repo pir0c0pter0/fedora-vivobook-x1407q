@@ -209,13 +209,28 @@ if [[ "$local_vk_installed" == false ]]; then
     warn "  vk_pool_fix.so não disponível — terminal pode ter flicker"
 fi
 
-# Wrapper script
+# Wrapper script (forces hardware Vulkan + pool fix)
 cat > /usr/local/bin/ptyxis-fixed << 'WRAPPER'
 #!/bin/sh
+# Force hardware Vulkan (turnip/freedreno) instead of Lavapipe (software)
+# On Niri, MESA device_select picks LVP by default — force freedreno ICD
+export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
+# Vulkan descriptor pool fix (prevents fragmentation in GSK)
 export LD_PRELOAD=/usr/local/lib64/vk_pool_fix.so
 exec /usr/bin/ptyxis "$@"
 WRAPPER
 chmod +x /usr/local/bin/ptyxis-fixed
+
+# Global hardware Vulkan for ALL apps (environment.d)
+mkdir -p "${REAL_HOME}/.config/environment.d"
+cat > "${REAL_HOME}/.config/environment.d/vulkan-hardware.conf" << 'ENVD'
+# Force hardware Vulkan only (freedreno/turnip on Adreno GPU)
+# Prevents Lavapipe (software) and other irrelevant ICDs from loading
+# Required on Niri — MESA device_select picks LVP without this
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
+ENVD
+chown -R "${REAL_USER}:${REAL_USER}" "${REAL_HOME}/.config/environment.d"
+log "  Hardware Vulkan forçado via environment.d"
 
 # D-Bus service override (Ptyxis usa D-Bus activation)
 mkdir -p "${REAL_HOME}/.local/share/dbus-1/services"
@@ -357,6 +372,35 @@ if [[ -f "${SCRIPT_DIR}/vivobook-update.sh" ]]; then
     cp "${SCRIPT_DIR}/vivobook-update.sh" /usr/local/bin/vivobook-update
     chmod +x /usr/local/bin/vivobook-update
     log "vivobook-update instalado em /usr/local/bin/"
+fi
+
+# Install sync_render + claude shim (flicker-free Claude Code)
+sync_render_installed=false
+if [[ -f "${SCRIPT_DIR}/sync_render.c" ]] && command -v gcc &>/dev/null; then
+    if gcc -o /usr/local/bin/sync_render "${SCRIPT_DIR}/sync_render.c" -lutil 2>/dev/null; then
+        sync_render_installed=true
+        log "sync_render compilado e instalado"
+    fi
+fi
+if [[ "$sync_render_installed" == false && -f "${SCRIPT_DIR}/sync_render" ]]; then
+    cp "${SCRIPT_DIR}/sync_render" /usr/local/bin/sync_render
+    chmod +x /usr/local/bin/sync_render
+    sync_render_installed=true
+    log "sync_render pre-built copiado"
+fi
+if [[ "$sync_render_installed" == true ]] && command -v claude &>/dev/null; then
+    CLAUDE_BIN=$(command -v claude)
+    if [[ "$CLAUDE_BIN" != "/usr/local/bin/sync_render" ]] && ! grep -q "sync_render" "$CLAUDE_BIN" 2>/dev/null; then
+        mv "$CLAUDE_BIN" /usr/local/bin/claude-real
+        cat > /usr/local/bin/claude << 'SHIM'
+#!/bin/sh
+exec /usr/local/bin/sync_render /usr/local/bin/claude-real "$@"
+SHIM
+        chmod +x /usr/local/bin/claude
+        log "claude shim instalado (auto-wraps com sync_render)"
+    else
+        log "claude shim já presente"
+    fi
 fi
 
 # ─── Rebuild initramfs ──────────────────────────────────────────────────────
