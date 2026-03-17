@@ -33,12 +33,18 @@
 #include <termios.h>
 #include <pty.h>
 
-/* Coalescing window in milliseconds. Writes within this window
- * are batched into a single synchronized update.
- * 20ms catches full conversation redraws from Claude Code, which can
- * arrive in multiple chunks with brief pauses between them.
- * Still imperceptible as latency for interactive use. */
+/* Normal coalescing window — catches erase+rewrite pairs from streaming output */
 #define COALESCE_MS 20
+
+/* Extended coalescing window for large redraws (full conversation reload).
+ * Claude Code reloads take 200-500ms to generate. When the buffer has grown
+ * past REDRAW_THRESHOLD, we use this longer window to keep waiting for more
+ * data instead of flushing partial state. */
+#define COALESCE_REDRAW_MS 200
+
+/* Buffer size that indicates a large redraw is in progress (64KB).
+ * Normal streaming output stays well below this. */
+#define REDRAW_THRESHOLD (64 * 1024)
 
 /* Max buffer size. Claude Code full conversation redraws can exceed 1MB
  * (long conversations with syntax highlighting). 16MB avoids mid-redraw
@@ -171,7 +177,8 @@ int main(int argc, char *argv[])
             forward_winsize(real_tty, master_fd);
         }
 
-        int timeout = cbuf_len > 0 ? COALESCE_MS : -1;
+        int timeout = cbuf_len == 0 ? -1 :
+                      cbuf_len > REDRAW_THRESHOLD ? COALESCE_REDRAW_MS : COALESCE_MS;
         int ret = poll(fds, 2, timeout);
 
         if (ret < 0) {
