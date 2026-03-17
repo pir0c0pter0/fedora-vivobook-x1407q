@@ -377,13 +377,17 @@ fi
 # Install sync_render + claude shim (flicker-free Claude Code)
 sync_render_installed=false
 if [[ -f "${SCRIPT_DIR}/sync_render.c" ]] && command -v gcc &>/dev/null; then
-    if gcc -o /usr/local/bin/sync_render "${SCRIPT_DIR}/sync_render.c" -lutil 2>/dev/null; then
+    # Compile to temp path then mv — avoids "Text file busy" if sync_render is running
+    if gcc -O2 -o /tmp/sync_render.new "${SCRIPT_DIR}/sync_render.c" -lutil 2>/dev/null; then
+        mv /tmp/sync_render.new /usr/local/bin/sync_render
+        chmod +x /usr/local/bin/sync_render
         sync_render_installed=true
         log "sync_render compilado e instalado"
     fi
 fi
 if [[ "$sync_render_installed" == false && -f "${SCRIPT_DIR}/sync_render" ]]; then
-    cp "${SCRIPT_DIR}/sync_render" /usr/local/bin/sync_render
+    cp "${SCRIPT_DIR}/sync_render" /tmp/sync_render.new
+    mv /tmp/sync_render.new /usr/local/bin/sync_render
     chmod +x /usr/local/bin/sync_render
     sync_render_installed=true
     log "sync_render pre-built copiado"

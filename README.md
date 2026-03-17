@@ -887,11 +887,17 @@ vivobook-camera status
 
 PTY proxy that eliminates terminal flicker from Claude Code on ARM/Wayland.
 
-**Problem:** Claude Code does erase+rewrite on every streamed token. On ARM/Wayland (Adreno GPU, Ptyxis/VTE), the redraw gap between erase and rewrite is visible — causing constant flicker during long conversations. The Vulkan pool fix (#9) eliminates GPU-level fragmentation, but the terminal-level erase+rewrite pattern still produces flicker under sustained streaming.
+**Problem:** Claude Code does erase+rewrite on every streamed token. On ARM/Wayland (Adreno GPU, Ptyxis/VTE), the redraw gap between erase and rewrite is visible — causing constant flicker during long conversations, especially during full conversation reloads/compaction. The Vulkan pool fix (#9) eliminates GPU-level fragmentation, but the terminal-level erase+rewrite pattern still produces flicker under sustained streaming.
 
-**Root cause:** Each token from Claude Code triggers a sequence of terminal escape codes: cursor movement, erase line, write new content. At streaming speed (~50 tokens/sec), these arrive as separate write syscalls. The terminal renders each write immediately, making the erase visible for 1-2 frames before the new content arrives.
+**Root cause (two-layer):**
 
-**Fix:** `sync_render` — a PTY proxy that creates a pseudo-terminal pair, runs the target command on the slave pty, and coalesces rapid writes within a 5ms window. The coalesced output is wrapped with Mode 2026 synchronized output markers (`\e[?2026h ... \e[?2026l`), which tells the terminal to buffer all changes and render them as a single atomic frame:
+1. Each token from Claude Code (Ink.js) triggers cursor movement + erase + write, arriving as separate write syscalls at streaming speed.
+2. **Critical:** Claude Code already wraps every individual write with Mode 2026 markers (`\e[?2026h...\e[?2026l`). When sync_render adds an outer Mode 2026 pair, VTE receives nested pairs and doesn't reference-count them — it renders after each inner `\e[?2026l`, causing ~200 renders during a conversation reload instead of one per coalescing window.
+
+**Fix:** `sync_render` — a PTY proxy that:
+1. Coalesces rapid writes within a 5ms window (catches all erase+rewrite pairs, typically <1ms apart)
+2. **Strips inner `\e[?2026h`/`\e[?2026l` markers** from the coalesced buffer before wrapping
+3. Wraps the entire batch with a single outer Mode 2026 pair — VTE renders once per 5ms window
 
 ```bash
 # Build
@@ -925,8 +931,8 @@ Every new terminal tab starts `bash` running inside `sync_render`'s PTY proxy. A
 | Property | Value |
 |----------|-------|
 | **Affected app** | Claude Code (and any CLI that does rapid erase+rewrite) |
-| **Root cause** | Per-token erase+rewrite visible on ARM/Wayland due to GPU render gap |
-| **Fix** | `sync_render` — PTY proxy with 5ms coalescing + Mode 2026 sync markers |
+| **Root cause** | Nested Mode 2026 pairs (Ink.js wraps every write + sync_render outer) — VTE renders after each inner `\e[?2026l` |
+| **Fix** | `sync_render` strips inner markers + coalesces 5ms + wraps with single outer Mode 2026 pair |
 | **Protocol** | [Mode 2026 synchronized output](https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797) |
 | **Terminal support** | GNOME Terminal/VTE, kitty, foot, WezTerm (not alacritty) |
 | **Latency** | 5ms coalescing window — imperceptible |

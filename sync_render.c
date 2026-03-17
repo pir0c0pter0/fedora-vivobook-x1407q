@@ -33,18 +33,11 @@
 #include <termios.h>
 #include <pty.h>
 
-/* Normal coalescing window — catches erase+rewrite pairs from streaming output */
-#define COALESCE_MS 20
-
-/* Extended coalescing window for large redraws (full conversation reload).
- * Claude Code reloads take 200-500ms to generate. When the buffer has grown
- * past REDRAW_THRESHOLD, we use this longer window to keep waiting for more
- * data instead of flushing partial state. */
-#define COALESCE_REDRAW_MS 200
-
-/* Buffer size that indicates a large redraw is in progress (64KB).
- * Normal streaming output stays well below this. */
-#define REDRAW_THRESHOLD (64 * 1024)
+/* Coalescing window in milliseconds. Writes within this window
+ * are batched into a single synchronized update.
+ * 5ms is enough to catch erase+rewrite pairs (typically <1ms apart)
+ * without adding perceptible latency. */
+#define COALESCE_MS 5
 
 /* Max buffer size. Claude Code full conversation redraws can exceed 1MB
  * (long conversations with syntax highlighting). 16MB avoids mid-redraw
@@ -95,9 +88,37 @@ static int write_all(int fd, const void *buf, size_t len)
     return 0;
 }
 
-/* Flush coalesced buffer with sync markers */
-static void flush_synced(int out_fd, const char *buf, size_t len)
+/* Strip inner Mode 2026 sync markers from buffer in-place.
+ * Claude Code (Ink.js) wraps every individual write with \e[?2026h...\e[?2026l.
+ * sync_render adds an outer pair — nested pairs cause VTE to render after each
+ * inner \e[?2026l, defeating coalescing. Strip the inner markers so VTE only
+ * sees one sync pair for the entire coalesced batch. */
+static size_t strip_sync_markers(char *buf, size_t len)
 {
+    /* Both sequences are 8 bytes: ESC [ ? 2 0 2 6 h/l */
+    static const char start[8] = "\033[?2026h";
+    static const char end[8]   = "\033[?2026l";
+    char *src = buf;
+    char *dst = buf;
+    char *buf_end = buf + len;
+
+    while (src < buf_end) {
+        size_t remaining = buf_end - src;
+        if (remaining >= 8 &&
+            (memcmp(src, start, 8) == 0 || memcmp(src, end, 8) == 0)) {
+            src += 8; /* skip the sequence */
+        } else {
+            *dst++ = *src++;
+        }
+    }
+    return dst - buf;
+}
+
+/* Flush coalesced buffer with sync markers */
+static void flush_synced(int out_fd, char *buf, size_t len)
+{
+    if (len == 0) return;
+    len = strip_sync_markers(buf, len);
     if (len == 0) return;
     write_all(out_fd, SYNC_START, sizeof(SYNC_START) - 1);
     write_all(out_fd, buf, len);
@@ -177,8 +198,7 @@ int main(int argc, char *argv[])
             forward_winsize(real_tty, master_fd);
         }
 
-        int timeout = cbuf_len == 0 ? -1 :
-                      cbuf_len > REDRAW_THRESHOLD ? COALESCE_REDRAW_MS : COALESCE_MS;
+        int timeout = cbuf_len > 0 ? COALESCE_MS : -1;
         int ret = poll(fds, 2, timeout);
 
         if (ret < 0) {
