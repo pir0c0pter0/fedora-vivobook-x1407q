@@ -79,3 +79,4 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 - **Câmera** — 4 sensores identificados (2x OV02C10 RGB + 2x IR). CCI/CAMSS/CSIPHY não estão no DTB. Patches do Bryan O'Donoghue (Linaro) v8 em review no LKML (Fev 2026). Purwa (X1P) "not fully working" no repo do alexVinarskis. Precisa kernel custom ou esperar merge upstream (~6.21/6.22). Firmware de câmera do Windows NÃO foi extraído.
 - **1 device I2C desconhecido** — bus 4: 0x5b respondendo (0x43 e 0x76 não responderam no scan). Pode ser PS8833 (USB retimer) já mapeado no DTB.
 - **UCM2 upstream** — PR para alsa-ucm-conf adicionando Vivobook 14 ao regex
+- **Mesa upstream** — Issue #15106 aberto: `VkLayer_MESA_device_select` picks Lavapipe on ARM (no PCI/boot_vga) with non-GNOME compositors (Niri, Hyprland). `device_select_find_non_cpu()` deveria ignorar Lavapipe/llvmpipe no fallback. https://gitlab.freedesktop.org/mesa/mesa/-/issues/15106

@@ -546,6 +546,8 @@ update-desktop-database ~/.local/share/applications/
 > **Important**: Ptyxis uses `DBusActivatable=true` — the D-Bus service file override is required, not just the desktop entry. Without it, systemd launches `/usr/bin/ptyxis` directly, bypassing LD_PRELOAD.
 
 > **Compositor note**: On GNOME/Mutter, the `VkLayer_MESA_device_select` layer correctly picks turnip (hardware GPU). On Niri and other non-GNOME Wayland compositors, the device selection falls back to Lavapipe (software CPU Vulkan), making GTK4 apps render entirely on the CPU. Setting `VK_DRIVER_FILES` forces the Vulkan loader to only load the freedreno ICD (turnip), ensuring hardware rendering. The `environment.d` config applies this globally to all apps in the user session.
+>
+> **Upstream**: Root cause filed as [Mesa #15106](https://gitlab.freedesktop.org/mesa/mesa/-/issues/15106) — `device_select_find_non_cpu()` picks Lavapipe (index 0) on ARM when no PCI/boot_vga is present and the compositor isn't GNOME. Fix would be to skip software Vulkan implementations in the fallback path.
 
 **Result:** 952 errors → 0 errors. Vulkan renderer preserved (better performance than GL fallback).
 
