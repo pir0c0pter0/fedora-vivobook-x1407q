@@ -512,20 +512,14 @@ sudo cp vk_pool_fix.so /usr/local/lib64/vk_pool_fix.so
 
 # Create wrapper script (needed because Ptyxis uses D-Bus activation,
 # which ignores Exec= in .desktop and LD_PRELOAD env vars)
-# Also forces hardware Vulkan (turnip) — see compositor note below
+# Note: VK_DRIVER_FILES not needed — Mesa 25.3.6+ (MR 37622) correctly picks
+# turnip on Niri via VkLayer_MESA_device_select
 sudo tee /usr/local/bin/ptyxis-fixed << 'WRAPPER'
 #!/bin/sh
-export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
 export LD_PRELOAD=/usr/local/lib64/vk_pool_fix.so
 exec /usr/bin/ptyxis "$@"
 WRAPPER
 sudo chmod +x /usr/local/bin/ptyxis-fixed
-
-# Force hardware Vulkan globally for ALL apps
-mkdir -p ~/.config/environment.d
-cat > ~/.config/environment.d/vulkan-hardware.conf << 'ENVD'
-VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
-ENVD
 
 # Override D-Bus service (this is what actually launches Ptyxis)
 mkdir -p ~/.local/share/dbus-1/services
@@ -545,9 +539,7 @@ update-desktop-database ~/.local/share/applications/
 
 > **Important**: Ptyxis uses `DBusActivatable=true` — the D-Bus service file override is required, not just the desktop entry. Without it, systemd launches `/usr/bin/ptyxis` directly, bypassing LD_PRELOAD.
 
-> **Compositor note**: On GNOME/Mutter, the `VkLayer_MESA_device_select` layer correctly picks turnip (hardware GPU). On Niri and other non-GNOME Wayland compositors, the device selection falls back to Lavapipe (software CPU Vulkan), making GTK4 apps render entirely on the CPU. Setting `VK_DRIVER_FILES` forces the Vulkan loader to only load the freedreno ICD (turnip), ensuring hardware rendering. The `environment.d` config applies this globally to all apps in the user session.
->
-> **Upstream**: Root cause filed as [Mesa #15106](https://gitlab.freedesktop.org/mesa/mesa/-/issues/15106) — `device_select_find_non_cpu()` picks Lavapipe (index 0) on ARM when no PCI/boot_vga is present and the compositor isn't GNOME. Fix would be to skip software Vulkan implementations in the fallback path.
+> **Compositor note**: `VkLayer_MESA_device_select` correctly picks turnip (Adreno X1-45) on Niri since Mesa 25.3.6 (fixed by MR 37622). No `VK_DRIVER_FILES` override needed on Mesa 25.3+. On older Mesa versions, Lavapipe was selected on non-GNOME compositors — the workaround was `VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json`.
 
 **Result:** 952 errors → 0 errors. Vulkan renderer preserved (better performance than GL fallback).
 
@@ -557,7 +549,7 @@ update-desktop-database ~/.local/share/applications/
 | **Root cause** | GTK4 GSK `maxSets=100` + turnip pool fragmentation |
 | **Error** | `VK_ERROR_OUT_OF_POOL_MEMORY` at `tu_descriptor_set.cc:649` |
 | **Fix** | `vk_pool_fix.so` — increases pool size 200x via LD_PRELOAD + ProcAddr interception |
-| **Compositor** | GNOME/Mutter: auto-selects turnip. Niri/others: needs `VK_DRIVER_FILES` to force freedreno |
+| **Compositor** | All Wayland compositors: turnip auto-selected since Mesa 25.3.6 (MR 37622) |
 | **Alternative** | `GSK_RENDERER=ngl` (forces GL, avoids Vulkan entirely) |
 
 > **Note**: This is an interaction bug between GTK4 and Mesa/turnip — GTK4 creates pools too small for turnip's linear allocator. May be fixed upstream in future GTK4 or Mesa releases. To check: remove the LD_PRELOAD and monitor with `journalctl -f | grep VK_ERROR`.

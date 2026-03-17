@@ -209,28 +209,15 @@ if [[ "$local_vk_installed" == false ]]; then
     warn "  vk_pool_fix.so não disponível — terminal pode ter flicker"
 fi
 
-# Wrapper script (forces hardware Vulkan + pool fix)
+# Wrapper script (pool fix only — VK_DRIVER_FILES not needed on Mesa 25.3+)
+# VkLayer_MESA_device_select correctly picks turnip on Niri since Mesa 25.3.6 (MR 37622)
 cat > /usr/local/bin/ptyxis-fixed << 'WRAPPER'
 #!/bin/sh
-# Force hardware Vulkan (turnip/freedreno) instead of Lavapipe (software)
-# On Niri, MESA device_select picks LVP by default — force freedreno ICD
-export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
-# Vulkan descriptor pool fix (prevents fragmentation in GSK)
+# Vulkan descriptor pool fix (prevents fragmentation in GSK/turnip)
 export LD_PRELOAD=/usr/local/lib64/vk_pool_fix.so
 exec /usr/bin/ptyxis "$@"
 WRAPPER
 chmod +x /usr/local/bin/ptyxis-fixed
-
-# Global hardware Vulkan for ALL apps (environment.d)
-mkdir -p "${REAL_HOME}/.config/environment.d"
-cat > "${REAL_HOME}/.config/environment.d/vulkan-hardware.conf" << 'ENVD'
-# Force hardware Vulkan only (freedreno/turnip on Adreno GPU)
-# Prevents Lavapipe (software) and other irrelevant ICDs from loading
-# Required on Niri — MESA device_select picks LVP without this
-VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
-ENVD
-chown -R "${REAL_USER}:${REAL_USER}" "${REAL_HOME}/.config/environment.d"
-log "  Hardware Vulkan forçado via environment.d"
 
 # D-Bus service override (Ptyxis usa D-Bus activation)
 mkdir -p "${REAL_HOME}/.local/share/dbus-1/services"
