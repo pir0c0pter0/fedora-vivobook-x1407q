@@ -512,10 +512,11 @@ sudo cp vk_pool_fix.so /usr/local/lib64/vk_pool_fix.so
 
 # Create wrapper script (needed because Ptyxis uses D-Bus activation,
 # which ignores Exec= in .desktop and LD_PRELOAD env vars)
-# Note: VK_DRIVER_FILES not needed — Mesa 25.3.6+ (MR 37622) correctly picks
-# turnip on Niri via VkLayer_MESA_device_select
+# VK_DRIVER_FILES still needed: MR 37622 fixes device select but libvulkan_lvp.so
+# still loads without it, degrading GTK4 rendering and causing terminal flicker
 sudo tee /usr/local/bin/ptyxis-fixed << 'WRAPPER'
 #!/bin/sh
+export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
 export LD_PRELOAD=/usr/local/lib64/vk_pool_fix.so
 exec /usr/bin/ptyxis "$@"
 WRAPPER
@@ -539,7 +540,7 @@ update-desktop-database ~/.local/share/applications/
 
 > **Important**: Ptyxis uses `DBusActivatable=true` — the D-Bus service file override is required, not just the desktop entry. Without it, systemd launches `/usr/bin/ptyxis` directly, bypassing LD_PRELOAD.
 
-> **Compositor note**: `VkLayer_MESA_device_select` correctly picks turnip (Adreno X1-45) on Niri since Mesa 25.3.6 (fixed by MR 37622). No `VK_DRIVER_FILES` override needed on Mesa 25.3+. On older Mesa versions, Lavapipe was selected on non-GNOME compositors — the workaround was `VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json`.
+> **Compositor note**: `VkLayer_MESA_device_select` correctly picks turnip (Adreno X1-45) on Niri since Mesa 25.3.6 (MR 37622). However, without `VK_DRIVER_FILES`, `libvulkan_lvp.so` (Lavapipe) still gets loaded alongside freedreno — this degrades GTK4 rendering and causes visible flicker during Claude Code reloads. `VK_DRIVER_FILES` prevents LVP from loading entirely.
 
 **Result:** 952 errors → 0 errors. Vulkan renderer preserved (better performance than GL fallback).
 
@@ -549,7 +550,7 @@ update-desktop-database ~/.local/share/applications/
 | **Root cause** | GTK4 GSK `maxSets=100` + turnip pool fragmentation |
 | **Error** | `VK_ERROR_OUT_OF_POOL_MEMORY` at `tu_descriptor_set.cc:649` |
 | **Fix** | `vk_pool_fix.so` — increases pool size 200x via LD_PRELOAD + ProcAddr interception |
-| **Compositor** | All Wayland compositors: turnip auto-selected since Mesa 25.3.6 (MR 37622) |
+| **Compositor** | All Wayland compositors: turnip selected via MR 37622, but `VK_DRIVER_FILES` still needed to prevent LVP loading |
 | **Alternative** | `GSK_RENDERER=ngl` (forces GL, avoids Vulkan entirely) |
 
 > **Note**: This is an interaction bug between GTK4 and Mesa/turnip — GTK4 creates pools too small for turnip's linear allocator. May be fixed upstream in future GTK4 or Mesa releases. To check: remove the LD_PRELOAD and monitor with `journalctl -f | grep VK_ERROR`.

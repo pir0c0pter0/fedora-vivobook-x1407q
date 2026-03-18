@@ -209,15 +209,27 @@ if [[ "$local_vk_installed" == false ]]; then
     warn "  vk_pool_fix.so não disponível — terminal pode ter flicker"
 fi
 
-# Wrapper script (pool fix only — VK_DRIVER_FILES not needed on Mesa 25.3+)
-# VkLayer_MESA_device_select correctly picks turnip on Niri since Mesa 25.3.6 (MR 37622)
+# Wrapper script — forces hardware Vulkan + pool fix
+# VK_DRIVER_FILES needed even on Mesa 25.3.6: MR 37622 fixes device select but
+# LVP still gets loaded without this override, degrading GTK4 rendering and
+# causing terminal flicker during Claude Code reloads
 cat > /usr/local/bin/ptyxis-fixed << 'WRAPPER'
 #!/bin/sh
-# Vulkan descriptor pool fix (prevents fragmentation in GSK/turnip)
+export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
 export LD_PRELOAD=/usr/local/lib64/vk_pool_fix.so
 exec /usr/bin/ptyxis "$@"
 WRAPPER
 chmod +x /usr/local/bin/ptyxis-fixed
+
+# Global hardware Vulkan for ALL apps (environment.d)
+mkdir -p "${REAL_HOME}/.config/environment.d"
+cat > "${REAL_HOME}/.config/environment.d/vulkan-hardware.conf" << 'ENVD'
+# Force hardware Vulkan only (freedreno/turnip on Adreno GPU)
+# Prevents LVP from loading — MR 37622 fixes device select but LVP still
+# gets loaded without this, degrading GTK4 rendering performance
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
+ENVD
+chown -R "${REAL_USER}:${REAL_USER}" "${REAL_HOME}/.config/environment.d"
 
 # D-Bus service override (Ptyxis usa D-Bus activation)
 mkdir -p "${REAL_HOME}/.local/share/dbus-1/services"
