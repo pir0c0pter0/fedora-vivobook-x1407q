@@ -393,17 +393,42 @@ if [[ "$sync_render_installed" == false && -f "${SCRIPT_DIR}/sync_render" ]]; th
 fi
 if [[ "$sync_render_installed" == true ]]; then
     # Configure Ptyxis profile to use sync_render as shell wrapper
-    # This covers ALL apps launched from the terminal, not just claude
     PTYXIS_UUID=$(sudo -u "${REAL_USER}" dconf read /org/gnome/Ptyxis/default-profile-uuid 2>/dev/null | tr -d "'")
     if [[ -n "$PTYXIS_UUID" ]]; then
         sudo -u "${REAL_USER}" dconf write "/org/gnome/Ptyxis/Profiles/${PTYXIS_UUID}/use-custom-command" true
         sudo -u "${REAL_USER}" dconf write "/org/gnome/Ptyxis/Profiles/${PTYXIS_UUID}/custom-command" "'sync_render /bin/bash --login'"
-        log "Ptyxis profile: sync_render /bin/bash --login (todos os apps cobertos)"
+        log "Ptyxis profile: sync_render /bin/bash --login"
     else
         warn "Ptyxis profile não encontrado — configurar manualmente"
         info "  dconf write /org/gnome/Ptyxis/Profiles/<UUID>/use-custom-command true"
         info "  dconf write /org/gnome/Ptyxis/Profiles/<UUID>/custom-command \"'sync_render /bin/bash --login'\""
     fi
+
+    # Fallback: auto-activate sync_render in bash startup files
+    # Catches tabs opened bypassing the Ptyxis profile custom-command
+    # (e.g. ptyxis-agent session restore, dock icon click edge cases)
+    SYNC_BASHRC_BLOCK='# Flicker-free terminal: re-exec bash inside sync_render PTY proxy
+if [ -z "$SYNC_RENDER_ACTIVE" ] && [ -t 1 ] && [ -x /usr/local/bin/sync_render ]; then
+    export SYNC_RENDER_ACTIVE=1
+    exec /usr/local/bin/sync_render /bin/bash --login
+fi'
+    SYNC_PROFILE_BLOCK='# Auto-activate sync_render for flicker-free terminal rendering
+if [[ -t 1 && -z "$SYNC_RENDER_ACTIVE" ]] && command -v sync_render &>/dev/null; then
+    export SYNC_RENDER_ACTIVE=1
+    exec sync_render /bin/bash --login
+fi'
+    for f in "${REAL_HOME}/.bashrc" "${REAL_HOME}/.bash_profile"; do
+        if [[ -f "$f" ]] && ! grep -q "SYNC_RENDER_ACTIVE" "$f"; then
+            echo "" >> "$f"
+            if [[ "$f" == *bashrc ]]; then
+                echo "$SYNC_BASHRC_BLOCK" >> "$f"
+            else
+                echo "$SYNC_PROFILE_BLOCK" >> "$f"
+            fi
+            log "sync_render fallback adicionado a $f"
+        fi
+    done
+    chown "${REAL_USER}:${REAL_USER}" "${REAL_HOME}/.bashrc" "${REAL_HOME}/.bash_profile" 2>/dev/null || true
 fi
 
 # ─── Rebuild initramfs ──────────────────────────────────────────────────────
