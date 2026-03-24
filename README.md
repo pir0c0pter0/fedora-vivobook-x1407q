@@ -108,6 +108,7 @@ Documents:
 
 - [USB4-TB3-investigation.md](USB4-TB3-investigation.md)
 - [docs/research/2026-03-24-usb4-custom-kernel-plan.md](docs/research/2026-03-24-usb4-custom-kernel-plan.md)
+- [docs/research/2026-03-24-usb4-upstream-patch-checklist.md](docs/research/2026-03-24-usb4-upstream-patch-checklist.md)
 
 ---
 

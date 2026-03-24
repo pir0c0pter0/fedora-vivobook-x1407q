@@ -10,21 +10,28 @@
 A primeira barreira observada foi o PHY incorreto no DTB, mas a investigação
 posterior mostrou que esse não é o bloqueio final. O estado atual ficou:
 
-- **Blocker 1 — PHY ainda em USB3+DP**: o DTB atual usa
-  `qcom,x1e80100-qmp-usb3-dp-phy` onde USB4/TB3 requer
-  `qcom,x1e80100-qmp-usb43dp-phy`
+- **Blocker 1 — topologia DT/PHY ainda incompleta para USB4**: o DT atual
+  expõe só o caminho hoje aproveitado por USB3+DP; para USB4 ainda faltam
+  host/router, graph completo e os follow-ups públicos de PHY/DP
 - **Blocker 2 — firmware/PPM não deixa o Linux entrar no altmode**:
   `ALT_MODE_OVERRIDE` ausente e `SET_NEW_CAM` retorna `Operation not supported`
 - **Blocker 3 — falta o host/router USB4 para x1e80100 no kernel**:
   sem esse driver, não existe barramento USB4 funcional para o dock tunelar
 
 ```
-/proc/device-tree/soc@0/phy@fd5000/compatible  → qcom,x1e80100-qmp-usb3-dp-phy  ← ERRADO para USB4
-/proc/device-tree/soc@0/phy@fda000/compatible  → qcom,x1e80100-qmp-usb3-dp-phy  ← ERRADO para USB4
+/proc/device-tree/soc@0/phy@fd5000/compatible  → qcom,x1e80100-qmp-usb3-dp-phy
+/proc/device-tree/soc@0/phy@fda000/compatible  → qcom,x1e80100-qmp-usb3-dp-phy
 ```
 
-O driver `phy-qcom-qmp-combo.ko` JÁ contém `x1e80100_usb43dp_serdes_tbl` (tabelas USB4 Gen3+DP),
-o hardware suporta, mas o DT não configura.
+Observação importante de upstream: o binding público aceito para X1E fica no
+arquivo `qcom,sc8280xp-qmp-usb43dp-phy.yaml`, mas o `compatible` usado para o
+SoC continua sendo `qcom,x1e80100-qmp-usb3-dp-phy`. Em outras palavras:
+inventar `qcom,x1e80100-qmp-usb43dp-phy` num overlay local não alinha com o
+que existe hoje upstream.
+
+O driver `phy-qcom-qmp-combo.ko` JÁ contém `x1e80100_usb43dp_serdes_tbl`
+(tabelas USB4 Gen3+DP), então o gargalo deixou de ser "achar um compatible
+mágico" e passou a ser subir a pilha USB4 completa com DT/graph corretos.
 
 ## Thunderbolt no kernel: presente mas inativo
 
@@ -153,7 +160,7 @@ Sem TB3 ativo, só acessa: carga PD + interface Billboard (inútil).
 
 Para funcionar completamente precisa:
 1. Driver host/router USB4 no kernel + nó NHI/router correspondente no DT
-2. PHY mudado para `qcom,x1e80100-qmp-usb43dp-phy`
+2. DT/PHY/graph alinhados ao stack público de USB4 para `x1e80100`
 3. `typec_thunderbolt.ko` conseguir negociar altmode
 4. boltctl autorizar o dispositivo
 
@@ -162,7 +169,7 @@ Para funcionar completamente precisa:
 Seguindo o padrão do projeto (INSYDE bloqueia DTB override):
 - Criar módulo DKMS com `of_overlay_fdt_apply()`
 - Overlay precisa:
-  - Mudar `compatible` do PHY `fd5000` e `fda000` para `qcom,x1e80100-qmp-usb43dp-phy`
+  - Alinhar nós de PHY/connector/retimer ao stack público de USB4 do X1E
   - Adicionar nó USB4 NHI/router para `a600000.usb` e `a800000.usb`
 - Referência de padrão: `vivobook_cam_fix.c` (two-phase overlay)
 
@@ -232,6 +239,7 @@ um driver host/router Qualcomm pronto para teste imediato.
 - Tratar `modules/vivobook-usb4-fix-1.0/` como apoio de diagnóstico, não como fix final
 - Usar o fluxo RPM Fedora já aplicado na investigação de `s2idle`
 - Plano de execução: `docs/research/2026-03-24-usb4-custom-kernel-plan.md`
+- Checklist exata do patch stack: `docs/research/2026-03-24-usb4-upstream-patch-checklist.md`
 
 **Alternativas enquanto o patch stack não chega:**
 - Hub USB-A ou dock USB4 passivo (sem requisito TB3)

@@ -45,16 +45,24 @@ Arquivos esperados:
 Observação: esse pedaço precisa seguir exatamente o binding da série RFC. Não vale
 inventar nó local sem casar com o driver real.
 
-### 3. PHY USB43DP para x1e80100
+### 3. PHY / QMP combo e cola de DT
 
-Objetivo: permitir que o combo PHY seja reconhecido como USB4+DP, não só USB3+DP.
+Objetivo: alinhar o combo PHY, os mode-switches e o graph de board ao stack
+público de USB4 para `x1e80100`.
 
 Arquivos prováveis:
 - `drivers/phy/qualcomm/phy-qcom-qmp-combo.c`
-- DTS com `compatible = "qcom,x1e80100-qmp-usb43dp-phy"` nos PHYs `fd5000` e `fda000`
+- `Documentation/devicetree/bindings/phy/qcom,sc8280xp-qmp-usb43dp-phy.yaml`
+- DTS/board files em `arch/arm64/boot/dts/qcom/`
 
-Se a série do host/router já trouxer isso, usar o patch dela. Se não trouxer, esse
-ajuste entra como patch complementar.
+Observação importante:
+- o arquivo do binding é `usb43dp`, mas o `compatible` público aceito para X1E
+  continua `qcom,x1e80100-qmp-usb3-dp-phy`
+- portanto, não vale inventar um `compatible = "qcom,x1e80100-qmp-usb43dp-phy"`
+  fora da série real
+
+Se a série do host/router já trouxer o ajuste certo de PHY/graph, usar o patch
+dela. Se não trouxer, esse bucket entra como patch complementar.
 
 ### 4. UCSI / altmode quirks
 
@@ -199,4 +207,5 @@ Parar e não gastar mais tempo em DKMS se:
 
 - Investigação principal: `USB4-TB3-investigation.md`
 - Fluxo RPM já validado no projeto: `docs/research/2026-03-16-s2idle-suspend-fix.md`
+- Checklist exata do patch stack: `docs/research/2026-03-24-usb4-upstream-patch-checklist.md`
 - Árvore upstream Thunderbolt/USB4: https://kernel.googlesource.com/pub/scm/linux/kernel/git/westeri/thunderbolt/+/refs/heads/master/drivers/thunderbolt/
