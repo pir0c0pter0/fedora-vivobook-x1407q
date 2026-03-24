@@ -48,7 +48,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 17 | **RGB camera working** | DKMS module `vivobook_cam_fix` (two-phase DT overlay) | OV02C10 on CCI1 — libcamera + Snapshot working, on-demand via `vivobook-camera start` |
 | 18 | **Claude Code flicker-free** | PTY proxy `sync_render` with Mode 2026 synchronized output | Coalesces rapid terminal writes into atomic frames — zero flicker on ARM/Wayland |
 
-**6 custom kernel modules**, **1 Vulkan driver fix**, **1 PTY sync proxy**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix**, **0 kernel patches** — everything done at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides.
+**6 custom kernel modules**, **1 Vulkan driver fix**, **1 PTY sync proxy**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix**, **0 shipped kernel patches** — everything needed for daily-driver use currently runs at runtime via DKMS/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides. USB4/TB3 is the first area that appears to require a real custom-kernel path.
 
 ## Current Status
 
@@ -73,8 +73,41 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **CDSP / NPU** | :white_check_mark: Working | CDSP firmware in initramfs — Hexagon compute online (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
 | **Charge control** | :white_check_mark: Working | Charge limit 80% via udev rule (see [Charge Control Fix](#16-battery-charge-control-fix)) |
 | **USB-C DP alt-mode** | :white_check_mark: Working | Both ports, tested DP-2 up to 2560×1600. Device link errors at boot are cosmetic ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
+| **USB4 / TB3 tunneling** | :x: Not working | DP alt-mode works, but Thunderbolt tunneling is blocked by missing Qualcomm x1e80100 host/router support in current kernels. See [USB4/TB3 Status](#usb4tb3-status-mar-2026) |
 | **Camera RGB** | :white_check_mark: Working | OV02C10 via DKMS overlay, on-demand `vivobook-camera start` (see [Camera Fix](#17-rgb-camera-fix)) |
 | **Camera IR** | :x: Not working | pm8010 PMIC physically absent — sensor has no power (see [Camera Research](#camera-research)) |
+
+---
+
+## USB4/TB3 Status (Mar 2026)
+
+The laptop exposes two USB-C ports with USB4/TB3-capable hardware, and plain
+USB-C DP alt-mode already works on both ports. The remaining problem is
+specifically Thunderbolt tunneling for docks like the Elgato TB3 Dock.
+
+Current findings:
+
+- `data_role` can come up as `host [device]` on both Type-C ports; forcing `host`
+  is enough to make the dock appear as a USB Billboard fallback device
+- UCSI reports `ALT_MODE_DETAILS`, but **not** `ALT_MODE_OVERRIDE`; direct
+  `SET_NEW_CAM` requests fail with `Operation not supported`
+- the firmware path behind `pmic_glink_altmode` never sends `USBC_NOTIFY` for the dock,
+  so the PS8833 retimer is never programmed for TB3 by the normal path
+- experimental synthetic TB3 entry now reaches `typec_thunderbolt`, but crashes in
+  the `ps883x` retimer path, so that route is disabled for safety
+- the blocker is no longer just DT or retimer setup: current Linux kernels still
+  lack Qualcomm `x1e80100` USB4 host/router support, so `/sys/bus/usb4/` never appears
+
+Practical conclusion:
+
+- **USB-C DP alt-mode:** working
+- **USB4/TB3 dock tunneling:** blocked upstream
+- **Next step:** custom kernel once a public Qualcomm USB4 host/router patch stack is available
+
+Documents:
+
+- [USB4-TB3-investigation.md](USB4-TB3-investigation.md)
+- [docs/research/2026-03-24-usb4-custom-kernel-plan.md](docs/research/2026-03-24-usb4-custom-kernel-plan.md)
 
 ---
 
@@ -1187,7 +1220,9 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 │       ├── BRIGHTNESS-FIX-STATUS.md
 │       ├── BRIGHTNESS-RESEARCH.md
 │       ├── CAMERA_STATUS.md
-│       └── 2026-03-16-s2idle-suspend-fix.md
+│       ├── 2026-03-16-s2idle-suspend-fix.md
+│       └── 2026-03-24-usb4-custom-kernel-plan.md
+├── USB4-TB3-investigation.md      # USB4 / Thunderbolt 3 reverse-engineering notes
 ├── modules/
 │   └── vivobook-cam-fix-2.0/     # Camera DKMS module + systemd service
 │       ├── vivobook_cam_fix.c
@@ -1209,6 +1244,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **Camera RGB**: Working on-demand (`vivobook-camera start`). Not auto-loaded at boot to avoid I2C bus renumbering. `rmmod` causes CAMCC GDSC corruption — reboot to unload (see [Camera Fix](#17-rgb-camera-fix))
 - **Camera IR**: pm8010 PMIC physically absent — sensor has no power. No one upstream has IR camera working on Snapdragon X Linux (see [Camera Research](#camera-research))
 - **Suspend (S3/s2idle)**: Both crash — PDC wakeup mapping disabled in kernel (`nwakeirq_map = 0`), system power domain has no idle state. Qualcomm patches (Maulik Shah, 5-patch series) in review on LKML. Custom kernel with fix prepared but build incomplete ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
+- **USB4 / Thunderbolt 3**: Plain DP alt-mode works, but TB3 dock tunneling is blocked. `data_role` may initialize wrong, UCSI exposes no `ALT_MODE_OVERRIDE`, the normal firmware path never delivers `USBC_NOTIFY`, and current kernels still lack Qualcomm `x1e80100` host/router support. See [USB4/TB3 Status](#usb4tb3-status-mar-2026)
 - **~~cpufreq~~**: Fixed — `scmi_cpufreq` autoload via `/etc/modules-load.d/` ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
 - **~~CDSP/NPU offline~~**: Fixed — firmware in initramfs (see [CDSP/NPU Fix](#15-cdspnpu-fix))
 - **~~Battery charge control~~**: Fixed — udev rule sets 80% charge limit (see [Charge Control Fix](#16-battery-charge-control-fix))
@@ -1224,6 +1260,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - [x1e/Hamoa camera DTSI](https://lkml.org/lkml/2026/2/26/1238) — Device tree camera nodes for x1e80100 laptops
 - [CAMSS driver for X1 Elite](https://lore.kernel.org/all/20250314-b4-media-comitters-next-25-03-13-x1e80100-camss-driver-v2-7-d163d66fcc0d@linaro.org/T/) — Camera subsystem driver patches
 - [ov08x40 on x1e80100 CRD](https://lwn.net/Articles/992466/) — OV08X40 sensor support for reference design
+- [USB4 Host Router bindings RFC](https://lkml.org/lkml/2025/9/18/1281) — Qualcomm USB4 host/router bindings discussion
 
 ## License
 

@@ -4,6 +4,13 @@
 **Hardware:** ASUS Vivobook X1407QA, Snapdragon X X1-26-100, Kernel 6.19.8-300.fc44.aarch64
 **Objetivo:** Habilitar TB3 (Thunderbolt 3) no Elgato Thunderbolt 3 Dock via bypass do firmware ADSP
 
+> **Status em 2026-03-24:** este design continua útil como groundwork de
+> instrumentação Type-C/retimer, mas a investigação seguinte mostrou que ele não
+> fecha o caso sozinho. O bloqueio principal passou a ser a ausência do
+> host/router USB4 Qualcomm para `x1e80100` no kernel. Ver
+> `USB4-TB3-investigation.md` e
+> `docs/research/2026-03-24-usb4-custom-kernel-plan.md`.
+
 ---
 
 ## Problema
