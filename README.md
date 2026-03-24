@@ -110,6 +110,11 @@ Documents:
 - [docs/research/2026-03-24-usb4-custom-kernel-plan.md](docs/research/2026-03-24-usb4-custom-kernel-plan.md)
 - [docs/research/2026-03-24-usb4-upstream-patch-checklist.md](docs/research/2026-03-24-usb4-upstream-patch-checklist.md)
 
+External tracking:
+
+- [Qualcomm Linux `kernel-topics` issue #825: public DTS/DTB support request for ASUS Vivobook 14 X1407QA](https://github.com/qualcomm-linux/kernel-topics/issues/825)
+- [Technical follow-up comment on issue #825 with current USB4/TB3 blockers](https://github.com/qualcomm-linux/kernel-topics/issues/825#issuecomment-4118158804)
+
 ---
 
 ## Quick Start — Complete Installation Guide
