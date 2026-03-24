@@ -9,8 +9,10 @@ case "${1:-start}" in
             exit 0
         fi
         echo "Loading camera module (OV02C10)..."
-        sudo systemctl start vivobook-camera.service
-        if [ $? -eq 0 ] && ls /dev/video* &>/dev/null; then
+        if ! sudo systemctl restart vivobook-camera.service; then
+            echo "vivobook-camera.service reported an error; checking camera nodes anyway..." >&2
+        fi
+        if ls /dev/video* &>/dev/null; then
             echo "Camera ready. Open Snapshot or any camera app."
         else
             echo "Error loading camera. Check: sudo dmesg | grep vivobook_cam"

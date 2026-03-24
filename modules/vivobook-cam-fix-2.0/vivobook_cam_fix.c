@@ -10,7 +10,7 @@
  *   Phase 1: Add CAMCC, CCI1 (disabled), CAMSS, regulators, pinctrl
  *            → subsystems probe, CCI1 stays inactive
  *   Phase 2: Enable CCI1 → CCI probe → OV02C10 sensor probe
- *   Phase 3: Hold CAMCC runtime PM ref to prevent PLL config loss
+ *   Hold runtime PM refs as soon as each block appears
  *
  * PLL8 fix: CAMCC uses runtime PM (use_rpm=true). After probe, runtime PM
  * suspends CAMCC, powering off MMCX domain. This LOSES all PLL register
@@ -46,7 +46,14 @@
 
 static int overlay_phase1_id = -1;
 static int overlay_phase2_id = -1;
-static struct device *camcc_dev;
+static struct device *held_pm_devs[4];
+
+enum vivobook_cam_pm_target {
+	PM_TARGET_CAMCC,
+	PM_TARGET_CAMSS,
+	PM_TARGET_CCI0,
+	PM_TARGET_CCI1,
+};
 
 /* DMI match table — only load on ASUS Vivobook */
 static const struct dmi_system_id vivobook_cam_dmi[] = {
@@ -88,33 +95,67 @@ static int apply_overlay(const void *blob, unsigned int len, int *id,
 	return 0;
 }
 
-/*
- * Hold a runtime PM reference on CAMCC to prevent it from suspending.
- * Without this, runtime PM powers off MMCX domain after probe, losing
- * all PLL register configs. cam_cc_pll8 then fails to enable with -110
- * (timeout) because L register reads as 0.
- */
-static void camcc_hold_runtime_pm(void)
+static int hold_runtime_pm_target(const char *path, const char *label,
+				  enum vivobook_cam_pm_target target,
+				  unsigned int retries, unsigned int delay_ms)
 {
 	struct device_node *np;
 	struct platform_device *pdev;
+	int ret;
 
-	np = of_find_compatible_node(NULL, NULL, "qcom,x1e80100-camcc");
-	if (!np) {
-		pr_warn("CAMCC node not found, PLL8 may fail\n");
-		return;
+	if (held_pm_devs[target])
+		return 0;
+
+	while (retries--) {
+		np = of_find_node_by_path(path);
+		if (!np) {
+			if (!retries) {
+				pr_warn("%s node %s not found\n", label, path);
+				return -ENODEV;
+			}
+			msleep(delay_ms);
+			continue;
+		}
+
+		pdev = of_find_device_by_node(np);
+		of_node_put(np);
+		if (!pdev) {
+			if (!retries) {
+				pr_warn("%s device not ready yet\n", label);
+				return -EPROBE_DEFER;
+			}
+			msleep(delay_ms);
+			continue;
+		}
+
+		ret = pm_runtime_resume_and_get(&pdev->dev);
+		if (ret < 0) {
+			put_device(&pdev->dev);
+			pr_warn("failed to hold %s runtime PM ref: %d\n",
+				label, ret);
+			return ret;
+		}
+
+		held_pm_devs[target] = &pdev->dev;
+		pr_info("holding %s runtime PM ref\n", label);
+		return 0;
 	}
 
-	pdev = of_find_device_by_node(np);
-	of_node_put(np);
-	if (!pdev) {
-		pr_warn("CAMCC device not found, PLL8 may fail\n");
-		return;
-	}
+	return -ENODEV;
+}
 
-	camcc_dev = &pdev->dev;
-	pm_runtime_get_sync(camcc_dev);
-	pr_info("holding CAMCC runtime PM ref (prevents PLL config loss)\n");
+static void release_runtime_pm_refs(void)
+{
+	int i;
+
+	for (i = ARRAY_SIZE(held_pm_devs) - 1; i >= 0; i--) {
+		if (!held_pm_devs[i])
+			continue;
+
+		pm_runtime_put_sync(held_pm_devs[i]);
+		put_device(held_pm_devs[i]);
+		held_pm_devs[i] = NULL;
+	}
 }
 
 static int __init vivobook_cam_fix_init(void)
@@ -138,14 +179,26 @@ static int __init vivobook_cam_fix_init(void)
 		return ret;
 
 	/*
-	 * Wait for CAMCC and CAMSS to probe before enabling CCI1.
-	 * CCI1 needs CAMCC clocks — if CAMCC hasn't probed yet, CCI
-	 * will defer. 1000ms is generous; CAMCC typically probes in <100ms.
+	 * Grab CAMCC and CAMSS immediately after phase1. A blind sleep here
+	 * leaves a large window for CAMCC runtime PM to drop PLL8 state before
+	 * the first stream ever happens.
 	 */
-	msleep(1000);
+	ret = hold_runtime_pm_target("/soc@0/clock-controller@ade0000",
+				     "CAMCC", PM_TARGET_CAMCC, 20, 50);
+	if (ret) {
+		pr_err("CAMCC hold failed (%d), removing phase1\n", ret);
+		of_overlay_remove(&overlay_phase1_id);
+		return ret;
+	}
 
-	/* Hold CAMCC awake to prevent PLL config loss */
-	camcc_hold_runtime_pm();
+	ret = hold_runtime_pm_target("/soc@0/isp@acb7000",
+					     "CAMSS", PM_TARGET_CAMSS, 20, 50);
+	if (ret) {
+		pr_err("CAMSS hold failed (%d), removing phase1\n", ret);
+		release_runtime_pm_refs();
+		of_overlay_remove(&overlay_phase1_id);
+		return ret;
+	}
 
 	/* Phase 2: enable CCI1 → CCI probe → sensor probe */
 	ret = apply_overlay(vivobook_cam_phase2_dtbo,
@@ -153,8 +206,25 @@ static int __init vivobook_cam_fix_init(void)
 			    &overlay_phase2_id, "phase2");
 	if (ret) {
 		pr_err("phase2 failed (%d), removing phase1\n", ret);
-		if (camcc_dev)
-			pm_runtime_put_sync(camcc_dev);
+		release_runtime_pm_refs();
+		of_overlay_remove(&overlay_phase1_id);
+		return ret;
+	}
+
+	/*
+	 * Hold CCI blocks awake once their platform devices exist.
+	 * This prevents runtime PM from tearing down shared CPAS/slow AHB
+	 * clocks between sensor probe and the first capture.
+	 */
+	hold_runtime_pm_target("/soc@0/cci@ac15000",
+			       "CCI0", PM_TARGET_CCI0, 20, 50);
+
+	ret = hold_runtime_pm_target("/soc@0/cci@ac16000",
+				     "CCI1", PM_TARGET_CCI1, 20, 50);
+	if (ret) {
+		pr_err("CCI1 hold failed (%d), removing overlays\n", ret);
+		release_runtime_pm_refs();
+		of_overlay_remove(&overlay_phase2_id);
 		of_overlay_remove(&overlay_phase1_id);
 		return ret;
 	}
@@ -165,8 +235,7 @@ static int __init vivobook_cam_fix_init(void)
 
 static void __exit vivobook_cam_fix_exit(void)
 {
-	if (camcc_dev)
-		pm_runtime_put_sync(camcc_dev);
+	release_runtime_pm_refs();
 
 	if (overlay_phase2_id >= 0)
 		of_overlay_remove(&overlay_phase2_id);

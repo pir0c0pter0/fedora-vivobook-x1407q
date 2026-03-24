@@ -1,0 +1,61 @@
+diff --git a/drivers/media/platform/qcom/camss/camss-csid.c b/drivers/media/platform/qcom/camss/camss-csid.c
+index 0000000..0000000 100644
+--- a/drivers/media/platform/qcom/camss/camss-csid.c
++++ b/drivers/media/platform/qcom/camss/camss-csid.c
+@@
+ const char * const csid_testgen_modes[] = {
+ 	"Disabled",
+ 	"Incrementing",
+ 	"Alternating 0x55/0xAA",
+ 	"All Zeros 0x00",
+ 	"All Ones 0xFF",
+ 	"Pseudo-random Data",
+ 	"User Specified",
+ 	"Complex pattern",
+ 	"Color box",
+ 	"Color bars",
+ 	NULL
+ };
++
++static bool csid_skip_clock_rate_vote(struct csid_device *csid,
++				      const char *clock_name);
+@@
+ static int csid_set_clock_rates(struct csid_device *csid)
+ {
+ 	struct device *dev = csid->camss->dev;
+ 	const struct csid_format_info *fmt;
+ 	s64 link_freq;
+ 	int i, j;
+ 	int ret;
+@@
+ 			ret = clk_set_rate(clock->clk, rate);
+ 			if (ret < 0) {
+ 				dev_err(dev, "clk set rate failed: %d\n", ret);
+ 				return ret;
+ 			}
+ 		} else if (clock->nfreqs) {
++			if (csid_skip_clock_rate_vote(csid, clock->name))
++				continue;
++
+ 			clk_set_rate(clock->clk, clock->freq[0]);
+ 		}
+ 	}
+ 
+ 	return 0;
+ }
++
++static bool csid_skip_clock_rate_vote(struct csid_device *csid,
++				      const char *clock_name)
++{
++	if (!of_device_is_compatible(csid->camss->dev->of_node,
++				     "qcom,x1e80100-camss"))
++		return false;
++
++	/*
++	 * x1e80100 emits an RCG WARN when qcom_camss tries to reprogram the
++	 * slow AHB clock through the CPAS AHB branch at stream-on time. The
++	 * camera continues to stream correctly without this explicit rate vote,
++	 * so keep the existing firmware/kernel default rate instead.
++	 */
++	return !strcmp(clock_name, "cpas_ahb");
++}

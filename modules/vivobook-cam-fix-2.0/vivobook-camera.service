@@ -15,9 +15,12 @@ ExecStart=/sbin/modprobe qcom_camss
 ExecStart=/sbin/modprobe ov02c10
 ExecStart=/sbin/modprobe vivobook_cam_fix
 
+# Pin camera blocks in "on" before the first autosuspend window.
+ExecStartPost=/bin/sh -c 'udevadm settle -t 5 >/dev/null 2>&1 || true; for p in /sys/devices/platform/soc@0/ade0000.clock-controller /sys/devices/platform/soc@0/acb7000.isp /sys/devices/platform/soc@0/ac15000.cci /sys/devices/platform/soc@0/ac16000.cci; do [ -e "$p/power/control" ] && echo on > "$p/power/control"; done'
+
 # Give sensor time to probe, then restart wireplumber for pipewire to see it
 ExecStartPost=/bin/sleep 3
-ExecStartPost=/bin/sh -c 'loginctl list-sessions --no-legend | while read id rest; do user=$(loginctl show-session "$id" -p Name --value); uid=$(id -u "$user" 2>/dev/null) && XDG_RUNTIME_DIR="/run/user/$uid" su "$user" -c "systemctl --user restart wireplumber" 2>/dev/null; done'
+ExecStartPost=/bin/sh -c 'loginctl list-sessions --no-legend | while read id rest; do user=$(loginctl show-session "$id" -p Name --value); uid=$(id -u "$user" 2>/dev/null || true); [ -n "$uid" ] || continue; [ "$uid" -ge 1000 ] || continue; [ -S "/run/user/$uid/bus" ] || continue; su "$user" -c "XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus systemctl --user restart wireplumber" >/dev/null 2>&1 || true; done; exit 0'
 
 # NOTE: rmmod is dangerous (CAMCC GDSC corruption) — stop = no-op, reboot to unload
 ExecStop=/bin/true
