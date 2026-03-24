@@ -1,0 +1,61 @@
+#!/bin/bash
+# vivobook-usb4-role-fix — force host role when UCSI exposes "host [device]"
+
+set -euo pipefail
+
+PORT="${1:-}"
+SYSFS_PORT="/sys/class/typec/${PORT}"
+ROLE_FILE="${SYSFS_PORT}/data_role"
+PARTNER_PATH="/sys/class/typec/${PORT}-partner"
+
+log() {
+    logger -t vivobook-usb4-role-fix "$*"
+}
+
+read_role() {
+    cat "$ROLE_FILE" 2>/dev/null || true
+}
+
+is_target_machine() {
+    local vendor product board
+
+    vendor="$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || true)"
+    product="$(cat /sys/class/dmi/id/product_name 2>/dev/null || true)"
+    board="$(cat /sys/class/dmi/id/board_name 2>/dev/null || true)"
+
+    [[ "$vendor" == "ASUSTeK COMPUTER INC." || "$vendor" == "ASUSTeK" ]] || return 1
+    [[ "$product" == *"Vivobook"* || "$board" == *"X1407QA"* ]] || return 1
+}
+
+[[ -n "$PORT" ]] || exit 0
+[[ -d "$SYSFS_PORT" ]] || exit 0
+[[ -w "$ROLE_FILE" ]] || exit 0
+is_target_machine || exit 0
+[[ -e "$PARTNER_PATH" ]] || exit 0
+
+for _ in 1 2 3 4 5; do
+    role="$(read_role)"
+    if [[ "$role" == "host [device]" ]]; then
+        if echo host > "$ROLE_FILE" 2>/dev/null; then
+            log "${PORT}: forced data_role=host"
+            exit 0
+        fi
+
+        if printf '%s\n' host | tee "$ROLE_FILE" >/dev/null 2>&1; then
+            log "${PORT}: forced data_role=host via tee"
+            exit 0
+        else
+            role_after="$(read_role)"
+            log "${PORT}: failed to force host role (current='${role_after}')"
+            exit 0
+        fi
+    fi
+
+    if [[ "$role" == "[host] device" ]]; then
+        exit 0
+    fi
+
+    sleep 0.2
+done
+
+exit 0

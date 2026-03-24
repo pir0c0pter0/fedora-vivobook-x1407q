@@ -1,0 +1,8 @@
+# 70-vivobook-usb4.rules
+#
+# The Vivobook occasionally exposes Type-C ports as "host [device]" even when
+# we need the host role for docks and adapters. Use a helper so we can gate the
+# write by DMI and log what happened.
+
+ACTION=="add", SUBSYSTEM=="typec", KERNEL=="port[0-9]*", RUN+="@HELPER_PATH@ %k"
+ACTION=="change", SUBSYSTEM=="typec", KERNEL=="port[0-9]*", RUN+="@HELPER_PATH@ %k"
