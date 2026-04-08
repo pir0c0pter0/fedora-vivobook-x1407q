@@ -432,8 +432,9 @@ Mesa: 25.3.6
 ## Related upstream work
 
 - **Camera RGB:** Working via DKMS two-phase DT overlay. IR camera blocked (pm8010 absent).
-- **Camera (upstream):** Bryan O'Donoghue (Linaro) v8 patches in LKML review (Feb 2026). Expected merge ~6.21/6.22.
+- **Camera (upstream):** Bryan O'Donoghue (Linaro) v9 patches (7 patches, reduzido de v8's 18) in LKML review (Feb 2026). Expected merge ~6.21/6.22. **Note:** patches only cover x1e80100 (Hamoa) — not Purwa/x1p42100. Our DKMS overlay remains the only working path for this SoC.
 - **Suspend (s2idle):** Both S3 and s2idle crash — PDC wakeup disabled in kernel. Qualcomm 5-patch series (Maulik Shah, March 2026) in LKML review. Custom kernel with fix prepared but not built yet.
 - **USB4 / Thunderbolt 3:** USB-C DP alt-mode works, but TB3 tunneling is still blocked. UCSI exposes no `ALT_MODE_OVERRIDE`, the firmware never sends `USBC_NOTIFY` for the dock path, and current kernels still lack Qualcomm `x1e80100` USB4 host/router support. This is the first feature on this machine that looks likely to require a real custom-kernel path.
 - **PCIe race condition:** Upstream fix expected ~6.21, would eliminate WiFi DKMS module.
+- **CDSP/NPU headers:** Qualcomm closed the GitHub issue requesting open-source of Snapdragon X DSP headers (Apr 2026) — officially not releasing them. Proposed alternative: new QDA (DSP Accelerator) kernel driver with FastRPC via RPMsg, but incompatible with existing fastrpc stack. CDSP remains functional via firmware-only approach.
 - **DTB:** Vivobook X1407QA DTB not yet submitted — depends on camera/sensor patches.

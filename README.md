@@ -1184,8 +1184,8 @@ All components loaded via DKMS two-phase DT overlay (`vivobook_cam_fix` v2.0):
 
 | Patch series | Author | Version | Target | Status |
 |-------------|--------|---------|--------|--------|
-| [x1e80100 CAMSS dt-bindings + dtsi](https://lkml.org/lkml/2026/2/25/1157) | Bryan O'Donoghue (Linaro) | v8 (18 patches) | linux-next | In review (Feb 2026) |
-| [x1e/Hamoa camera DTSI](https://lkml.org/lkml/2026/2/26/1238) | Bryan O'Donoghue | v1 (11 patches) | linux-next | In review (Feb 2026) |
+| [x1e80100 CAMSS dt-bindings + dtsi](https://lkml.org/lkml/2026/2/25/1157) | Bryan O'Donoghue (Linaro) | v8→[v9](https://lkml.org/lkml/2026/2/26/1172) (7 patches) | linux-next | In review (Feb 2026) — v9 reduz para 7 patches + PHY API |
+| [x1e/Hamoa camera DTSI](https://lkml.org/lkml/2026/2/26/1238) | Bryan O'Donoghue | v1 (11 patches) | linux-next | In review (Feb 2026) — cobre Dell/Lenovo, **não Purwa** |
 | [CAMSS driver for X1 Elite](https://lore.kernel.org/all/20250314-b4-media-comitters-next-25-03-13-x1e80100-camss-driver-v2-7-d163d66fcc0d@linaro.org/T/) | Bryan O'Donoghue | v2 (7 patches) | media-committers/next | In review |
 | [ov08x40 on x1e80100 CRD](https://lwn.net/Articles/992466/) | Bryan O'Donoghue | — | — | Merged/WIP |
 
@@ -1225,8 +1225,8 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 | Zenbook A14 DTB | Patches by Alex Vinarskis | Merged in 6.19 |
 | Vivobook X1407QA DTB | Not submitted yet | TBD |
 | UCM2 Vivobook 14 audio | Not submitted yet | alsa-ucm-conf |
-| x1e80100 CAMSS (camera subsystem) | v8 by Bryan O'Donoghue (Linaro), 18 patches | ~6.21/6.22 |
-| x1e/Hamoa camera DTSI | v1 by Bryan O'Donoghue, 11 patches | ~6.21/6.22 |
+| x1e80100 CAMSS (camera subsystem) | v9 por Bryan O'Donoghue (Linaro), 7 patches — só Hamoa | ~6.21/6.22 |
+| x1e/Hamoa camera DTSI | v1 por Bryan O'Donoghue, 11 patches — Dell/Lenovo, não Purwa | ~6.21/6.22 |
 | OV02C10 sensor driver | Merged (Hans de Goede) | 6.19 (available) |
 | PDC wakeup + s2idle | v1 by Maulik Shah (Qualcomm), 5 patches | ~6.21/7.0 |
 
@@ -1279,7 +1279,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **Suspend (S3/s2idle)**: Both crash — PDC wakeup mapping disabled in kernel (`nwakeirq_map = 0`), system power domain has no idle state. Qualcomm patches (Maulik Shah, 5-patch series) in review on LKML. Custom kernel with fix prepared but build incomplete ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
 - **USB4 / Thunderbolt 3**: Plain DP alt-mode works, but TB3 dock tunneling is blocked. `data_role` may initialize wrong, UCSI exposes no `ALT_MODE_OVERRIDE`, the normal firmware path never delivers `USBC_NOTIFY`, and current kernels still lack Qualcomm `x1e80100` host/router support. See [USB4/TB3 Status](#usb4tb3-status-mar-2026)
 - **~~cpufreq~~**: Fixed — `scmi_cpufreq` autoload via `/etc/modules-load.d/` ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
-- **~~CDSP/NPU offline~~**: Fixed — firmware in initramfs (see [CDSP/NPU Fix](#15-cdspnpu-fix))
+- **~~CDSP/NPU offline~~**: Fixed — firmware in initramfs (see [CDSP/NPU Fix](#15-cdspnpu-fix)). Nota: Qualcomm **fechou a issue** sobre open-source dos headers DSP Snapdragon X (abr 2026) — não vão liberar. Proposta de driver alternativo QDA no kernel, mas incompatível com stack fastrpc existente.
 - **~~Battery charge control~~**: Fixed — udev rule sets 80% charge limit (see [Charge Control Fix](#16-battery-charge-control-fix))
 - **~~USB-C device links~~**: Cosmetic — `pmic_glink` logs `Failed to create device link (0x180)` for PS8833 retimers at boot. All functionality works ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6))
 - **1 unknown I2C device** on bus 4: address `0x5b` (may be camera sensor on CCI, not regular I2C)
@@ -1289,8 +1289,10 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - [Zenbook A14 patches](https://patchew.org/linux/20250523131605.6624-1-alex.vinarskis@gmail.com/) by Alex Vinarskis
 - [PCIe pwrctrl fix](https://lkml.org/lkml/2026/1/15/415) — 15-patch series targeting kernel ~6.21
 - [linux-x1e80100-zenbook-a14](https://github.com/alexVinarskis/linux-x1e80100-zenbook-a14) — Custom kernel repo with camera patch
-- [x1e80100 CAMSS patches v8](https://lkml.org/lkml/2026/2/25/1157) — Bryan O'Donoghue (Linaro), 18 patches for camera subsystem
-- [x1e/Hamoa camera DTSI](https://lkml.org/lkml/2026/2/26/1238) — Device tree camera nodes for x1e80100 laptops
+- [x1e80100 CAMSS patches v9](https://lkml.org/lkml/2026/2/26/1172) — Bryan O'Donoghue (Linaro), 7 patches, em review (Feb 2026) — **apenas x1e80100 (Hamoa), não cobre Purwa**
+- [x1e80100 CAMSS patches v8](https://lkml.org/lkml/2026/2/25/1157) — versão anterior, 18 patches
+- [x1e/Hamoa camera DTSI](https://lkml.org/lkml/2026/2/26/1238) — Device tree camera nodes para Dell/Lenovo x1e80100
+- [Qualcomm QDA DSP Accelerator driver](https://www.phoronix.com/news/Qualcomm-DSP-Accel-Driver) — nova proposta de driver DSP no kernel (interface diferente do fastrpc existente)
 - [CAMSS driver for X1 Elite](https://lore.kernel.org/all/20250314-b4-media-comitters-next-25-03-13-x1e80100-camss-driver-v2-7-d163d66fcc0d@linaro.org/T/) — Camera subsystem driver patches
 - [ov08x40 on x1e80100 CRD](https://lwn.net/Articles/992466/) — OV08X40 sensor support for reference design
 - [USB4 Host Router bindings RFC](https://lkml.org/lkml/2025/9/18/1281) — Qualcomm USB4 host/router bindings discussion
