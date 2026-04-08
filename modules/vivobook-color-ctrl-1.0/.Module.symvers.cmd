@@ -1,0 +1,1 @@
+savedcmd_Module.symvers :=  /usr/src/kernels/6.19.10-300.fc44.aarch64/scripts/mod/modpost -M          -o Module.symvers -n -T modules.order -i /usr/src/kernels/6.19.10-300.fc44.aarch64/Module.symvers -e 

@@ -1,0 +1,1 @@
+savedcmd_vivobook_color_ctrl.ko := ld -r -EL  -maarch64linux -z norelro -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T /usr/src/kernels/6.19.10-300.fc44.aarch64/scripts/module.lds -o vivobook_color_ctrl.ko vivobook_color_ctrl.o vivobook_color_ctrl.mod.o .module-common.o
