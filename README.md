@@ -25,7 +25,7 @@
 
 ## Achievements
 
-Starting from a laptop that **refused to boot** Linux, every fix was reverse-engineered from scratch — no upstream support, no documentation, no community guides for this model. **18 achievements** and counting.
+Starting from a laptop that **refused to boot** Linux, every fix was reverse-engineered from scratch — no upstream support, no documentation, no community guides for this model. **19 achievements** and counting.
 
 | # | Achievement | Method | Impact |
 |---|------------|--------|--------|
@@ -47,8 +47,9 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 16 | **Battery charge limit** | udev rule sets 80% threshold | Charge stops at 80%, starts at 50% — extends battery lifespan |
 | 17 | **RGB camera fully working** | `vivobook_cam_fix` + `libcamera` OV02C10 data + `qcom_camss` override | OV02C10 on CCI1 — clean `cam -l`, still frame, 720p30 video, Snapshot/PipeWire, on-demand via `vivobook-camera start` |
 | 18 | **Claude Code flicker-free** | PTY proxy `sync_render` with Mode 2026 synchronized output | Coalesces rapid terminal writes into atomic frames — zero flicker on ARM/Wayland |
+| 19 | **Display color control** | DKMS module `vivobook_color_ctrl` — CTM via DRM atomic commit from kernel space | msm_dpu exposes CTM/PCC but not GAMMA_LUT — wl-gammarelay-rs and zwlr_gamma_control both fail; kernel module bypasses DRM master restriction |
 
-**6 custom kernel modules**, **1 in-tree kernel module override** (`qcom-camss`), **1 Vulkan driver fix**, **1 PTY sync proxy**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix** — everything needed for daily-driver use currently runs at runtime via DKMS/module overrides/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides. USB4/TB3 is the first area that still appears to require a real custom-kernel path.
+**7 custom kernel modules**, **1 in-tree kernel module override** (`qcom-camss`), **1 Vulkan driver fix**, **1 PTY sync proxy**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix** — everything needed for daily-driver use currently runs at runtime via DKMS/module overrides/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides. USB4/TB3 is the first area that still appears to require a real custom-kernel path.
 
 ## Current Status
 
@@ -76,6 +77,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **USB4 / TB3 tunneling** | :x: Not working | DP alt-mode works, but Thunderbolt tunneling is blocked by missing Qualcomm x1e80100 host/router support in current kernels. See [USB4/TB3 Status](#usb4tb3-status-mar-2026) |
 | **Camera RGB** | :white_check_mark: Working | OV02C10 via DKMS overlay + `qcom_camss` override, clean still/video and clean kernel log on-demand `vivobook-camera start` (see [Camera Fix](#17-rgb-camera-fix)) |
 | **Camera IR** | :x: Not working | pm8010 PMIC physically absent — sensor has no power (see [Camera Research](#camera-research)) |
+| **Display color control** | :white_check_mark: Working | CTM saturation + contrast via DKMS module (see [Display Color Control Fix](#19-display-color-control-fix)) |
 
 ---
 
@@ -1003,6 +1005,52 @@ Every new terminal tab starts `bash` running inside `sync_render`'s PTY proxy. A
 
 ---
 
+### 19. Display Color Control Fix
+
+CTM-based saturation and contrast control for the eDP panel via a kernel module that commits color matrices directly through the DRM atomic API.
+
+**Problem:** The display has no hardware brightness curve control accessible from Linux userspace. The standard tools all fail:
+
+- `ddcutil`: eDP panel does not expose DDC/CI over i2c — no response on any bus
+- `wl-gammarelay-rs` / `zwlr_gamma_control_manager_v1`: requires `GAMMA_LUT` DRM property. msm_dpu calls `drm_crtc_enable_color_mgmt(crtc, 0, true, 0)` — CTM enabled, but `GAMMA_LUT` size is 0 (not supported by PCC hardware). niri logs: `couldn't get gamma properties: missing GAMMA_LUT property`
+
+**Root cause:** The Qualcomm Display Processing Unit (`msm_dpu`) exposes a CTM (Color Transformation Matrix) through its PCC (Panel Color Correction) hardware block, but PCC does not implement a gamma lookup table. All userspace gamma tools depend on `GAMMA_LUT`.
+
+**Fix:** `vivobook_color_ctrl` — a DKMS kernel module that:
+
+1. Finds the DRM device via `bus_find_device_by_name(&platform_bus_type, NULL, "ae01000.display-controller")` + child device iteration (walking the "drm" class children to get `struct drm_minor *`)
+2. Builds a 3×3 BT.709 luma-preserving saturation matrix combined with a contrast scalar
+3. Commits it as a `drm_property_blob` via `drm_atomic_commit` from kernel space — bypassing the DRM master restriction that blocks userspace tools
+
+**Two bugs worked around in msm_dpu:**
+
+1. **`CONVERT_S3_15` sign bug** (`dpu_crtc.c`): The macro `(((u64)val & ~BIT_ULL(63)) >> 17) & GENMASK(17,0)` strips the sign bit, treating all CTM values as positive. Negative off-diagonal elements (needed for saturation > 1.0) become positive, adding brightness instead of subtracting. Fix: encode negative values as 18-bit 2's complement trick: `twos = (0x40000 - hw) & 0x3FFFF; return twos << 17`
+
+2. **`color_mgmt_changed` not set**: `_dpu_crtc_setup_cp_blocks()` has guard `if (!state->color_mgmt_changed && !drm_atomic_crtc_needs_modeset(state)) return;` — setting `crtc_state->ctm` directly bypasses the DRM property path that normally sets this flag. Must set `crtc_state->color_mgmt_changed = true` explicitly.
+
+```bash
+# Build and load
+cd ~/Documents/wifiteste/modules/vivobook-color-ctrl-1.0
+make
+sudo insmod vivobook_color_ctrl.ko
+
+# Adjust (each write causes a brief display flash — expected)
+echo "1.0" | sudo tee /sys/kernel/vivobook_color/saturation
+echo "1.15" | sudo tee /sys/kernel/vivobook_color/contrast
+
+# Current defaults: saturation=1.000 (neutral), contrast=1.150
+```
+
+| Property | Value |
+|----------|-------|
+| **Sysfs** | `/sys/kernel/vivobook_color/saturation`, `/sys/kernel/vivobook_color/contrast` |
+| **Range** | 0.000 – 2.000 (1.000 = identity) |
+| **Hardware** | msm_dpu PCC block, 18-bit S3.15 coefficients |
+| **Display flash** | Expected on each write — PCC hardware reprogrammed via atomic commit |
+| **DKMS** | `vivobook-color-ctrl` — autoinstall configured, manual `insmod` needed until boot autoload set up |
+
+---
+
 ## System Configuration Summary
 
 ### Files modified on the system
@@ -1237,7 +1285,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 ```
 .
 ├── build-vivobook-iso.sh          # ISO builder — download, patch, flash
-├── setup-vivobook.sh              # Post-install — apply all 18 fixes
+├── setup-vivobook.sh              # Post-install — apply all 19 fixes
 ├── vivobook-update.sh             # Safe update manager
 ├── extract-qcom-firmware.sh       # Extract firmware from Windows
 ├── install-battery-time-ext.sh    # GNOME battery time extension
@@ -1257,12 +1305,16 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 │       └── 2026-03-24-usb4-custom-kernel-plan.md
 ├── USB4-TB3-investigation.md      # USB4 / Thunderbolt 3 reverse-engineering notes
 ├── modules/
-│   └── vivobook-cam-fix-2.0/     # Camera DKMS module + systemd service
-│       ├── vivobook_cam_fix.c
-│       ├── vivobook_cam_phase1.dts
-│       ├── vivobook_cam_phase2.dts
-│       ├── vivobook-camera.service
-│       ├── vivobook-camera
+│   ├── vivobook-cam-fix-2.0/     # Camera DKMS module + systemd service
+│   │   ├── vivobook_cam_fix.c
+│   │   ├── vivobook_cam_phase1.dts
+│   │   ├── vivobook_cam_phase2.dts
+│   │   ├── vivobook-camera.service
+│   │   ├── vivobook-camera
+│   │   ├── Makefile
+│   │   └── dkms.conf
+│   └── vivobook-color-ctrl-1.0/  # Display color control — CTM saturation + contrast
+│       ├── vivobook_color_ctrl.c
 │       ├── Makefile
 │       └── dkms.conf
 └── CLAUDE.md                      # AI assistant project rules
