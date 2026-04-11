@@ -5,9 +5,7 @@
 | Câmera | Status | Detalhes |
 |--------|--------|---------|
 | RGB #1 (OV02C10) | **FUNCIONANDO** | CCI1 bus 1 (AON), addr 0x36, libcamera OK, Snapshot mostra imagem |
-| IR (modelo TBD) | **BLOQUEADA** | AVDD (pm8010 LDO7_M 2.9V) inacessível — pm8010 ausente no SPMI, LDO7 não provisionado no RPMH. Sensor -ENXIO no I2C. Precisa patch RPMH ou ACPI power seq. |
-| RGB #2 | **DESCONHECIDA** | Sem info de AeoB, possivelmente mesma lente que IR |
-| IR #2 | **DESCONHECIDA** | Sem info |
+| IR (HM1092) | **PESQUISADA, NÃO RESOLVIDA** | Sensor confirmado Hynix HM1092, ACPI VEN_QCOM&DEV_0C99, binding Asus Purwa = QRD_Pw, AVDD pm8010 LDO7_M @ 2.91V, DOVDD pm8010 LDO4_M @ 1.82V, MCLK0 GPIO 96, reset GPIO 109, AosShareResource=0. pm8010 ausente no SPMI scan mas Windows usa essas LDOs. Checkpoint A = YELLOW. I2C bus ainda TBD. Ver `2026-04-11-ir-camera-discovery.md` |
 
 ## Módulo DKMS: `vivobook-cam-fix` v2.0
 

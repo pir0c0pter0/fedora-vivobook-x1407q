@@ -73,11 +73,12 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 | Áudio speakers | WSA884x × 2 via SoundWire |
 | Áudio DSP | ADSP via Q6APM, LPASS macros (rx, tx, wsa, va) |
 | Câmera RGB | OV02C10 × 2 (OmniVision, 2MP), CCI1, I2C 0x36, CSIPHY4, MCLK4 19.2MHz |
-| Câmera IR | 2 sensores IR (Windows Hello), modelos TBD |
+| Câmera IR | Hynix HM1092 (Windows Hello), ACPI QCOM0C99 (Spectra 695 ISP Aux Sensor), MCLK0 GPIO 96, reset GPIO 109, bus TBD |
 
 ## TODO
 
-- **Câmera** — 4 sensores identificados (2x OV02C10 RGB + 2x IR). CCI/CAMSS/CSIPHY não estão no DTB. Patches do Bryan O'Donoghue (Linaro) v8 em review no LKML (Fev 2026). Purwa (X1P) "not fully working" no repo do alexVinarskis. Precisa kernel custom ou esperar merge upstream (~6.21/6.22). Firmware de câmera do Windows NÃO foi extraído.
+- **Câmera IR (HM1092)** — Phase 1 discovery concluída em 2026-04-11 via Qualcomm SOC driver package (não BIOS). Sensor confirmado: Hynix HM1092, binding Asus Purwa = `SUBSYS_13041043&REV_0001` → `CameraAuxSensor_Device_QRD_Pw`, AVDD=pm8010 LDO7_M (2.91V), DOVDD=pm8010 LDO4_M (1.82V), MCLK0 GPIO 96, reset GPIO 109, AosShareResource=0 (sem AOS sharing). Bloqueio: pm8010 ausente no SPMI scan mas Windows usa LDO4_M/LDO7_M → duas hipóteses (pm8010 dormente no DT Zenbook A14 vs fisicamente ausente). Próximo passo = habilitar pm8010 no DT overlay como teste empírico (Checkpoint A = YELLOW). Findings em `docs/research/2026-04-11-ir-camera-discovery.md`.
+- **RGB cpas_ahb patch regrediu no 6.19.10** — kernel bumpou 6.19.8 → 6.19.10 e perdemos o patch `qcom_camss` que suprimia `cam_cc_pll8/Lucid PLL/cam_cc_slow_ahb_clk_src` warnings. Frame capture ainda funciona, só warnings cosmético. Fix = rebuild do patch pra 6.19.10 em `/lib/modules/6.19.10-300.fc44.aarch64/updates/`.
 - **1 device I2C desconhecido** — bus 4: 0x5b respondendo (0x43 e 0x76 não responderam no scan). Pode ser PS8833 (USB retimer) já mapeado no DTB.
 - **UCM2 upstream** — PR para alsa-ucm-conf adicionando Vivobook 14 ao regex
 - **Mesa issue #15106** — Aberto e fechado: device select via MR 37622 funciona no Mesa 25.3.6, mas LVP ainda é carregado sem `VK_DRIVER_FILES`, degradando rendering. `VK_DRIVER_FILES` mantido no setup. https://gitlab.freedesktop.org/mesa/mesa/-/issues/15106
