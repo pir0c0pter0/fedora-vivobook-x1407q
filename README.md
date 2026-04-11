@@ -35,7 +35,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 4 | **Battery reporting** | ADSP firmware injected into initramfs | `qcom-battmgr` was failing at early boot |
 | 5 | **Brightness control** | DKMS module `vivobook_bl_fix` | Direct PMIC PWM register manipulation |
 | 6 | **Fn hotkeys** | DKMS module `vivobook_hotkey_fix` | ASUS vendor HID init + key mapping |
-| 7 | **GPU acceleration** | Firmware in initramfs (4 files including ZAP shader) | Adreno X1-45 with full 3D |
+| 7 | **GPU acceleration** | Firmware in initramfs (3 files: `sqe.fw`, `gmu.bin`, device-specific ZAP shader) | Adreno X1-45 with full 3D |
 | 8 | **Boot time: 1min47s -> 8s** | TPM timeout elimination + initrd cleanup | Masked phantom TPM devices, removed unused modules |
 | 9 | **Terminal flicker fixed** | LD_PRELOAD Vulkan pool fix (`vk_pool_fix.so`) | GTK4/turnip descriptor pool fragmentation → 952 errors eliminated |
 | 10 | **Battery time in panel** | GNOME Shell extension `battery-time@wifiteste` | Hover over battery icon shows time remaining (weighted rolling average) |
@@ -470,19 +470,18 @@ echo "vivobook_hotkey_fix" | sudo tee /etc/modules-load.d/vivobook-hotkey-fix.co
 
 GPU firmware in initramfs for early loading.
 
-**Problem:** The Adreno X1-45 GPU requires four firmware files. The generic firmware is only available compressed (`.xz`) and the kernel's direct loader fails during early boot. The ZAP shader (`qcdxkmsucpurwa.mbn`) uses the MDT loader which does NOT retry — if it's not available immediately, GPU init fails completely (no 3D acceleration).
+**Problem:** The Adreno X1-45 GPU driver probes at ~t=2.0s, ~375ms before switchroot, so its firmware must be in the initramfs. `msm.ko` does not declare `MODULE_FIRMWARE`, so dracut never auto-pulls the GPU blobs — they have to be forced via `install_items`. The ZAP shader (`qcdxkmsucpurwa.mbn`) is referenced by name in the Zenbook A14 DTB override (`zap-shader.firmware-name`) and extracted from Windows — it is not in any Linux package.
 
 ```bash
-echo 'install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/gen71500_zap.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcdxkmsucpurwa.mbn "' | sudo tee /etc/dracut.conf.d/qcom-gpu-firmware.conf
+echo 'install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcdxkmsucpurwa.mbn "' | sudo tee /etc/dracut.conf.d/qcom-gpu-firmware.conf
 sudo dracut --force
 ```
 
 | Firmware | Path | Purpose |
 |----------|------|---------|
-| `gen71500_sqe.fw.xz` | `qcom/` | Shader Queue Engine |
-| `gen71500_gmu.bin.xz` | `qcom/` | Graphics Management Unit |
-| `gen71500_zap.mbn` | `qcom/x1p42100/` | ZAP shader (generic) |
-| `qcdxkmsucpurwa.mbn` | `qcom/x1p42100/ASUSTeK/zenbook-a14/` | ZAP shader (device-specific) |
+| `gen71500_sqe.fw.xz` | `qcom/` | Shader Queue Engine (package `qcom-firmware`) |
+| `gen71500_gmu.bin.xz` | `qcom/` | Graphics Management Unit (package `qcom-firmware`) |
+| `qcdxkmsucpurwa.mbn` | `qcom/x1p42100/ASUSTeK/zenbook-a14/` | ZAP shader (Windows blob, DTB-referenced) |
 
 | Property | Value |
 |----------|-------|

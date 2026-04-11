@@ -323,7 +323,7 @@ check_firmware_compat() {
         "qcadsp8380.mbn" "adsp_dtbs.elf"
         "qccdsp8380.mbn" "cdsp_dtbs.elf"
         "gen71500_sqe.fw" "gen71500_gmu.bin"
-        "gen71500_zap.mbn" "qcdxkmsucpurwa.mbn"
+        "qcdxkmsucpurwa.mbn"
     )
 
     local changed=()

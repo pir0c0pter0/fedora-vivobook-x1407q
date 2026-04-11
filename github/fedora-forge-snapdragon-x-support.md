@@ -148,24 +148,23 @@ Must load **before** `vivobook_kbd_fix` so the HID driver is registered when the
 
 ---
 
-### 7. GPU — firmware not in initramfs, MDT loader doesn't retry
+### 7. GPU — firmware not in initramfs (msm.ko has no MODULE_FIRMWARE declarations)
 
 **Problem:** No 3D acceleration. `glxinfo` shows software renderer. GPU init fails with `gpu hw init failed: -2`.
 
-**Root cause:** The Adreno X1-45 requires four firmware files. The ZAP shader (`qcdxkmsucpurwa.mbn`) uses the MDT (Meta Data Table) loader which does **not retry** — if the firmware isn't available at the first probe attempt, GPU init fails permanently. The generic firmware files are compressed (`.xz`) and the kernel's direct loader fails during early boot when only the initramfs is available.
+**Root cause:** The Adreno X1-45 GPU driver probes at ~t=2.0s, ~375ms before `switchroot` — so when it calls `adreno_request_fw()` the rootfs is not yet mounted. `msm.ko` does not declare any `MODULE_FIRMWARE`, so dracut never pulls the GPU blobs automatically. And the device-specific ZAP shader (`qcdxkmsucpurwa.mbn`) is extracted from Windows and not present in any Linux firmware package at all.
 
-**How it was fixed:** All four GPU firmware files added to initramfs via dracut:
+**How it was fixed:** Three GPU firmware files forced into the initramfs via a dracut `install_items+=` drop-in:
 
 | Firmware | Purpose |
 |----------|---------|
-| `gen71500_sqe.fw.xz` | Shader Queue Engine microcode |
-| `gen71500_gmu.bin.xz` | Graphics Management Unit firmware |
-| `gen71500_zap.mbn` | ZAP shader (generic, TrustZone authenticated) |
-| `qcdxkmsucpurwa.mbn` | ZAP shader (device-specific, MDT format) |
+| `gen71500_sqe.fw.xz` | Shader Queue Engine microcode (`qcom-firmware` package) |
+| `gen71500_gmu.bin.xz` | Graphics Management Unit firmware (`qcom-firmware` package) |
+| `qcdxkmsucpurwa.mbn` | ZAP shader (Windows-extracted; DTB `zap-shader.firmware-name`) |
 
 **Result:** Full 3D acceleration — freedreno (OpenGL), turnip (Vulkan), Adreno X1-45.
 
-**What Fedora could do:** Same as #4 — ship Qualcomm firmware in initramfs. The GPU firmware is the most critical because the MDT loader has zero retry logic.
+**What Fedora could do:** Add `MODULE_FIRMWARE("qcom/gen71500_sqe.fw")` and friends to `msm.ko` so dracut pulls them via the standard firmware-resolution path. The device-specific ZAP shader problem is deeper — it needs either an upstream-signed replacement or a DTB that points at the upstream path (`qcom/x1p42100/gen71500_zap.mbn`), assuming the TrustZone accepts that signature.
 
 ---
 

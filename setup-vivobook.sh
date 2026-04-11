@@ -178,7 +178,7 @@ echo "vivobook_hotkey_fix" > /etc/modules-load.d/vivobook-hotkey-fix.conf
 # ─── 7. GPU — Firmware no initramfs ─────────────────────────────────────────
 step 7 $TOTAL "GPU (firmware initramfs)..."
 cat > /etc/dracut.conf.d/qcom-gpu-firmware.conf << 'EOF'
-install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/gen71500_zap.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcdxkmsucpurwa.mbn "
+install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcdxkmsucpurwa.mbn "
 EOF
 log "  dracut GPU config"
 

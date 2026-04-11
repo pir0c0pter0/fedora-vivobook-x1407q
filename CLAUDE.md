@@ -4,7 +4,7 @@
 
 Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com Snapdragon X. Tudo feito em runtime — 6 módulos DKMS, 1 fix Vulkan (LD_PRELOAD), 1 PTY sync proxy, 1 extensão GNOME, 1 fix UCM2 áudio, 1 fix suspend/lid, 1 fix cpufreq, 1 fix CDSP/NPU, 1 fix charge control, 0 patches de kernel.
 
-## Conquistas (18/18)
+## Conquistas (19/19)
 
 1. **Boot** — Custom ISO + Zenbook A14 DTB (mesmo die Qualcomm "Purwa")
 2. **WiFi** — DKMS `wcn_regulator_fix` + board.bin (PCIe race condition + regulador)
@@ -12,7 +12,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 4. **Bateria** — Firmware ADSP no initramfs (qcom-battmgr falhava no early boot)
 5. **Brilho** — DKMS `vivobook_bl_fix` (PWM via PMIC PMK8550 LPG → DTEST3 → GPIO5)
 6. **Hotkeys Fn** — DKMS `vivobook_hotkey_fix` (init ASUS vendor HID + key mapping)
-7. **GPU** — 4 firmwares no initramfs (ZAP shader MDT loader não faz retry)
+7. **GPU** — 3 firmwares no initramfs (probe 375ms antes do switchroot, msm.ko não declara MODULE_FIRMWARE; ZAP shader `qcdxkmsucpurwa.mbn` referenciado pelo DTB Zenbook A14)
 8. **Boot 1:47→8s** — Mask TPM fantasma + limpeza initrd
 9. **Terminal flicker** — `vk_pool_fix.so` (LD_PRELOAD pool Vulkan 200x) + `VK_DRIVER_FILES` (força turnip hardware, Niri usa Lavapipe sem isso)
 10. **Tempo bateria** — Extensão GNOME `battery-time@wifiteste` (média ponderada)
@@ -24,6 +24,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 16. **Charge control** — udev rule seta limite 80% via `charge_control_end_threshold` — firmware aceita escrita, start auto 50%
 17. **Câmera RGB** — DKMS `vivobook_cam_fix` (DT overlay two-phase) — OV02C10 no CCI1, libcamera + Snapshot, on-demand via `vivobook-camera start`
 18. **Claude Code flicker-free** — `sync_render` (PTY proxy com Mode 2026 synchronized output) — coalesce 5ms + render atômico, zero flicker no ARM/Wayland
+19. **Display color control** — DKMS `vivobook_color_ctrl` (CTM via DRM atomic commit do kernel) — msm_dpu expõe CTM/PCC mas não GAMMA_LUT, wl-gammarelay-rs e zwlr_gamma_control falham, módulo kernel bypassa restrição de DRM master
 
 ## Regras — SEMPRE fazer
 

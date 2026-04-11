@@ -424,15 +424,12 @@ inject_patches() {
         log "  WiFi firmware (ath11k/WCN6855) copiado"
     fi
 
-    # GPU firmware
+    # GPU firmware (gen71500_sqe.fw.xz + gen71500_gmu.bin.xz vêm do pacote qcom-firmware;
+    # qcdxkmsucpurwa.mbn é o ZAP shader extraído do Windows, referenciado pelo DTB)
     for fw in gen71500_sqe.fw gen71500_sqe.fw.xz gen71500_gmu.bin gen71500_gmu.bin.xz; do
         [[ -f "/usr/lib/firmware/qcom/$fw" ]] && \
             sudo cp "/usr/lib/firmware/qcom/$fw" "${ROOTFS}/usr/lib/firmware/qcom/" 2>/dev/null || true
     done
-    if [[ -f "/usr/lib/firmware/qcom/x1p42100/gen71500_zap.mbn" ]]; then
-        sudo mkdir -p "${ROOTFS}/usr/lib/firmware/qcom/x1p42100"
-        sudo cp "/usr/lib/firmware/qcom/x1p42100/gen71500_zap.mbn" "${ROOTFS}/usr/lib/firmware/qcom/x1p42100/"
-    fi
 
     # --- 2. DKMS module sources ---
     ((n++)); step $n $total "Módulos DKMS (sources)..."
@@ -464,7 +461,7 @@ inject_patches() {
 install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcadsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsp_dtbs.elf /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspr.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsps.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspua.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/battmgr.jsn "
 EOF
     sudo tee "${ROOTFS}/etc/dracut.conf.d/qcom-gpu-firmware.conf" >/dev/null << 'EOF'
-install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/gen71500_zap.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcdxkmsucpurwa.mbn "
+install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcdxkmsucpurwa.mbn "
 EOF
     sudo tee "${ROOTFS}/etc/dracut.conf.d/qcom-cdsp-firmware.conf" >/dev/null << 'EOF'
 install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qccdsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdsp_dtbs.elf /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdspr.jsn "
