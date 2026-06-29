@@ -132,7 +132,29 @@ External tracking:
 | **USB drive** | 8GB+ for ISO, 32GB+ recommended for persistence |
 | **Second machine** | To prepare the USB (or use Windows on the Vivobook itself) |
 
-### Step 0 — Prepare BIOS
+> ⚠️ **Do Step 1 while Windows still exists.** Installing Fedora wipes the
+> Windows partition, and the Qualcomm firmware lives *only* there. Dump it to a
+> pendrive first — without it WiFi, GPU, audio and battery won't work.
+
+### Step 1 — Extract firmware from Windows (do this FIRST, before formatting)
+
+The Qualcomm firmware is proprietary and exists only on the Windows partition
+(ADSP, GPU ZAP shader, CDSP, WiFi). Dump it to a pendrive **before** wiping
+Windows:
+
+1. Copy **`extract-firmware-windows.bat`** to a USB pendrive (FAT32/exFAT).
+2. On the Vivobook's Windows, double-click it from the pendrive — it
+   self-elevates to Administrator (click *Yes*).
+3. It copies the Qualcomm driver packages (`qc*`) from the `DriverStore`
+   (keeping the `.inf` files, which the Linux tool needs to remap names) into
+   `vivobook-qcom-firmware\` on the pendrive, and prints the next steps.
+4. Keep this pendrive — you'll apply the firmware in **Step 6**.
+
+> No Windows anymore? You can still dump the firmware from another ASUS
+> Vivobook X1407QA, or recover it later from a Windows recovery image. There is
+> no generic download — it is signed for this exact device family.
+
+### Step 2 — Prepare BIOS
 
 1. Power off the Vivobook completely
 2. Hold **F2** and power on to enter UEFI/BIOS
@@ -140,7 +162,7 @@ External tracking:
 4. **Enable USB boot** (Boot → USB Boot → Enabled)
 5. Save and exit (F10)
 
-### Step 1 — Download ISO and Flash USB
+### Step 3 — Download ISO and Flash USB
 
 ```bash
 # Download Fedora 44 aarch64 Workstation Live ISO
@@ -151,15 +173,24 @@ sudo dd if=Fedora-Workstation-Live-aarch64-44-1.1.iso of=/dev/sdX bs=4M status=p
 sync
 ```
 
-Or use the ISO builder from this repo:
+Or use the ISO builder from this repo (**Part 1** — runs on *any* PC / any distro):
 
 ```bash
-sudo bash build-vivobook-iso.sh
+bash build-vivobook-iso.sh
 ```
 
-This script downloads the ISO, injects all 16 patches (firmware, DKMS, configs, GRUB params), and optionally flashes to USB.
+The build is split into two parts so the ISO can be built anywhere, with all
+hardware configuration deferred to the actual laptop:
 
-### Step 2 — Boot from USB
+| Part | Script | Where it runs | What it does |
+|------|--------|---------------|--------------|
+| **1** | `build-vivobook-iso.sh` | any PC (dnf/apt/pacman/zypper) | downloads/verifies the Fedora ISO, injects Snapdragon boot params into the live GRUB, and bundles the **Part 2 payload** into `/opt/vivobook-fixes/` (setup script + helper scripts + `modules/` + bundled `firmware/` + `.c` sources). Rebuilds the squashfs/ISO and can flash USB. |
+| **2** | `setup-vivobook.sh` | on the Vivobook, after install | applies *all* hardware fixes (DKMS, firmware initramfs, audio, brightness, WiFi, battery, terminal, suspend, …). Auto-stages bundled `modules/` → `/usr/src` and `firmware/` → `/usr/lib/firmware`. |
+
+Part 1 only prepares boot + payload; it does **not** require the laptop's
+firmware or DKMS modules to be present, so it works on any machine.
+
+### Step 4 — Boot from USB
 
 1. Connect the USB drive
 2. Hold **F12** (or **ESC**) during power-on for boot menu
@@ -173,42 +204,43 @@ This script downloads the ISO, injects all 16 patches (firmware, DKMS, configs, 
 
 > **Why Zenbook A14 DTB?** There is no DTB for the Vivobook X1407QA in the kernel. The Zenbook A14 uses the same Qualcomm x1p42100 SoC. The INSYDE UEFI firmware provides the DTB and **cannot be overridden** from GRUB on aarch64 (7 methods tested: BLS devicetree, GRUB fdt module, dtbloader.efi, EFI stub — all fail). So we boot with the Zenbook DTB and fix all hardware differences via runtime kernel modules.
 
-### Step 3 — Install Fedora to NVMe
+### Step 5 — Install Fedora to NVMe
 
 1. Once booted into the Live environment, open the installer
 2. Install Fedora to the NVMe drive (default btrfs layout)
 3. Reboot into the installed system
 
-> **Important:** At first boot from NVMe, edit GRUB again with `clk_ignore_unused pd_ignore_unused` — you'll make this permanent in Step 5.
+> **Important:** At first boot from NVMe, edit GRUB again with `clk_ignore_unused pd_ignore_unused` — you'll make this permanent in Step 6.
 
-### Step 4 — Extract Firmware from Windows
+### Step 6 — Apply firmware + all fixes (Part 2)
 
-The Qualcomm firmware is proprietary and must be extracted from the Windows partition. BitLocker prevents direct access from Linux, so run this **from Windows** (PowerShell as Administrator):
-
-See [docs/GUIA-EXTRAIR-FIRMWARE.md](docs/GUIA-EXTRAIR-FIRMWARE.md) for the full PowerShell scripts.
-
-Quick version — copy the extracted firmware to a USB drive, then on the Linux side:
+Now on the **installed Fedora**. First, plug in the pendrive from Step 1 and
+install the firmware dump:
 
 ```bash
-# Mount the USB with the extracted firmware
-sudo mount /dev/sdX1 /mnt
-
-# Copy firmware to the correct paths
-sudo mkdir -p /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/
-sudo cp /mnt/qcom-firmware/*.mbn /mnt/qcom-firmware/*.elf \
-    /mnt/qcom-firmware/*.jsn /mnt/qcom-firmware/*.bin \
-    /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/
-
-# WiFi board data
-sudo mkdir -p /usr/usr/lib/firmware/ath11k/WCN6855/hw2.1/
-sudo cp /mnt/qcom-firmware/board*.bin /usr/usr/lib/firmware/ath11k/WCN6855/hw2.1/board.bin
-
-sudo umount /mnt
+# Point the extractor at the dump on the pendrive (adjust the path):
+sudo ./extract-qcom-firmware.sh /run/media/$USER/PENDRIVE/vivobook-qcom-firmware
+# (or, if bundled in the ISO: sudo /opt/vivobook-fixes/extract-qcom-firmware.sh <dump>)
 ```
 
-### Step 5 — Apply All Fixes (Automated)
+`extract-qcom-firmware.sh` uses `qcom-firmware-extract` (installing it if
+needed) to place every file at its correct path under
+`/usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/` and the WiFi board data
+under `/usr/lib/firmware/ath11k/WCN6855/hw2.1/`.
 
-Clone this repo and run the setup script:
+> Still dual-booting? Run `sudo ./extract-qcom-firmware.sh` with **no argument**
+> to mount the local Windows NTFS partition directly (no pendrive needed). For
+> the manual PowerShell method see
+> [docs/GUIA-EXTRAIR-FIRMWARE.md](docs/GUIA-EXTRAIR-FIRMWARE.md).
+
+Then apply every hardware fix. If you built the ISO with Part 1, the setup
+payload is already on the system:
+
+```bash
+sudo /opt/vivobook-fixes/setup-vivobook.sh
+```
+
+Otherwise, clone this repo and run it from there:
 
 ```bash
 git clone https://github.com/pir0c0pter0/fedora-vivobook-x1407q.git
@@ -216,11 +248,15 @@ cd fedora-vivobook-x1407q
 sudo bash setup-vivobook.sh
 ```
 
-This applies all 16 fixes: 4 DKMS modules, firmware initramfs configs, GRUB params, suspend/lid, UCM2 audio, Vulkan fix, GNOME extension, charge control, cpufreq, dconf defaults, and cleans up old scripts.
+This applies all fixes: DKMS modules, firmware initramfs configs, GRUB params,
+suspend/lid, UCM2 audio, Vulkan fix, `sync_render`, GNOME extension, charge
+control, cpufreq, dconf defaults, on-demand camera, and cleans up old scripts.
+When run from the bundled payload it also auto-stages `modules/` → `/usr/src`
+and bundled `firmware/` → `/usr/lib/firmware` first, so it is self-contained.
 
 Or apply each fix manually — see [Detailed Fix Guide](#detailed-fix-guide) below.
 
-### Step 6 — Reboot and Verify
+### Step 7 — Reboot and Verify
 
 ```bash
 sudo reboot
@@ -258,21 +294,39 @@ wpctl status | grep -A5 Sinks
 
 ## Setup Scripts
 
-### Option A — Custom ISO (recommended for new installs)
+### Part 1 — Build the bootable ISO (any PC)
 
 ```bash
-sudo bash build-vivobook-iso.sh
+bash build-vivobook-iso.sh        # interactive menu
 ```
 
-Interactive menu: downloads Fedora ISO, injects all 16 patches into the squashfs, creates a ready-to-flash ISO. First boot runs DKMS build + initramfs automatically.
+Detects the package manager (dnf/apt/pacman/zypper), downloads + verifies the
+Fedora ISO, injects Snapdragon boot params into the live GRUB, bundles the
+Part 2 payload into `/opt/vivobook-fixes/`, rebuilds the squashfs/ISO, and can
+flash USB. No laptop firmware/DKMS needed — runs anywhere.
 
-### Option B — Post-install on existing Fedora
+### Part 2 — Apply all fixes (on the Vivobook)
 
 ```bash
+sudo /opt/vivobook-fixes/setup-vivobook.sh   # from the bundled payload
+# or, from a repo clone:
 sudo bash setup-vivobook.sh
 ```
 
-Applies all 16 fixes on an already-installed system: DKMS modules, firmware initramfs, GRUB params, suspend/lid, UCM2 audio, Vulkan fix, GNOME extension, charge control, cpufreq, dconf defaults. Also cleans up deprecated scripts.
+Run **after** installing Fedora and (if needed) extracting the firmware. Applies
+every hardware fix on the running system: DKMS modules, firmware initramfs,
+GRUB params, suspend/lid, UCM2 audio, Vulkan fix, `sync_render`, GNOME
+extension, charge control, cpufreq, dconf defaults, on-demand camera. Auto-stages
+bundled modules/firmware and cleans up deprecated scripts.
+
+### Windows firmware dump
+
+```
+extract-firmware-windows.bat      # run on Windows (auto-elevates), dumps to pendrive
+```
+
+Copies the Qualcomm `qc*` driver packages from the Windows `DriverStore` to a
+pendrive, to be consumed on Linux by `extract-qcom-firmware.sh <dump-dir>`.
 
 ### Safe updates
 
