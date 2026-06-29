@@ -1,16 +1,18 @@
 #!/bin/bash
 # =============================================================================
-# setup-vivobook.sh — Apply all 16 ASUS Vivobook X1407QA fixes on installed Fedora
+# setup-vivobook.sh — PARTE 2: aplica todos os fixes no Vivobook já bootado
+# ASUS Vivobook X1407QA (Snapdragon X) — Fedora 44 aarch64
 #
-# Substitui: setup-all.sh (que não tinha lid/suspend, UCM2, dconf system-wide)
+# Empacotado no ISO pela Parte 1 (build-vivobook-iso.sh) em /opt/vivobook-fixes/.
+# Faz stage automático dos módulos DKMS (modules/ -> /usr/src) e do firmware
+# bundled (firmware/ -> /usr/lib/firmware) quando rodado de /opt/vivobook-fixes/.
 #
 # Pré-requisitos:
-#   - Fedora 44 aarch64 instalado no NVMe
-#   - Firmware extraído em /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/
-#   - WiFi board.bin em /usr/lib/firmware/ath11k/WCN6855/hw2.1/
-#   - Módulos DKMS em /usr/src/ (wcn-regulator-fix, vivobook-kbd-fix, etc.)
+#   - Fedora 44 aarch64 instalado e bootado no Vivobook
+#   - Firmware: bundled no ISO (auto-staged) OU extraído do Windows antes:
+#       sudo /opt/vivobook-fixes/extract-qcom-firmware.sh
 #
-# Usage: sudo bash setup-vivobook.sh
+# Usage: sudo bash /opt/vivobook-fixes/setup-vivobook.sh
 # =============================================================================
 
 set -uo pipefail
@@ -95,6 +97,26 @@ install_dkms_module() {
     fi
 }
 
+# ─── Stage do payload bundled (vindo do ISO, em /opt/vivobook-fixes/) ─────────
+# Copia módulos DKMS -> /usr/src e firmware bundled -> /usr/lib/firmware, para o
+# setup ser self-contained quando rodado de /opt/vivobook-fixes/ (Parte 2).
+stage_bundled() {
+    if [[ -d "${SCRIPT_DIR}/modules" ]]; then
+        local moddir name
+        for moddir in "${SCRIPT_DIR}/modules"/*/; do
+            [[ -d "$moddir" ]] || continue
+            name=$(basename "$moddir")
+            if [[ ! -d "/usr/src/${name}" ]]; then
+                cp -a "$moddir" "/usr/src/${name}" && log "  DKMS source staged: ${name}"
+            fi
+        done
+    fi
+    if [[ -d "${SCRIPT_DIR}/firmware" ]]; then
+        cp -a "${SCRIPT_DIR}/firmware/." /usr/lib/firmware/ 2>/dev/null && \
+            log "  Firmware bundled instalado em /usr/lib/firmware/"
+    fi
+}
+
 # =============================================================================
 #  MAIN
 # =============================================================================
@@ -107,6 +129,7 @@ echo -e "${BOLD}═════════════════════�
 echo ""
 
 check_deps
+stage_bundled
 
 # ─── Pre-flight: firmware check ──────────────────────────────────────────────
 FW_DIR="/usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14"

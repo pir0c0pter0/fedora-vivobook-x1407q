@@ -1,8 +1,12 @@
 #!/bin/bash
 # =============================================================================
 # extract-qcom-firmware.sh
-# Extrai firmware Qualcomm da partição Windows do ASUS Vivobook 14 X1407Q
-# Executar APÓS dar boot no Fedora (live ou instalado)
+# Extrai firmware Qualcomm do ASUS Vivobook 14 X1407Q. Executar no Fedora.
+#
+# Uso:
+#   sudo ./extract-qcom-firmware.sh                  # monta a partição Windows
+#   sudo ./extract-qcom-firmware.sh <dir-do-dump>    # usa dump de pendrive
+#                                                    # (extract-firmware-windows.bat)
 # =============================================================================
 
 set -euo pipefail
@@ -20,9 +24,11 @@ info() { echo -e "${CYAN}[i]${NC} $1"; }
 
 FW_DEST="/lib/firmware/qcom"
 WIN_MOUNT="/mnt/windows"
+SOURCE_DIR="${1:-}"   # opcional: dump do pendrive (gerado por extract-firmware-windows.bat)
+MOUNTED=0
 
 cleanup_fw() {
-    sudo umount "${WIN_MOUNT}" 2>/dev/null || true
+    [[ "$MOUNTED" == "1" ]] && sudo umount "${WIN_MOUNT}" 2>/dev/null || true
 }
 trap cleanup_fw EXIT
 
@@ -45,35 +51,51 @@ if ! command -v qcom-firmware-extract &>/dev/null; then
     fi
 fi
 
-# Encontrar e montar partição Windows
-log "Procurando partição Windows..."
-win_part=""
-
-for part in $(lsblk -rno NAME,FSTYPE | grep -E 'ntfs' | awk '{print $1}'); do
-    mnt_test="/tmp/win-test-$$"
-    mkdir -p "${mnt_test}"
-    if sudo mount -o ro "/dev/${part}" "${mnt_test}" 2>/dev/null; then
-        if [[ -d "${mnt_test}/Windows/System32" ]]; then
-            win_part="/dev/${part}"
-            sudo umount "${mnt_test}"
-            rmdir "${mnt_test}"
-            break
-        fi
-        sudo umount "${mnt_test}"
+if [[ -n "${SOURCE_DIR}" ]]; then
+    # Origem = dump do pendrive (extract-firmware-windows.bat). Sem montar nada.
+    if [[ ! -d "${SOURCE_DIR}" ]]; then
+        err "Diretório de origem não existe: ${SOURCE_DIR}"
+        exit 1
     fi
-    rmdir "${mnt_test}" 2>/dev/null || true
-done
+    if [[ ! -d "${SOURCE_DIR}/Windows/System32" ]]; then
+        warn "${SOURCE_DIR} não parece um dump válido (sem Windows/System32/)"
+        info "Use a pasta 'vivobook-qcom-firmware' gerada pelo .bat."
+    fi
+    WIN_MOUNT="${SOURCE_DIR}"
+    log "Usando dump do pendrive: ${SOURCE_DIR}"
+else
+    # Encontrar e montar partição Windows
+    log "Procurando partição Windows..."
+    win_part=""
 
-if [[ -z "${win_part}" ]]; then
-    err "Partição Windows não encontrada!"
-    info "Certifique-se que o Windows está instalado no NVMe."
-    info "Se já removeu o Windows, precisará dos firmwares de outra fonte."
-    exit 1
+    for part in $(lsblk -rno NAME,FSTYPE | grep -E 'ntfs' | awk '{print $1}'); do
+        mnt_test="/tmp/win-test-$$"
+        mkdir -p "${mnt_test}"
+        if sudo mount -o ro "/dev/${part}" "${mnt_test}" 2>/dev/null; then
+            if [[ -d "${mnt_test}/Windows/System32" ]]; then
+                win_part="/dev/${part}"
+                sudo umount "${mnt_test}"
+                rmdir "${mnt_test}"
+                break
+            fi
+            sudo umount "${mnt_test}"
+        fi
+        rmdir "${mnt_test}" 2>/dev/null || true
+    done
+
+    if [[ -z "${win_part}" ]]; then
+        err "Partição Windows não encontrada!"
+        info "Certifique-se que o Windows está instalado no NVMe."
+        info "Ou gere o dump no Windows (extract-firmware-windows.bat) e rode:"
+        info "  sudo $0 /caminho/do/pendrive/vivobook-qcom-firmware"
+        exit 1
+    fi
+
+    log "Partição Windows: ${win_part}"
+    sudo mkdir -p "${WIN_MOUNT}"
+    sudo mount -o ro "${win_part}" "${WIN_MOUNT}"
+    MOUNTED=1
 fi
-
-log "Partição Windows: ${win_part}"
-sudo mkdir -p "${WIN_MOUNT}"
-sudo mount -o ro "${win_part}" "${WIN_MOUNT}"
 
 # Extrair firmware
 log "Extraindo firmware..."

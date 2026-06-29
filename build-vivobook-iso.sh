@@ -1,17 +1,18 @@
 #!/bin/bash
 # =============================================================================
-# build-vivobook-iso.sh — Unified interactive ISO builder
+# build-vivobook-iso.sh — PARTE 1: builder do ISO bootável (roda em QUALQUER PC)
 # ASUS Vivobook X1407QA (Snapdragon X) — Fedora 44 aarch64
 #
-# Substitui: prepare-fedora-snapdragon.sh, build-v3-iso.sh, build-v4-iso.sh
+# Faz o mínimo para BOOTAR e INSTALAR o Linux no Vivobook:
+#   - Detecta gerenciador de pacotes (dnf/apt/pacman/zypper)
+#   - Baixa/verifica (SHA256) o ISO Fedora aarch64
+#   - Injeta parâmetros de boot Snapdragon no GRUB do live
+#   - Empacota o payload da PARTE 2 em /opt/vivobook-fixes/ (setup-vivobook.sh
+#     + scripts + modules/ + firmware/ bundled + fontes .c)
+#   - Reconstrói squashfs + ISO, verifica, grava USB
 #
-# Features:
-#   - Menu interativo
-#   - Verificação SHA256 da ISO source
-#   - Injeta TODOS os patches no squashfs (firmware, DKMS, configs, etc.)
-#   - Serviço first-boot para DKMS build + initramfs
-#   - Verificação da ISO de saída
-#   - Flash USB opcional
+# Os fixes de hardware NÃO são aplicados aqui — isso é a PARTE 2:
+#   no Vivobook já bootado, rodar: sudo /opt/vivobook-fixes/setup-vivobook.sh
 # =============================================================================
 
 set -uo pipefail
@@ -25,6 +26,10 @@ FEDORA_VERSION="${FEDORA_VERSION:-44}"
 FEDORA_ARCH="aarch64"
 FEDORA_EDITION="Workstation"
 FEDORA_MIRROR="https://dl.fedoraproject.org/pub/fedora/linux"
+
+# Overlay de firmware bundled no repo (espelha /usr/lib/firmware) — opcional.
+# Se presente, tem prioridade sobre o firmware do host. Permite build em qualquer PC.
+FW_BUNDLE="${SCRIPT_DIR}/firmware"
 
 # Globals set during build
 ISO_INPUT=""
@@ -44,7 +49,6 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
-DIM='\033[2m'
 NC='\033[0m'
 
 log()    { echo -e "${GREEN}[+]${NC} $*"; }
@@ -79,6 +83,30 @@ prompt_yn() {
 }
 
 # ─── Dependencies ────────────────────────────────────────────────────────────
+# Instala dependências no gerenciador de pacotes detectado (qualquer distro)
+install_deps_pkgs() {
+    if command -v dnf &>/dev/null; then
+        sudo dnf install -y xorriso squashfs-tools coreutils curl e2fsprogs
+    elif command -v apt-get &>/dev/null; then
+        sudo apt-get update && sudo apt-get install -y xorriso squashfs-tools coreutils curl e2fsprogs
+    elif command -v pacman &>/dev/null; then
+        sudo pacman -Sy --needed --noconfirm libisoburn squashfs-tools coreutils curl e2fsprogs
+    elif command -v zypper &>/dev/null; then
+        sudo zypper install -y xorriso squashfs coreutils curl e2fsprogs
+    else
+        err "Gerenciador de pacotes não reconhecido (dnf/apt/pacman/zypper)."
+        info "Instale manualmente: xorriso squashfs-tools curl e2fsprogs"
+        return 1
+    fi
+}
+
+# Retorna o primeiro diretório existente da lista (repo-bundled tem prioridade sobre host)
+first_dir() {
+    local d
+    for d in "$@"; do [[ -d "$d" ]] && { echo "$d"; return 0; }; done
+    return 1
+}
+
 check_deps() {
     local missing=()
     for cmd in xorriso unsquashfs mksquashfs sha256sum curl e2fsck resize2fs; do
@@ -87,7 +115,17 @@ check_deps() {
     if [[ ${#missing[@]} -gt 0 ]]; then
         warn "Dependências faltando: ${missing[*]}"
         if prompt_yn "Instalar automaticamente?"; then
-            sudo dnf install -y xorriso squashfs-tools coreutils curl e2fsprogs
+            install_deps_pkgs || { err "Falha ao instalar dependências."; exit 1; }
+            # Re-checa: nomes de pacote variam por distro, confirma que resolveu
+            local still=()
+            for cmd in xorriso unsquashfs mksquashfs sha256sum curl e2fsck resize2fs; do
+                command -v "$cmd" &>/dev/null || still+=("$cmd")
+            done
+            if [[ ${#still[@]} -gt 0 ]]; then
+                err "Ainda faltam após instalar: ${still[*]}"
+                info "Instale manualmente e rode de novo."
+                exit 1
+            fi
         else
             err "Instale manualmente e tente novamente."
             exit 1
@@ -103,14 +141,15 @@ check_deps() {
 # ─── Space check ─────────────────────────────────────────────────────────────
 check_space() {
     local required_gb="${1:-12}"
+    local path="${2:-/tmp}"
     local avail_mb
-    avail_mb=$(df -BM /tmp | tail -1 | awk '{print $4}' | tr -d 'M')
+    avail_mb=$(df -BM "$path" | tail -1 | awk '{print $4}' | tr -d 'M')
     local required_mb=$((required_gb * 1024))
     if [[ $avail_mb -lt $required_mb ]]; then
-        err "Precisa de pelo menos ${required_gb}GB livres em /tmp (tem $((avail_mb / 1024))GB)"
+        err "Precisa de pelo menos ${required_gb}GB livres em ${path} (tem $((avail_mb / 1024))GB)"
         exit 1
     fi
-    log "Espaço em /tmp: $((avail_mb / 1024))GB (precisa ${required_gb}GB)"
+    log "Espaço em ${path}: $((avail_mb / 1024))GB (precisa ${required_gb}GB)"
 }
 
 # ─── ISO Download ────────────────────────────────────────────────────────────
@@ -276,7 +315,7 @@ verify_iso() {
         "${iso_path}.sha256" \
         "${iso_path%.*}-CHECKSUM" \
         "${SCRIPT_DIR}/SHA256SUMS" \
-        "${SCRIPT_DIR}/Fedora-Workstation-44-1.1-aarch64-CHECKSUM"; do
+        "${SCRIPT_DIR}"/Fedora-Workstation-*-"${FEDORA_ARCH}"-CHECKSUM; do
         if [[ -f "$candidate" ]]; then
             checksum_file="$candidate"
             break
@@ -324,9 +363,9 @@ verify_iso() {
     xorriso -indev "$iso_path" -ls /EFI/ >/dev/null 2>&1 && has_efi=true
     xorriso -indev "$iso_path" -find / -name "grub.cfg" 2>/dev/null | grep -q grub && has_grub=true
 
-    [[ "$has_live" == true ]] && log "LiveOS presente" || warn "LiveOS não encontrado"
-    [[ "$has_efi" == true ]] && log "EFI boot presente" || warn "EFI boot não encontrado"
-    [[ "$has_grub" == true ]] && log "GRUB config presente" || warn "GRUB config não encontrado"
+    if [[ "$has_live" == true ]]; then log "LiveOS presente"; else warn "LiveOS não encontrado"; fi
+    if [[ "$has_efi" == true ]]; then log "EFI boot presente"; else warn "EFI boot não encontrado"; fi
+    if [[ "$has_grub" == true ]]; then log "GRUB config presente"; else warn "GRUB config não encontrado"; fi
 
     return 0
 }
@@ -338,8 +377,15 @@ extract_iso() {
     mkdir -p "$ISO_DIR"
 
     log "Extraindo ISO..."
-    xorriso -osirrox on -indev "$ISO_INPUT" -extract / "$ISO_DIR" 2>/dev/null
+    if ! xorriso -osirrox on -indev "$ISO_INPUT" -extract / "$ISO_DIR" 2>/dev/null; then
+        err "Falha ao extrair ISO com xorriso"
+        exit 1
+    fi
     chmod -R u+w "$ISO_DIR"
+    if [[ ! -d "${ISO_DIR}/LiveOS" ]]; then
+        err "Extração incompleta — LiveOS ausente em ${ISO_DIR}"
+        exit 1
+    fi
     log "ISO extraída"
 }
 
@@ -390,370 +436,91 @@ extract_squashfs() {
     fi
 }
 
-# ─── Inject all patches ──────────────────────────────────────────────────────
-inject_patches() {
-    local total=12
-    local n=0
-
+# ─── Bundle do payload da Parte 2 ───────────────────────────────────────────────
+# Copia setup-vivobook.sh + tudo que ele precisa para /opt/vivobook-fixes/ no rootfs.
+# NENHUMA config de hardware é aplicada aqui — isso é trabalho da Parte 2, rodada
+# no Vivobook já bootado (sudo /opt/vivobook-fixes/setup-vivobook.sh).
+bundle_payload() {
     header "══════════════════════════════════════════
-  INJETANDO PATCHES NO SQUASHFS
+  BUNDLE DO PAYLOAD (Parte 2) NO SQUASHFS
 ══════════════════════════════════════════"
 
-    # --- 1. Firmware Qualcomm ---
-    ((n++)); step $n $total "Firmware Qualcomm..."
-    local fw_device="${ROOTFS}/usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14"
-    sudo mkdir -p "$fw_device"
+    local dest="${ROOTFS}/opt/vivobook-fixes"
+    sudo mkdir -p "$dest"
 
-    local fw_source="/usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14"
-    if [[ -d "$fw_source" ]]; then
-        sudo cp -a "$fw_source"/* "$fw_device/" 2>/dev/null || true
-        local fw_count
-        fw_count=$(ls "$fw_device" 2>/dev/null | wc -l)
-        log "  Firmware copiado do sistema: ${fw_count} arquivos"
-    else
-        warn "  Firmware não encontrado em ${fw_source}"
-        warn "  Extrair do Windows após boot: /opt/vivobook-fixes/extract-qcom-firmware.sh"
-    fi
-
-    # WiFi board.bin (ath11k WCN6855)
-    local wifi_src="/usr/lib/firmware/ath11k/WCN6855/hw2.1"
-    local wifi_dst="${ROOTFS}/usr/lib/firmware/ath11k/WCN6855/hw2.1"
-    if [[ -d "$wifi_src" ]]; then
-        sudo mkdir -p "$wifi_dst"
-        sudo cp -a "$wifi_src"/* "$wifi_dst/" 2>/dev/null || true
-        log "  WiFi firmware (ath11k/WCN6855) copiado"
-    fi
-
-    # GPU firmware (gen71500_sqe.fw.xz + gen71500_gmu.bin.xz vêm do pacote qcom-firmware;
-    # qcdxkmsucpurwa.mbn é o ZAP shader extraído do Windows, referenciado pelo DTB)
-    for fw in gen71500_sqe.fw gen71500_sqe.fw.xz gen71500_gmu.bin gen71500_gmu.bin.xz; do
-        [[ -f "/usr/lib/firmware/qcom/$fw" ]] && \
-            sudo cp "/usr/lib/firmware/qcom/$fw" "${ROOTFS}/usr/lib/firmware/qcom/" 2>/dev/null || true
-    done
-
-    # --- 2. DKMS module sources ---
-    ((n++)); step $n $total "Módulos DKMS (sources)..."
-    local dkms_copied=0
-    for mod in wcn-regulator-fix vivobook-kbd-fix vivobook-bl-fix vivobook-hotkey-fix; do
-        local mod_src="/usr/src/${mod}-1.0"
-        if [[ -d "$mod_src" ]]; then
-            sudo cp -a "$mod_src" "${ROOTFS}/usr/src/"
-            ((dkms_copied++))
-            log "  ${mod}-1.0 copiado"
-        fi
-    done
-    if [[ $dkms_copied -eq 0 ]]; then
-        warn "  Nenhum módulo DKMS encontrado em /usr/src/"
-        warn "  Copie os módulos para /usr/src/ antes de rodar, ou instale manualmente pós-boot"
-    else
-        log "  ${dkms_copied}/4 módulos DKMS copiados"
-    fi
-
-    # --- 3. dracut configs ---
-    ((n++)); step $n $total "Configs dracut..."
-    sudo mkdir -p "${ROOTFS}/etc/dracut.conf.d"
-
-    sudo tee "${ROOTFS}/etc/dracut.conf.d/wcn-regulator-fix.conf" >/dev/null <<< \
-        'force_drivers+=" wcn_regulator_fix "'
-    sudo tee "${ROOTFS}/etc/dracut.conf.d/vivobook-kbd-fix.conf" >/dev/null <<< \
-        'force_drivers+=" vivobook_kbd_fix "'
-    sudo tee "${ROOTFS}/etc/dracut.conf.d/qcom-adsp-firmware.conf" >/dev/null << 'EOF'
-install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcadsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsp_dtbs.elf /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspr.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsps.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspua.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/battmgr.jsn "
-EOF
-    sudo tee "${ROOTFS}/etc/dracut.conf.d/qcom-gpu-firmware.conf" >/dev/null << 'EOF'
-install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcdxkmsucpurwa.mbn "
-EOF
-    sudo tee "${ROOTFS}/etc/dracut.conf.d/qcom-cdsp-firmware.conf" >/dev/null << 'EOF'
-install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qccdsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdsp_dtbs.elf /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdspr.jsn "
-EOF
-    sudo tee "${ROOTFS}/etc/dracut.conf.d/no-tpm.conf" >/dev/null <<< \
-        'omit_dracutmodules+=" tpm2-tss systemd-pcrphase "'
-    sudo tee "${ROOTFS}/etc/dracut.conf.d/no-nfs.conf" >/dev/null <<< \
-        'omit_dracutmodules+=" nfs "'
-    log "  7 configs dracut criados"
-
-    # --- 4. modules-load.d ---
-    ((n++)); step $n $total "Autoload de módulos..."
-    sudo mkdir -p "${ROOTFS}/etc/modules-load.d"
-    echo "wcn_regulator_fix"   | sudo tee "${ROOTFS}/etc/modules-load.d/wcn-regulator-fix.conf" >/dev/null
-    echo "vivobook_kbd_fix"    | sudo tee "${ROOTFS}/etc/modules-load.d/vivobook-kbd-fix.conf" >/dev/null
-    echo "vivobook_bl_fix"     | sudo tee "${ROOTFS}/etc/modules-load.d/vivobook-bl-fix.conf" >/dev/null
-    echo "vivobook_hotkey_fix" | sudo tee "${ROOTFS}/etc/modules-load.d/vivobook-hotkey-fix.conf" >/dev/null
-    echo "scmi_cpufreq"        | sudo tee "${ROOTFS}/etc/modules-load.d/scmi-cpufreq.conf" >/dev/null
-    log "  5 configs modules-load.d"
-
-    # --- 5. Logind / Suspend ---
-    ((n++)); step $n $total "Lid close / suspend..."
-    sudo mkdir -p "${ROOTFS}/etc/systemd/logind.conf.d"
-    sudo tee "${ROOTFS}/etc/systemd/logind.conf.d/no-suspend.conf" >/dev/null << 'EOF'
-[Login]
-HandleLidSwitch=lock
-HandleLidSwitchExternalPower=lock
-HandleLidSwitchDocked=lock
-IdleAction=ignore
-EOF
-    sudo mkdir -p "${ROOTFS}/etc/systemd/system"
-    for target in suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target sleep.target; do
-        sudo ln -sf /dev/null "${ROOTFS}/etc/systemd/system/${target}"
-    done
-    sudo ln -sf /dev/null "${ROOTFS}/etc/systemd/system/dev-tpm0.device"
-    sudo ln -sf /dev/null "${ROOTFS}/etc/systemd/system/dev-tpmrm0.device"
-    log "  Suspend desabilitado, TPM masked"
-
-    # --- 6. Udev rules ---
-    ((n++)); step $n $total "Udev rules (charge limit 80%)..."
-    sudo mkdir -p "${ROOTFS}/etc/udev/rules.d"
-    echo 'SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-bat", ATTR{charge_control_end_threshold}="80"' \
-        | sudo tee "${ROOTFS}/etc/udev/rules.d/99-battery-charge-limit.rules" >/dev/null
-    log "  Charge limit 80%"
-
-    # --- 7. Vulkan pool fix ---
-    ((n++)); step $n $total "Vulkan pool fix (vk_pool_fix.so)..."
-    sudo mkdir -p "${ROOTFS}/usr/local/lib64" "${ROOTFS}/usr/local/bin"
-
-    local vk_installed=false
-    if [[ -f "${SCRIPT_DIR}/vk_pool_fix.c" ]] && command -v gcc &>/dev/null; then
-        if gcc -shared -fPIC -o /tmp/vk_pool_fix.so "${SCRIPT_DIR}/vk_pool_fix.c" -ldl 2>/dev/null; then
-            sudo cp /tmp/vk_pool_fix.so "${ROOTFS}/usr/local/lib64/"
-            rm -f /tmp/vk_pool_fix.so
-            vk_installed=true
-            log "  Compilado e instalado"
-        fi
-    fi
-    if [[ "$vk_installed" == false && -f "${SCRIPT_DIR}/vk_pool_fix.so" ]]; then
-        sudo cp "${SCRIPT_DIR}/vk_pool_fix.so" "${ROOTFS}/usr/local/lib64/"
-        vk_installed=true
-        log "  Pre-built copiado"
-    fi
-    if [[ "$vk_installed" == false ]]; then
-        warn "  vk_pool_fix.so não disponível — compilar pós-boot"
-    fi
-
-    # Ptyxis wrapper
-    sudo tee "${ROOTFS}/usr/local/bin/ptyxis-fixed" >/dev/null << 'WRAPPER'
-#!/bin/sh
-export LD_PRELOAD=/usr/local/lib64/vk_pool_fix.so
-exec /usr/bin/ptyxis "$@"
-WRAPPER
-    sudo chmod +x "${ROOTFS}/usr/local/bin/ptyxis-fixed"
-
-    # .desktop override so GNOME launcher uses LD_PRELOAD wrapper
-    sudo mkdir -p "${ROOTFS}/usr/share/applications"
-    if [[ -f "${ROOTFS}/usr/share/applications/org.gnome.Ptyxis.desktop" ]]; then
-        sudo cp "${ROOTFS}/usr/share/applications/org.gnome.Ptyxis.desktop" \
-            "${ROOTFS}/usr/share/applications/org.gnome.Ptyxis.desktop.bak"
-        sudo sed -i 's|^Exec=ptyxis|Exec=/usr/local/bin/ptyxis-fixed|' \
-            "${ROOTFS}/usr/share/applications/org.gnome.Ptyxis.desktop"
-        log "  .desktop override para ptyxis criado"
-    else
-        # Create override for when Ptyxis is installed
-        sudo tee "${ROOTFS}/etc/xdg/autostart/.placeholder" >/dev/null <<< ""
-        sudo mkdir -p "${ROOTFS}/usr/local/share/applications"
-        sudo tee "${ROOTFS}/usr/local/share/applications/org.gnome.Ptyxis.desktop" >/dev/null << 'DESKTOP'
-[Desktop Entry]
-Type=Application
-Name=Terminal
-Comment=Terminal with Vulkan pool fix
-Exec=/usr/local/bin/ptyxis-fixed
-Icon=org.gnome.Ptyxis
-Categories=System;TerminalEmulator;
-DESKTOP
-        log "  .desktop override para ptyxis (fallback) criado"
-    fi
-
-    # --- 8. Setup scripts ---
-    ((n++)); step $n $total "Scripts de setup..."
-    sudo mkdir -p "${ROOTFS}/opt/vivobook-fixes"
-    for script in setup-all.sh vivobook-update.sh extract-qcom-firmware.sh \
-                  install-battery-time-ext.sh post-install-protect.sh; do
-        if [[ -f "${SCRIPT_DIR}/${script}" ]]; then
-            sudo cp "${SCRIPT_DIR}/${script}" "${ROOTFS}/opt/vivobook-fixes/"
-            sudo chmod +x "${ROOTFS}/opt/vivobook-fixes/${script}"
-        fi
-    done
-    [[ -f "${SCRIPT_DIR}/vk_pool_fix.c" ]] && \
-        sudo cp "${SCRIPT_DIR}/vk_pool_fix.c" "${ROOTFS}/opt/vivobook-fixes/"
-
-    # vivobook-update in PATH
-    if [[ -f "${SCRIPT_DIR}/vivobook-update.sh" ]]; then
-        sudo cp "${SCRIPT_DIR}/vivobook-update.sh" "${ROOTFS}/usr/local/bin/vivobook-update"
-        sudo chmod +x "${ROOTFS}/usr/local/bin/vivobook-update"
-    fi
-    log "  Scripts em /opt/vivobook-fixes/"
-
-    # --- 9. First-boot service ---
-    ((n++)); step $n $total "Serviço first-boot..."
-    sudo tee "${ROOTFS}/opt/vivobook-fixes/first-boot.sh" >/dev/null << 'FIRSTBOOT'
-#!/bin/bash
-# Vivobook X1407QA — First boot auto-setup
-# Compila DKMS, configura GRUB, rebuilda initramfs
-set -uo pipefail
-exec &>/var/log/vivobook-first-boot.log
-
-echo "=== Vivobook First Boot Setup — $(date) ==="
-echo "Kernel: $(uname -r)"
-
-# DKMS build
-dkms_ok=0
-dkms_fail=0
-dkms_failed_list=""
-for mod_dir in /usr/src/wcn-regulator-fix-1.0 /usr/src/vivobook-kbd-fix-1.0 \
-               /usr/src/vivobook-bl-fix-1.0 /usr/src/vivobook-hotkey-fix-1.0; do
-    [[ -d "$mod_dir" ]] || continue
-    mod_name=$(basename "$mod_dir" | sed 's/-1.0$//')
-    echo "DKMS build: $mod_name"
-    dkms add "$mod_dir" 2>/dev/null || true
-    if dkms build "${mod_name}/1.0" && dkms install "${mod_name}/1.0"; then
-        echo "  OK: $mod_name"
-        ((dkms_ok++))
-    else
-        echo "  FALHOU: $mod_name"
-        ((dkms_fail++))
-        dkms_failed_list="${dkms_failed_list} ${mod_name}"
-    fi
-done
-
-# GRUB params
-grubby --update-kernel=ALL --args="clk_ignore_unused pd_ignore_unused rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device" 2>/dev/null || true
-
-# /etc/default/grub
-if [[ -f /etc/default/grub ]] && ! grep -q "clk_ignore_unused" /etc/default/grub; then
-    sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet rhgb clk_ignore_unused pd_ignore_unused rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"/' /etc/default/grub
-fi
-
-# Rebuild initramfs
-dracut --force 2>/dev/null || true
-
-# GRUB config
-grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || \
-    grub2-mkconfig -o /boot/efi/EFI/fedora/grub.cfg 2>/dev/null || true
-
-# Disable auto-updates
-systemctl disable --now dnf-makecache.timer 2>/dev/null || true
-systemctl mask packagekit.service 2>/dev/null || true
-
-# Disable self
-systemctl disable vivobook-first-boot.service 2>/dev/null || true
-
-echo "=== First Boot Setup Complete — $(date) ==="
-echo "DKMS: ${dkms_ok} OK, ${dkms_fail} falhas"
-
-# Report DKMS failures visibly via MOTD
-if [[ $dkms_fail -gt 0 ]]; then
-    cat > /etc/motd << MOTD
-*** VIVOBOOK FIRST-BOOT: ${dkms_fail} módulo(s) DKMS falharam:${dkms_failed_list}
-*** Verifique: /var/log/vivobook-first-boot.log
-*** Instale kernel-devel e gcc, depois: dkms autoinstall && dracut --force
-MOTD
-    echo "AVISO: ${dkms_fail} módulo(s) DKMS falharam:${dkms_failed_list}"
-    echo "Verifique se kernel-devel e gcc estão instalados."
-    exit 1
-fi
-
-echo "Reboot recomendado para ativar módulos DKMS."
-FIRSTBOOT
-    sudo chmod +x "${ROOTFS}/opt/vivobook-fixes/first-boot.sh"
-
-    sudo tee "${ROOTFS}/etc/systemd/system/vivobook-first-boot.service" >/dev/null << 'UNIT'
-[Unit]
-Description=ASUS Vivobook X1407QA First Boot Setup
-After=multi-user.target
-ConditionPathExists=/opt/vivobook-fixes/first-boot.sh
-
-[Service]
-Type=oneshot
-ExecStart=/opt/vivobook-fixes/first-boot.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-    sudo mkdir -p "${ROOTFS}/etc/systemd/system/multi-user.target.wants"
-    sudo ln -sf /etc/systemd/system/vivobook-first-boot.service \
-        "${ROOTFS}/etc/systemd/system/multi-user.target.wants/vivobook-first-boot.service"
-    log "  Serviço first-boot configurado"
-
-    # --- 10. GNOME extension (battery-time) ---
-    ((n++)); step $n $total "Extensão GNOME battery-time..."
-    local ext_dir="${ROOTFS}/usr/share/gnome-shell/extensions/battery-time@wifiteste"
-    sudo mkdir -p "$ext_dir"
-
-    sudo tee "${ext_dir}/metadata.json" >/dev/null << 'META'
-{
-  "uuid": "battery-time@wifiteste",
-  "name": "Battery Time Remaining",
-  "description": "Shows battery time remaining in the panel with improved estimation (rolling average)",
-  "shell-version": ["50", "50.rc"],
-  "version": 1
-}
-META
-
-    # Copy extension.js from install script if available
-    if [[ -f "${SCRIPT_DIR}/install-battery-time-ext.sh" ]]; then
-        # Extract the extension.js content between the EXTJS markers
-        sed -n "/^cat > \"\$EXT_DIR\/extension.js\" << 'EXTJS'/,/^EXTJS$/p" \
-            "${SCRIPT_DIR}/install-battery-time-ext.sh" \
-            | sed '1d;$d' \
-            | sudo tee "${ext_dir}/extension.js" >/dev/null
-        if [[ -s "${ext_dir}/extension.js" ]]; then
-            log "  Extensão instalada system-wide"
+    # Parte 2 + auxiliares (.c são compilados na Parte 2; sync_render pode vir pre-built)
+    local payload=(
+        setup-vivobook.sh
+        extract-qcom-firmware.sh
+        install-battery-time-ext.sh
+        vivobook-update.sh
+        post-install-protect.sh
+        vk_pool_fix.c
+        sync_render.c
+        sync_render
+    )
+    local copied=0 missing=()
+    local f
+    for f in "${payload[@]}"; do
+        if [[ -f "${SCRIPT_DIR}/${f}" ]]; then
+            sudo cp "${SCRIPT_DIR}/${f}" "$dest/"
+            [[ "$f" == *.sh || "$f" == sync_render ]] && sudo chmod +x "$dest/${f}"
+            ((copied++))
         else
-            # Fallback: copy from installed location
-            local user_ext="$HOME/.local/share/gnome-shell/extensions/battery-time@wifiteste/extension.js"
-            if [[ -f "$user_ext" ]]; then
-                sudo cp "$user_ext" "${ext_dir}/extension.js"
-                log "  Extensão copiada da instalação local"
-            else
-                warn "  extension.js não extraído — removendo diretório incompleto"
-                sudo rm -rf "${ext_dir}"
-                warn "  Usar install-battery-time-ext.sh pós-boot"
-            fi
+            missing+=("$f")
         fi
-    else
-        warn "  install-battery-time-ext.sh não encontrado — removendo diretório incompleto"
-        sudo rm -rf "${ext_dir}"
-        warn "  Usar install-battery-time-ext.sh pós-boot"
+    done
+    log "  ${copied} scripts/arquivos em /opt/vivobook-fixes/"
+    [[ ${#missing[@]} -gt 0 ]] && warn "  Ausentes no repo: ${missing[*]}"
+
+    if [[ ! -f "${dest}/setup-vivobook.sh" ]]; then
+        err "setup-vivobook.sh (Parte 2) não encontrado no repo — ISO ficaria sem os fixes!"
+        exit 1
     fi
 
-    # --- 11. UCM2 Audio ---
-    ((n++)); step $n $total "Áudio UCM2..."
-    local ucm_conf="${ROOTFS}/usr/share/alsa/ucm2/conf.d/x1e80100/x1e80100.conf"
-    if [[ -f "$ucm_conf" ]]; then
-        if ! sudo grep -qi "vivobook" "$ucm_conf"; then
-            # Add Vivobook to ASUS regex — handle various patterns
-            if sudo grep -q "Zenbook A14" "$ucm_conf"; then
-                sudo sed -i 's/Zenbook A14/Zenbook A14|Vivobook 14/' "$ucm_conf"
-                log "  Vivobook 14 adicionado ao regex UCM2"
-            elif sudo grep -q "ASUS" "$ucm_conf"; then
-                warn "  Regex UCM2 não reconhecido — patch manual necessário após boot"
-            fi
-        else
-            log "  Vivobook já presente no UCM2"
-        fi
+    # Módulos DKMS (cam/color/usb4 do repo; os 4 core entram se bundled em modules/)
+    if [[ -d "${SCRIPT_DIR}/modules" ]]; then
+        sudo cp -a "${SCRIPT_DIR}/modules" "$dest/"
+        local nmod
+        nmod=$(find "${SCRIPT_DIR}/modules" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+        log "  modules/ copiado (${nmod} módulos DKMS)"
     else
-        info "  UCM2 x1e80100.conf não presente na ISO (será configurado pós-install)"
+        warn "  modules/ não encontrado no repo"
     fi
 
-    # --- 12. Touchpad + dconf defaults ---
-    ((n++)); step $n $total "Touchpad e defaults..."
-    sudo mkdir -p "${ROOTFS}/etc/dconf/db/local.d" "${ROOTFS}/etc/dconf/profile"
-    sudo tee "${ROOTFS}/etc/dconf/db/local.d/01-vivobook" >/dev/null << 'EOF'
-[org/gnome/desktop/peripherals/touchpad]
-click-method='areas'
+    # Firmware bundled (opcional). Se ausente, a Parte 2 extrai do Windows.
+    if [[ -d "$FW_BUNDLE" ]]; then
+        sudo cp -a "$FW_BUNDLE" "${dest}/firmware"
+        log "  firmware/ bundled copiado para o payload"
+    else
+        info "  firmware/ não bundled — Parte 2 extrai do Windows (extract-qcom-firmware.sh)"
+    fi
 
-[org/gnome/software]
-download-updates=false
-download-updates-notify=false
-EOF
-    # dconf profile to read local db
-    sudo tee "${ROOTFS}/etc/dconf/profile/user" >/dev/null << 'EOF'
-user-db:user
-system-db:local
-EOF
-    log "  dconf defaults configurados"
+    # Instruções no payload
+    sudo tee "${dest}/LEIA-ME.txt" >/dev/null << 'README'
+ASUS Vivobook X1407QA — Fixes de hardware (Parte 2)
 
+Rode ESTES passos no Vivobook DEPOIS de instalar o Fedora:
+
+  1) (se o firmware não veio no ISO) extrair do Windows:
+       - da partição Windows:  sudo /opt/vivobook-fixes/extract-qcom-firmware.sh
+       - OU de um dump em pendrive (gerado no Windows pelo
+         extract-firmware-windows.bat):
+           sudo /opt/vivobook-fixes/extract-qcom-firmware.sh \
+                /run/media/$USER/PENDRIVE/vivobook-qcom-firmware
+
+  2) aplicar todos os fixes (DKMS, firmware initramfs, áudio,
+     brilho, WiFi, bateria, terminal, suspend, etc.):
+       sudo /opt/vivobook-fixes/setup-vivobook.sh
+
+  3) reiniciar:
+       sudo reboot
+
+A Parte 1 (build do ISO) só preparou o boot e copiou estes arquivos.
+README
+    log "  LEIA-ME.txt criado"
     echo ""
-    log "Todos os 12 patches injetados"
+    log "Payload da Parte 2 embutido no squashfs"
 }
 
 # ─── Modify GRUB ─────────────────────────────────────────────────────────────
@@ -766,7 +533,7 @@ modify_grub() {
         [[ -f "$grub_cfg" ]] || continue
         if ! grep -q "clk_ignore_unused" "$grub_cfg"; then
             sed -i '/^[[:space:]]*linux\(efi\)\?[[:space:]]/s/$/ '"$snap_params"'/' "$grub_cfg"
-            log "  GRUB: $(echo "$grub_cfg" | sed "s|${ISO_DIR}/||")"
+            log "  GRUB: ${grub_cfg#"$ISO_DIR"/}"
         fi
     done < <(find "$ISO_DIR" -name "grub.cfg" 2>/dev/null)
 
@@ -808,8 +575,15 @@ rebuild_squashfs() {
 
     log "Recriando squashfs (demora ~5 min)..."
     sudo rm -f "$squash_dest"
-    sudo mksquashfs "$SQUASH_DIR" "$squash_dest" \
-        -comp xz -b 1M -Xdict-size 100% -no-recovery -processors "$(nproc)"
+    if ! sudo mksquashfs "$SQUASH_DIR" "$squash_dest" \
+        -comp xz -b 1M -Xdict-size 100% -no-recovery -processors "$(nproc)"; then
+        err "mksquashfs falhou — ISO não será gerada"
+        exit 1
+    fi
+    if [[ ! -f "$squash_dest" ]]; then
+        err "squashfs.img não foi criado em ${squash_dest}"
+        exit 1
+    fi
 
     local new_size
     new_size=$(du -h "$squash_dest" | cut -f1)
@@ -919,16 +693,17 @@ flash_usb() {
 # ─── Show instructions ────────────────────────────────────────────────────────
 show_instructions() {
     header "Instruções de Boot — Vivobook X1407QA"
-    info "1. Grave a ISO no pendrive (opção 3)"
+    info "1. Grave o ISO no pendrive (opção 4)"
     info "2. BIOS (F2): Desabilite Secure Boot, habilite USB boot"
     info "3. Boot menu (F12): Selecione USB"
-    info "4. Fedora boot com patches (GRUB já tem clk_ignore_unused)"
-    info "5. Instale no NVMe normalmente"
-    info "6. Primeiro boot roda setup automático (DKMS + initramfs)"
-    info "7. Reboot para ativar módulos"
-    info "8. Opcional: /opt/vivobook-fixes/install-battery-time-ext.sh"
+    info "4. Fedora boota (GRUB já tem clk_ignore_unused — Parte 1)"
+    info "5. Instale no NVMe normalmente e reboote no sistema instalado"
+    info "6. PARTE 2 — aplicar os fixes de hardware (no Vivobook):"
+    info "     sudo /opt/vivobook-fixes/extract-qcom-firmware.sh  (se preciso)"
+    info "     sudo /opt/vivobook-fixes/setup-vivobook.sh"
+    info "     sudo reboot"
     echo ""
-    info "Hardware funcional:"
+    info "Hardware funcional após a Parte 2:"
     info "  + WiFi (WCN6855, ath11k + wcn_regulator_fix)"
     info "  + Teclado (vivobook_kbd_fix)"
     info "  + Brilho (vivobook_bl_fix)"
@@ -937,6 +712,7 @@ show_instructions() {
     info "  + GPU (Adreno X1-45)"
     info "  + Audio (UCM2 regex fix)"
     info "  + Terminal (vk_pool_fix.so)"
+    info "  + Claude Code flicker-free (sync_render)"
     info "  + CPU scaling (scmi_cpufreq)"
     info "  + CDSP/NPU (firmware initramfs)"
     info "  - Camera (patches upstream ~6.21/6.22)"
@@ -951,6 +727,7 @@ build_complete() {
     discover_isos
     verify_iso "$ISO_INPUT" || exit 1
     check_space 12
+    check_space 4 "$SCRIPT_DIR"  # espaço para a ISO de saída + .sha256
 
     local input_name
     input_name=$(basename "$ISO_INPUT" .iso)
@@ -967,36 +744,29 @@ build_complete() {
 
     extract_iso
     extract_squashfs
-    inject_patches
     modify_grub
+    bundle_payload
     rebuild_squashfs
     rebuild_iso
     verify_output
 
     header "══════════════════════════════════════════
-  BUILD COMPLETA
+  BUILD COMPLETA (Parte 1)
 ══════════════════════════════════════════"
     log "ISO: ${ISO_OUTPUT}"
     echo ""
-    info "Patches incluídos na ISO:"
-    info "  + Firmware (ADSP, GPU, CDSP, WiFi)"
-    info "  + DKMS sources (/usr/src/)"
-    info "  + dracut configs (firmware initramfs)"
-    info "  + modules-load.d (autoload)"
-    info "  + Suspend disabled (lid = lock)"
-    info "  + TPM masked (boot time)"
-    info "  + vk_pool_fix.so (Vulkan)"
-    info "  + Charge limit 80%"
-    info "  + GRUB boot params"
-    info "  + UCM2 audio regex"
-    info "  + GNOME battery-time extension"
-    info "  + First-boot service (DKMS build + initramfs)"
-    info "  + vivobook-update em /usr/local/bin/"
+    info "O ISO contém (mínimo para bootar + instalar):"
+    info "  + Parâmetros de boot Snapdragon (GRUB live)"
+    info "  + Payload em /opt/vivobook-fixes/:"
+    info "      setup-vivobook.sh (Parte 2) + scripts auxiliares"
+    info "      modules/ (DKMS) + firmware/ (se bundled) + .c"
     echo ""
-    info "Após instalar e rebootar:"
-    info "  1. First boot faz DKMS + initramfs automaticamente"
-    info "  2. Segundo reboot ativa tudo"
-    info "  3. Rodar: /opt/vivobook-fixes/install-battery-time-ext.sh"
+    info "Workflow:"
+    info "  1. Grave o ISO no USB (opção 4) e instale o Fedora no Vivobook"
+    info "  2. Boote o sistema instalado"
+    info "  3. (se preciso) sudo /opt/vivobook-fixes/extract-qcom-firmware.sh"
+    info "  4. sudo /opt/vivobook-fixes/setup-vivobook.sh   ← Parte 2: todos os fixes"
+    info "  5. sudo reboot"
     echo ""
 
     if prompt_yn "Gravar no USB agora?"; then
@@ -1012,7 +782,7 @@ main() {
     echo -e "${BOLD}  Snapdragon X / Fedora 44 aarch64${NC}"
     echo -e "${BOLD}════════════════════════════════════════════${NC}"
     echo ""
-    echo "  1) Build ISO completa (todos os patches)"
+    echo "  1) Build ISO bootável (Parte 1 — boot + payload)"
     echo "  2) Baixar ISO Fedora ${FEDORA_VERSION} aarch64"
     echo "  3) Verificar ISO existente"
     echo "  4) Gravar ISO no USB"
