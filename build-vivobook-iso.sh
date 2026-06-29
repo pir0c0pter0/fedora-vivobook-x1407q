@@ -83,21 +83,47 @@ prompt_yn() {
 }
 
 # ─── Dependencies ────────────────────────────────────────────────────────────
-# Instala dependências no gerenciador de pacotes detectado (qualquer distro)
+# Instala só os comandos faltando, mapeando comando -> pacote por gerenciador.
+# brew vem primeiro: não precisa de sudo e funciona em distros atômicas
+# (Bazzite/Silverblue), onde `dnf` é redirecionado pro rpm-ostree e recusa instalar.
 install_deps_pkgs() {
-    if command -v dnf &>/dev/null; then
-        sudo dnf install -y xorriso squashfs-tools coreutils curl e2fsprogs
-    elif command -v apt-get &>/dev/null; then
-        sudo apt-get update && sudo apt-get install -y xorriso squashfs-tools coreutils curl e2fsprogs
-    elif command -v pacman &>/dev/null; then
-        sudo pacman -Sy --needed --noconfirm libisoburn squashfs-tools coreutils curl e2fsprogs
-    elif command -v zypper &>/dev/null; then
-        sudo zypper install -y xorriso squashfs coreutils curl e2fsprogs
+    local cmds=("$@")
+    [[ ${#cmds[@]} -eq 0 ]] && return 0
+
+    local mgr=""
+    if   command -v brew    &>/dev/null; then mgr=brew
+    elif command -v dnf     &>/dev/null; then mgr=dnf
+    elif command -v apt-get &>/dev/null; then mgr=apt
+    elif command -v pacman  &>/dev/null; then mgr=pacman
+    elif command -v zypper  &>/dev/null; then mgr=zypper
     else
-        err "Gerenciador de pacotes não reconhecido (dnf/apt/pacman/zypper)."
-        info "Instale manualmente: xorriso squashfs-tools curl e2fsprogs"
+        err "Gerenciador de pacotes não reconhecido (brew/dnf/apt/pacman/zypper)."
+        info "Instale manualmente os equivalentes a: ${cmds[*]}"
         return 1
     fi
+
+    local c pkg; local -A seen=(); local pkgs=()
+    for c in "${cmds[@]}"; do
+        case "$c" in
+            xorriso)            case "$mgr" in pacman) pkg=libisoburn;;     *) pkg=xorriso;;        esac ;;
+            unsquashfs|mksquashfs) case "$mgr" in brew|zypper) pkg=squashfs;; *) pkg=squashfs-tools;; esac ;;
+            e2fsck|resize2fs)   pkg=e2fsprogs ;;
+            sha256sum)          pkg=coreutils ;;
+            curl)               pkg=curl ;;
+            *)                  pkg="$c" ;;
+        esac
+        [[ -n "${seen[$pkg]:-}" ]] && continue
+        seen[$pkg]=1; pkgs+=("$pkg")
+    done
+
+    log "Instalando via ${mgr}: ${pkgs[*]}"
+    case "$mgr" in
+        brew)   brew install "${pkgs[@]}" ;;
+        dnf)    sudo dnf install -y "${pkgs[@]}" ;;
+        apt)    sudo apt-get update && sudo apt-get install -y "${pkgs[@]}" ;;
+        pacman) sudo pacman -Sy --needed --noconfirm "${pkgs[@]}" ;;
+        zypper) sudo zypper install -y "${pkgs[@]}" ;;
+    esac
 }
 
 # Retorna o primeiro diretório existente da lista (repo-bundled tem prioridade sobre host)
@@ -115,7 +141,7 @@ check_deps() {
     if [[ ${#missing[@]} -gt 0 ]]; then
         warn "Dependências faltando: ${missing[*]}"
         if prompt_yn "Instalar automaticamente?"; then
-            install_deps_pkgs || { err "Falha ao instalar dependências."; exit 1; }
+            install_deps_pkgs "${missing[@]}" || { err "Falha ao instalar dependências."; exit 1; }
             # Re-checa: nomes de pacote variam por distro, confirma que resolveu
             local still=()
             for cmd in xorriso unsquashfs mksquashfs sha256sum curl e2fsck resize2fs; do
