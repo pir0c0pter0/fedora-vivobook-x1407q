@@ -1,29 +1,29 @@
-# Extrair firmware Qualcomm do Windows — `extract-firmware-windows.bat`
+# Extract Qualcomm firmware from Windows — `extract-firmware-windows.bat`
 
-Guia para o **ASUS Vivobook 14 X1407QA (Snapdragon X)**.
+Guide for the **ASUS Vivobook 14 X1407QA (Snapdragon X)**.
 
-O firmware da Qualcomm (áudio/ADSP, GPU, CDSP, WiFi) é **proprietário e
-assinado pra esse modelo**. Ele só existe na partição do **Windows** que veio
-de fábrica — não tem download genérico. Este `.bat` copia esse firmware pra um
-pendrive, pra você usar depois no Fedora.
+The Qualcomm firmware (audio/ADSP, GPU, CDSP, WiFi) is **proprietary and signed
+for this exact model**. It only exists on the factory **Windows** partition —
+there is no generic download. This `.bat` copies that firmware to a USB drive so
+you can use it later on Fedora.
 
 ---
 
-## ⬇️ A ISO pronta (download)
+## ⬇️ The ready-made ISO (download)
 
-ISO bootável do Fedora 44 aarch64 já com os patches do Vivobook X1407QA
-(parâmetros de boot Snapdragon + scripts de fix embutidos):
+Bootable Fedora 44 aarch64 ISO already patched for the Vivobook X1407QA
+(Snapdragon boot params + fix scripts bundled in):
 
 - **Link:** https://temp.sh/lzVpY/Fedora-Workstation-Live-44-1.7.aarch64-VivoBook-patched.iso
-- **Expira:** ~2026-07-02 (temp.sh guarda por ~3 dias — baixe logo)
+- **Expires:** ~2026-07-02 (temp.sh keeps files for ~3 days — download soon)
 - **SHA256:**
   ```
   0396b34c930bf0149c1d04ee8ff76957019dd6503b34037fe8541f4a82f5c263
   ```
 
-**Baixar pelo navegador:** abra o link e clique em *"Click here to download"*.
+**Download in a browser:** open the link and click *"Click here to download"*.
 
-**Baixar pelo terminal** (o temp.sh entrega via POST):
+**Download from a terminal** (temp.sh serves it via POST):
 
 ```bash
 curl -L -X POST \
@@ -31,101 +31,101 @@ curl -L -X POST \
   -o Fedora-Workstation-Live-44-1.7.aarch64-VivoBook-patched.iso
 ```
 
-**Conferir a integridade** (tem que bater com o SHA256 acima):
+**Verify integrity** (must match the SHA256 above):
 
 ```bash
 sha256sum Fedora-Workstation-Live-44-1.7.aarch64-VivoBook-patched.iso
 ```
 
-**Gravar num pendrive** (⚠️ apaga tudo do pendrive — confira o `/dev/sdX`):
+**Write to a USB drive** (⚠️ erases the whole USB — double-check `/dev/sdX`):
 
 ```bash
 sudo dd if=Fedora-Workstation-Live-44-1.7.aarch64-VivoBook-patched.iso \
   of=/dev/sdX bs=4M status=progress oflag=sync && sync
 ```
 
-> A ISO **não** inclui o firmware Qualcomm (proprietário). Você extrai do seu
-> próprio Windows com o `.bat` abaixo, **antes** de instalar o Fedora.
+> The ISO does **not** include the Qualcomm firmware (proprietary). You extract
+> it from your own Windows using the `.bat` below, **before** installing Fedora.
 
 ---
 
-## ⚠️ Faça isto ANTES de formatar / instalar o Linux
+## ⚠️ Do this BEFORE you format / install Linux
 
-Instalar o Fedora **apaga o Windows**, e com ele o firmware. Se você já apagou
-o Windows sem extrair, vai precisar pegar o firmware de outro Vivobook X1407QA
-igual ou de uma imagem de recovery do Windows. **Extraia primeiro.**
+Installing Fedora **wipes Windows**, and the firmware goes with it. If you've
+already wiped Windows without extracting, you'll need the firmware from another
+identical Vivobook X1407QA or from a Windows recovery image. **Extract it first.**
 
-Sem esse firmware, depois do Linux instalado **não funcionam**: WiFi, GPU
-(aceleração), áudio e bateria.
-
----
-
-## Pré-requisitos
-
-- Vivobook ainda com **Windows** funcionando (o de fábrica).
-- Um **pendrive** formatado em **FAT32** ou **exFAT** (NTFS também serve).
-- O arquivo **`extract-firmware-windows.bat`** (vem junto com este guia / no reppositório do projeto).
+Without this firmware, once Linux is installed the following **won't work**:
+WiFi, GPU (acceleration), audio, and battery.
 
 ---
 
-## Passo a passo (no Windows)
+## Requirements
 
-1. Copie **`extract-firmware-windows.bat`** para o **pendrive**.
-2. Abra o pendrive no Explorador de Arquivos e dê **duplo-clique** no `.bat`.
-3. Vai aparecer o aviso do Controle de Conta de Usuário (UAC) pedindo
-   privilégios de administrador — clique **Sim**. (É necessário porque o
-   firmware fica numa pasta protegida do sistema.)
-4. Uma janela preta abre e vai listando os pacotes copiados (`[+] qcadsp...`,
-   `[+] qcdx...`, etc.). Aguarde até aparecer **"PROXIMOS PASSOS"**.
-5. Pode fechar a janela. O dump fica na pasta **`vivobook-qcom-firmware\`**, ao
-   lado do `.bat`, **no próprio pendrive**.
-
-> Rodando o `.bat` direto do pendrive, o dump já cai no pendrive. Se você rodou
-> de outra pasta (ex.: Downloads), mova a pasta `vivobook-qcom-firmware` para o
-> pendrive depois.
-
-**Não perca esse pendrive** — você vai usar o dump depois de instalar o Fedora.
+- Vivobook still running the factory **Windows**.
+- A **USB drive** formatted as **FAT32** or **exFAT** (NTFS also works).
+- The **`extract-firmware-windows.bat`** file (shipped with this guide / in the project repo).
 
 ---
 
-## O que o `.bat` faz (por dentro)
+## Step by step (on Windows)
 
-- Se auto-eleva para **Administrador** (relança via PowerShell `RunAs`).
-- Lê `C:\Windows\System32\DriverStore\FileRepository`.
-- Copia **inteiros** os pacotes de driver da Qualcomm (pastas que começam com
-  `qc*`: `qcadsp*`, `qcdx*`, `qccdsp*`, `qcwlan*`, `qcsubsys*`, …), **incluindo
-  os arquivos `.inf`**.
-- Preserva a estrutura `Windows\System32\DriverStore\FileRepository\...` dentro
-  de `vivobook-qcom-firmware\`.
-- No fim, mostra quantos pacotes e quantos arquivos `.mbn`/`.bin` foram copiados.
+1. Copy **`extract-firmware-windows.bat`** to the **USB drive**.
+2. Open the USB drive in File Explorer and **double-click** the `.bat`.
+3. A User Account Control (UAC) prompt asks for administrator privileges —
+   click **Yes**. (It's required because the firmware lives in a protected
+   system folder.)
+4. A black window opens and lists the packages it copies (`[+] qcadsp...`,
+   `[+] qcdx...`, etc.). Wait until you see **"NEXT STEPS"**.
+5. You can close the window. The dump is in the **`vivobook-qcom-firmware\`**
+   folder, next to the `.bat`, **on the USB drive itself**.
 
-> **Por que copiar os pacotes inteiros, e não só os `.mbn`?** A ferramenta do
-> lado Linux (`qcom-firmware-extract`) usa os arquivos **`.inf`** pra renomear
-> cada firmware para o caminho/nome corretos que o kernel espera. Só os `.mbn`
-> soltos não bastariam.
+> Running the `.bat` straight from the USB drive drops the dump onto the USB. If
+> you ran it from another folder (e.g. Downloads), move the
+> `vivobook-qcom-firmware` folder onto the USB afterwards.
+
+**Keep this USB drive** — you'll use the dump after installing Fedora.
 
 ---
 
-## Usar o dump no Fedora (depois de instalar)
+## What the `.bat` does (under the hood)
 
-Já no **Fedora instalado** no Vivobook, plugue o pendrive e rode (ajuste o
-caminho/nome do pendrive):
+- Self-elevates to **Administrator** (relaunches via PowerShell `RunAs`).
+- Reads `C:\Windows\System32\DriverStore\FileRepository`.
+- Copies the Qualcomm driver packages **whole** (folders starting with `qc*`:
+  `qcadsp*`, `qcdx*`, `qccdsp*`, `qcwlan*`, `qcsubsys*`, …), **including their
+  `.inf` files**.
+- Preserves the `Windows\System32\DriverStore\FileRepository\...` structure
+  inside `vivobook-qcom-firmware\`.
+- At the end, prints how many packages and how many `.mbn`/`.bin` files were copied.
+
+> **Why copy whole packages and not just the `.mbn` files?** The Linux-side tool
+> (`qcom-firmware-extract`) uses the **`.inf`** files to rename each firmware to
+> the exact path/name the kernel expects. The bare `.mbn` files alone are not
+> enough.
+
+---
+
+## Use the dump on Fedora (after installing)
+
+On the **installed Fedora** on the Vivobook, plug in the USB drive and run
+(adjust the USB path/name):
 
 ```bash
-# o caminho costuma ser /run/media/SEU_USUARIO/NOME_DO_PENDRIVE/vivobook-qcom-firmware
-sudo ./extract-qcom-firmware.sh /run/media/$USER/PENDRIVE/vivobook-qcom-firmware
+# the path is usually /run/media/YOUR_USER/USB_NAME/vivobook-qcom-firmware
+sudo ./extract-qcom-firmware.sh /run/media/$USER/USB/vivobook-qcom-firmware
 
-# se a ISO já trouxe os scripts embutidos:
-sudo /opt/vivobook-fixes/extract-qcom-firmware.sh /run/media/$USER/PENDRIVE/vivobook-qcom-firmware
+# if the ISO already bundled the scripts:
+sudo /opt/vivobook-fixes/extract-qcom-firmware.sh /run/media/$USER/USB/vivobook-qcom-firmware
 ```
 
-O `extract-qcom-firmware.sh` instala/usa o `qcom-firmware-extract` e coloca cada
-arquivo no lugar certo:
+`extract-qcom-firmware.sh` installs/uses `qcom-firmware-extract` and places each
+file in the right location:
 
 - `/usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/` (ADSP, GPU ZAP, CDSP)
-- `/usr/lib/firmware/ath11k/WCN6855/hw2.1/` (board data do WiFi)
+- `/usr/lib/firmware/ath11k/WCN6855/hw2.1/` (WiFi board data)
 
-Depois, aplique todos os fixes e reinicie:
+Then apply all fixes and reboot:
 
 ```bash
 sudo /opt/vivobook-fixes/setup-vivobook.sh
@@ -134,38 +134,38 @@ sudo reboot
 
 ---
 
-## Fluxo completo (resumo)
+## Full flow (summary)
 
-1. **(Windows, antes de formatar)** rodar `extract-firmware-windows.bat` → dump no pendrive.
-2. Gravar a ISO do Vivobook num pendrive e dar boot (F12) → instalar o Fedora no NVMe.
-3. **(Fedora instalado)** `extract-qcom-firmware.sh <pendrive>/vivobook-qcom-firmware`.
-4. `setup-vivobook.sh` → todos os fixes de hardware.
+1. **(Windows, before formatting)** run `extract-firmware-windows.bat` → dump onto the USB.
+2. Write the Vivobook ISO to a USB drive and boot it (F12) → install Fedora to the NVMe.
+3. **(Fedora installed)** `extract-qcom-firmware.sh <usb>/vivobook-qcom-firmware`.
+4. `setup-vivobook.sh` → all hardware fixes.
 5. `sudo reboot`.
 
 ---
 
-## Problemas comuns
+## Troubleshooting
 
-| Sintoma | Causa / solução |
+| Symptom | Cause / fix |
 |---|---|
-| "Nenhum pacote de driver Qualcomm (`qc*`) encontrado" | Não é o Windows de fábrica da ASUS, ou os drivers foram removidos. Use o Windows original do aparelho. |
-| UAC não aparece / "acesso negado" | Rode como administrador: clique-direito no `.bat` → **Executar como administrador**. |
-| Janela fecha na hora | Abra o **Prompt de Comando** como admin e rode o `.bat` pelo caminho dele pra ver as mensagens. |
-| `.bat` abre num editor de texto | Clique-direito → Abrir com → **Processador de Comandos do Windows**, ou rode pelo `cmd`. |
-| Pendrive não aparece no Fedora | Confira o caminho real: `ls /run/media/$USER/` (ou monte com o gerenciador de arquivos). |
-| `0 arquivos de firmware` no fim | DriverStore sem firmware Qualcomm — confirme que é o Vivobook X1407QA correto. |
+| "No Qualcomm driver packages (`qc*`) found" | Not the factory ASUS Windows, or the drivers were removed. Use the device's original Windows. |
+| No UAC prompt / "access denied" | Run as administrator: right-click the `.bat` → **Run as administrator**. |
+| Window closes instantly | Open **Command Prompt** as admin and run the `.bat` by its path to see the messages. |
+| `.bat` opens in a text editor | Right-click → Open with → **Windows Command Processor**, or run it from `cmd`. |
+| USB not visible on Fedora | Check the real path: `ls /run/media/$USER/` (or mount it via the file manager). |
+| `0 firmware files` at the end | DriverStore has no Qualcomm firmware — confirm it's the correct Vivobook X1407QA. |
 
 ---
 
-## O que cada firmware habilita
+## What each firmware enables
 
-| Pacote (Windows `qc*`) | Componente no Linux |
+| Package (Windows `qc*`) | Component on Linux |
 |---|---|
-| `qcadsp*` | DSP de áudio + gerenciador de bateria (ADSP) |
-| `qcdx*` | GPU Adreno X1-45 (shader ZAP `qcdxkmsucpurwa.mbn`) |
-| `qccdsp*` | DSP de computação / NPU (CDSP) |
-| `qcwlan*` | WiFi WCN6855 (board data) |
+| `qcadsp*` | Audio DSP + battery manager (ADSP) |
+| `qcdx*` | Adreno X1-45 GPU (ZAP shader `qcdxkmsucpurwa.mbn`) |
+| `qccdsp*` | Compute DSP / NPU (CDSP) |
+| `qcwlan*` | WCN6855 WiFi (board data) |
 
-> O firmware **não vai embutido** na ISO compartilhada (é proprietário e
-> específico do aparelho). Por isso cada pessoa extrai do próprio Windows com
-> este `.bat`.
+> The firmware is **not** bundled in the shared ISO (it's proprietary and
+> device-specific). That's why each person extracts it from their own Windows
+> with this `.bat`.
