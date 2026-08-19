@@ -27,7 +27,7 @@ cleanup() {
 trap cleanup EXIT
 
 need() { command -v "$1" >/dev/null || { echo "ERROR: missing command: $1" >&2; exit 1; }; }
-for command in xorriso unsquashfs mksquashfs fsck.erofs mkfs.erofs e2fsck resize2fs rsync dracut sha256sum file; do need "$command"; done
+for command in xorriso unsquashfs mksquashfs fsck.erofs mkfs.erofs e2fsck resize2fs rsync dracut lsinitrd sha256sum file; do need "$command"; done
 [[ $(uname -m) == aarch64 ]] || { echo 'ERROR: ISO customization must run in the ARM64 builder' >&2; exit 1; }
 [[ -f $INPUT_ISO ]] || { echo "ERROR: Fedora ISO missing: $INPUT_ISO" >&2; exit 1; }
 echo "$EXPECTED_INPUT_ISO_SHA256  $INPUT_ISO" | sha256sum --check --status || {
@@ -85,16 +85,35 @@ for path in dev proc sys run; do
     MOUNTS+=("$ROOTFS/$path")
 done
 chroot "$ROOTFS" depmod "$VERSION"
-chroot "$ROOTFS" dracut --force --no-hostonly "/boot/initramfs-$VERSION.img" "$VERSION"
+chroot "$ROOTFS" dracut --force --no-hostonly --add 'dmsquash-live livenet pollcdrom' \
+    --omit 'iscsi nvmf' \
+    "/boot/initramfs-$VERSION.img" "$VERSION"
+INITRD_LIST=$WORK_ROOT/initrd-list.txt
+INITRD_MODULES=$WORK_ROOT/initrd-modules.txt
+lsinitrd "$ROOTFS/boot/initramfs-$VERSION.img" > "$INITRD_LIST"
+lsinitrd -m "$ROOTFS/boot/initramfs-$VERSION.img" > "$INITRD_MODULES"
+for module in dmsquash-live livenet pollcdrom; do
+    grep -qxF "$module" "$INITRD_MODULES" || {
+        echo "ERROR: initramfs missing dracut module $module" >&2
+        exit 1
+    }
+done
+if grep -Eq '^(iscsi|nvmf)$' "$INITRD_MODULES" || grep -Eq 'parse-iscsiroot|iscsi_tcp' "$INITRD_LIST"; then
+    echo 'ERROR: initramfs unexpectedly contains iSCSI support' >&2
+    exit 1
+fi
+module_trees=$(grep -oE 'usr/lib/modules/[0-9][^/ ]*' "$INITRD_LIST" | sort -u)
+[[ $module_trees == "usr/lib/modules/$VERSION" ]] || {
+    echo "ERROR: initramfs kernel module trees do not match $VERSION: $module_trees" >&2
+    exit 1
+}
 for ((i=${#MOUNTS[@]}-1; i>=BASE_MOUNTS; i--)); do
     mountpoint -q "${MOUNTS[$i]}" && umount -R "${MOUNTS[$i]}" || true
 done
 MOUNTS=("${MOUNTS[@]:0:$BASE_MOUNTS}")
 
-echo '[6/8] Creating primary Linux 7.2 and Fedora recovery boot entries'
+echo '[6/8] Creating normal and diagnostic Linux 7.2 boot entries'
 LOADER=$ISO_TREE/boot/aarch64/loader
-cp "$LOADER/linux" "$LOADER/linux-fedora-recovery"
-cp "$LOADER/initrd" "$LOADER/initrd-fedora-recovery"
 install -m0644 "$KERNEL_ARTIFACTS/boot/vmlinuz-$VERSION" "$LOADER/linux"
 install -m0644 "$ROOTFS/boot/initramfs-$VERSION.img" "$LOADER/initrd"
 install -Dm0644 "$KERNEL_ARTIFACTS/boot/dtb/qcom/x1p42100-asus-zenbook-a14.dtb" \
@@ -115,9 +134,10 @@ menuentry "Fedora 44 X1407QA — Linux 7.2 (principal)" --class fedora --class g
     linux ($root)/boot/aarch64/loader/linux quiet rhgb root=live:CDLABEL=Fedora-WS-Live-44 rd.live.image clk_ignore_unused pd_ignore_unused
     initrd ($root)/boot/aarch64/loader/initrd
 }
-menuentry "Fedora recovery — kernel original" --class fedora --class gnu-linux {
-    linux ($root)/boot/aarch64/loader/linux-fedora-recovery quiet rhgb root=live:CDLABEL=Fedora-WS-Live-44 rd.live.image
-    initrd ($root)/boot/aarch64/loader/initrd-fedora-recovery
+menuentry "Fedora 44 X1407QA — Linux 7.2 (diagnóstico)" --class fedora --class gnu-linux {
+    devicetree ($root)/boot/aarch64/loader/x1p42100-asus-vivobook-x1407qa.dtb
+    linux ($root)/boot/aarch64/loader/linux root=live:CDLABEL=Fedora-WS-Live-44 rd.live.image rd.debug log_buf_len=1M clk_ignore_unused pd_ignore_unused
+    initrd ($root)/boot/aarch64/loader/initrd
 }
 GRUB
 
@@ -138,9 +158,11 @@ rm -f "$OUTPUT_ISO"
 xorriso -indev "$INPUT_ISO" -outdev "$OUTPUT_ISO" -update_r "$ISO_TREE" / -boot_image any replay >/dev/null 2>&1
 
 echo '[8/8] Verifying output and writing SHA256'
-xorriso -indev "$OUTPUT_ISO" -find /boot/aarch64/loader -type f >/tmp/x1407qa-iso-files.txt 2>/dev/null
-grep -q 'linux-fedora-recovery' /tmp/x1407qa-iso-files.txt
-grep -q 'x1p42100-asus-vivobook-x1407qa.dtb' /tmp/x1407qa-iso-files.txt
+ISO_FILES=$WORK_ROOT/iso-files.txt
+xorriso -indev "$OUTPUT_ISO" -find /boot/aarch64/loader -type f >"$ISO_FILES" 2>&1
+grep -q '/boot/aarch64/loader/linux' "$ISO_FILES"
+grep -q '/boot/aarch64/loader/initrd' "$ISO_FILES"
+grep -q 'x1p42100-asus-vivobook-x1407qa.dtb' "$ISO_FILES"
 sha256sum "$OUTPUT_ISO" > "$OUTPUT_ISO.sha256"
 echo "PASS: $OUTPUT_ISO"
 cat "$OUTPUT_ISO.sha256"

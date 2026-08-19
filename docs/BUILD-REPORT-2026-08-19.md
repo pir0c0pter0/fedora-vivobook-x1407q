@@ -4,18 +4,19 @@ Data: **19 de agosto de 2026**
 
 Repositório: `pir0c0pter0/fedora-vivobook-x1407q`
 
-Commit remoto usado como base: `e36aa2f83fed8243a27689cf667054b9a76a5896`.
+Commit remoto usado como base: `a4f246ea619e60c0863a77701ac1b4bfa9a51e89`.
 
-Resultado: ISO ARM64 personalizada construída, auditada e gravada em pendrive.
+Resultado: nova ISO ARM64 personalizada construída, auditada, gravada, relida
+integralmente do pendrive e inicializada com sucesso no X1407QA.
 
 ## 1. Objetivo
 
 Produzir uma mídia live/instalável Fedora Workstation ARM64 específica para o
-ASUS Vivobook 14 X1407QA. O Linux 7.2 final é o kernel principal e o kernel
-original do Fedora permanece como recuperação. A mídia inclui DTB X1P42100,
-módulos e initramfs próprios, firmware extraído deste PC, scripts, módulos DKMS
-e documentação do repositório. Recursos experimentais perigosos não são
-ativados por padrão.
+ASUS Vivobook 14 X1407QA. O Linux 7.2 final é o único kernel oferecido no menu
+de boot, em modos normal e diagnóstico. A mídia inclui DTB X1P42100, módulos e
+initramfs próprios, firmware extraído deste PC, scripts, módulos DKMS e
+documentação do repositório. Recursos experimentais perigosos não são ativados
+por padrão.
 
 ## 2. Hardware analisado
 
@@ -136,14 +137,14 @@ Fluxo executado:
 4. instalar kernel, configuração, DTB e módulos no root live;
 5. copiar repositório e catálogo de firmware para `/opt/vivobook-fixes`;
 6. executar `depmod 7.2.0-x1407qa` no root Fedora;
-7. gerar `initramfs-7.2.0-x1407qa.img` com `dracut --no-hostonly`;
-8. preservar kernel e initramfs Fedora como recuperação;
-9. instalar Linux 7.2, initramfs e DTB no loader live;
-10. criar menu GRUB principal e de recuperação;
-11. recriar EROFS com LZ4HC;
-12. atualizar a ISO com `xorriso -update_r`;
-13. preservar El Torito/EFI com `-boot_image any replay`;
-14. gerar e validar SHA-256.
+7. gerar `initramfs-7.2.0-x1407qa.img` com os módulos dracut live e sem
+   iSCSI/NVMf;
+8. instalar Linux 7.2, initramfs e DTB no loader live;
+9. criar entradas GRUB normal e de diagnóstico;
+10. recriar EROFS com LZ4HC;
+11. atualizar a ISO com `xorriso -update_r`;
+12. preservar El Torito/EFI com `-boot_image any replay`;
+13. gerar e validar SHA-256.
 
 ### Menu GRUB
 
@@ -151,8 +152,8 @@ Entrada padrão: `Fedora 44 X1407QA — Linux 7.2 (principal)`. Usa kernel 7.2,
 initramfs correspondente, `x1p42100-asus-vivobook-x1407qa.dtb`,
 `rd.live.image`, `clk_ignore_unused` e `pd_ignore_unused`.
 
-Entrada alternativa: `Fedora recovery — kernel original`. Usa cópias
-independentes do kernel e initramfs originais do Fedora.
+Entrada alternativa: `Fedora 44 X1407QA — Linux 7.2 (diagnóstico)`. Usa o mesmo
+kernel, initramfs e DTB auditados, sem `quiet rhgb` e com `rd.debug`.
 
 ## 7. Problemas encontrados e correções
 
@@ -194,7 +195,8 @@ foi retomada após liberar mais de 30 GB físicos.
 ### Atualização não recursiva
 
 `xorriso -update` alterou apenas a raiz e manteve o GRUB original. A auditoria
-detectou a ausência de DTB e recuperação. A correção crítica foi `-update_r`.
+detectou a ausência do DTB e do loader personalizados. A correção crítica foi
+`-update_r`.
 
 ### Escrita bruta no Windows ARM64
 
@@ -202,12 +204,45 @@ detectou a ausência de DTB e recuperação. A correção crítica foi `-update_
 suportava `wsl --mount` para disco físico. Foi usado Rufus 4.15 portátil oficial,
 com assinatura Authenticode válida da Akeo Consulting.
 
+### Initramfs personalizado sem suporte live
+
+O primeiro boot do Linux 7.2 parou em aproximadamente 1,15 segundo com
+`dracut: FATAL: Don't know how to handle 'root=live:CDLABEL=Fedora-WS-Live-44'`.
+O kernel, o DTB e o pendrive estavam íntegros; o initramfs personalizado tinha
+`rootfs-block`, mas não `dmsquash-live`. O initramfs Fedora preservado mostrava
+o padrão correto: `--add 'dmsquash-live livenet pollcdrom'`.
+
+O primeiro reparo adicionou esses módulos copiando amplamente o initramfs
+Fedora. A ISO corrigida e a leitura direta completa do Kingston produziram o
+mesmo SHA-256, mas o boot seguinte revelou um segundo erro antes de montar o
+sistema live.
+
+### Hook iSCSI indevido e kernel sem os filesystems live
+
+O segundo boot parou em `iscsiroot requested but kernel/initrd does not support
+iscsi`. A cópia ampla havia trazido `iscsi`, `nvmf` e
+`90-parse-iscsiroot.sh`; esse hook tentava carregar `iscsi_tcp` antes de
+confirmar a existência de um `netroot` iSCSI.
+
+A auditoria do `.config` embutido também encontrou três bloqueadores que seriam
+os erros seguintes: ISO9660 e EROFS estavam desativados, assim como DM snapshot.
+O Linux 7.2 foi recompilado com `CONFIG_ISO9660_FS=y`, `CONFIG_JOLIET=y`,
+`CONFIG_EROFS_FS=y`, `CONFIG_EROFS_FS_ZIP=y` e `CONFIG_DM_SNAPSHOT=m`. Os 1.665
+arquivos da árvore de módulos foram substituídos no EROFS e o initramfs foi
+gerado novamente por `dracut`, adicionando somente os módulos live necessários
+e omitindo explicitamente `iscsi nvmf`.
+
+O initramfs reextraído contém `dmsquash-live`, `livenet`, `pollcdrom`,
+`dm-snapshot` e `overlay`, não contém o hook iSCSI e possui somente a árvore
+`7.2.0-x1407qa`. O pipeline agora falha se o `.config` final ou o initramfs não
+cumprirem esses contratos.
+
 ## 8. Resultado final
 
 ```text
-Nome: Fedora-44-X1407QA-Linux-7.2.iso
-Tamanho: 4.919.656.448 bytes (4,582 GiB)
-SHA-256: bf7f278ef2445ae591f65c458e553bc2febdbc1a33ce0043f5fc9b04adab99d9
+Nome: Fedora-44-X1407QA-Linux-7.2-livefix-reviewed.iso
+Tamanho: 4.473.094.144 bytes (4,166 GiB)
+SHA-256: 114bc4bd5034096cee8c89369bd8c8b41abc03f93298ae5fa15b8dc9b2e11341
 ```
 
 Arquivos críticos auditados:
@@ -215,15 +250,15 @@ Arquivos críticos auditados:
 ```text
 boot/aarch64/loader/linux
 boot/aarch64/loader/initrd
-boot/aarch64/loader/linux-fedora-recovery
-boot/aarch64/loader/initrd-fedora-recovery
 boot/aarch64/loader/x1p42100-asus-vivobook-x1407qa.dtb
 boot/grub2/grub.cfg
 LiveOS/squashfs.img
 ```
 
-O GRUB foi inspecionado quanto a `Linux 7.2 (principal)`, `Fedora recovery`,
-`devicetree`, `linux-fedora-recovery` e `rd.live.image`.
+O GRUB foi inspecionado quanto a duas entradas do mesmo Linux 7.2, normal e de
+diagnóstico. Ambas carregam o DTB do VivoBook; a segunda remove `quiet rhgb` e
+adiciona `rd.debug` para tornar eventual falha legível. A recuperação com o
+kernel Fedora foi removida porque não inicia neste equipamento.
 
 ## 9. Pendrive e validação
 
@@ -242,6 +277,20 @@ DIFF_OFFSET=0
 Somente o primeiro MiB de metadados mudou. Todos os bytes de 1 MiB ao fim da
 ISO — kernels, initramfs, EROFS, firmware, DTB e payload — são idênticos.
 
+Essa validação corresponde à tentativa anterior. A nova ISO revisada foi então
+gravada no mesmo Kingston e os seus 4.473.094.144 bytes foram relidos diretamente
+do dispositivo. A leitura física produziu o mesmo SHA-256 da seção 8. Kernel,
+initramfs, DTB e GRUB também foram extraídos do pendrive e comparados byte a
+byte com os artefatos revisados; o dispositivo permaneceu desmontado.
+
+### Boot físico confirmado
+
+Após a regravação e a auditoria completa, o usuário confirmou que a entrada
+Linux 7.2 inicializou no ASUS Vivobook X1407QA. Isso valida o caminho crítico
+UEFI → GRUB → DTB → kernel → initramfs → `root=live:` que havia falhado nas
+tentativas anteriores. A validação não implica que todos os periféricos ou
+recursos experimentais tenham sido exercitados.
+
 ## 10. Testes
 
 Testes existentes executados: `Test-BootstrapBuildEnv.ps1`,
@@ -254,10 +303,12 @@ Testes adicionados:
 - `tests/Test-Linux72KernelScripts.ps1`;
 - `tests/Test-PersonalIsoBuilder.ps1`.
 
-Esses testes agora acompanham o repositório. Os testes de scripts verificam os
-contratos e parâmetros críticos; eles não substituem um build integral nem um
-teste de boot no equipamento. Scripts Bash relevantes também passaram por
-`bash -n`, e a ISO final foi auditada diretamente conforme as seções 8 e 9.
+Esses testes agora acompanham o repositório. Além dos parâmetros, o pipeline
+confere os valores finais do Kconfig e inspeciona o initramfs gerado para exigir
+os módulos live, rejeitar iSCSI/NVMf e aceitar somente a árvore de módulos
+`7.2.0-x1407qa`. Scripts Bash relevantes também passaram por `bash -n`, a ISO
+foi auditada diretamente conforme as seções 8 e 9 e o boot físico básico foi
+confirmado no equipamento.
 
 ## 11. Limitações e segurança
 
@@ -265,16 +316,15 @@ teste de boot no equipamento. Scripts Bash relevantes também passaram por
   assinado com chave cadastrada no firmware do usuário.
 - Câmera IR continua indisponível por ausência física do PMIC necessário.
 - USB4/TB3 e suspend continuam experimentais e desativados por padrão.
-- Preserve a recuperação Fedora até validar extensivamente o Linux 7.2.
+- Use a entrada Linux 7.2 de diagnóstico se a entrada normal ainda falhar.
 - Nenhuma partição do NVMe interno foi modificada durante este trabalho.
 - A ISO já gravada contém o snapshot do repositório disponível no momento do
   empacotamento, anterior a este relatório e às correções finais do pipeline.
   Os kernels, initramfs, DTB e firmware auditados não mudam por isso; para obter
   uma mídia com a documentação e os scripts finais dentro de `/opt`, gere uma
   nova ISO a partir do commit publicado por este trabalho.
-- O boot completo no X1407QA ainda deve ser validado pelo usuário; a auditoria
-  realizada comprova a estrutura e a integridade da mídia, não compatibilidade
-  funcional de todos os dispositivos.
+- O boot básico foi confirmado no X1407QA, mas isso não comprova compatibilidade
+  funcional de todos os dispositivos, suspend, USB4/TB3 ou câmera IR.
 
 ## 12. Reprodução
 

@@ -33,6 +33,8 @@ for option in \
     CONFIG_QCOM_PMIC_GLINK CONFIG_BATTERY_QCOM_BATTMGR CONFIG_QCOM_SPMI_ADC_TM5 \
     CONFIG_QCOM_CLK_RPMH CONFIG_QCOM_COMMAND_DB CONFIG_QCOM_RPMH \
     CONFIG_QCOM_SCM CONFIG_QCOM_SMEM CONFIG_QCOM_AOSS_QMP \
+    CONFIG_ISO9660_FS CONFIG_JOLIET CONFIG_EROFS_FS CONFIG_EROFS_FS_ZIP \
+    CONFIG_DM_SNAPSHOT \
     CONFIG_PHY_QCOM_QMP_COMBO CONFIG_USB_DWC3_QCOM CONFIG_TYPEC_UCSI \
     CONFIG_UCSI_PMIC_GLINK CONFIG_ATH11K CONFIG_ATH11K_PCI \
     CONFIG_BT_HCIUART CONFIG_BT_HCIUART_QCA CONFIG_SND_SOC_QCOM \
@@ -42,6 +44,14 @@ for option in \
     $config --enable "${option#CONFIG_}" 2>/dev/null || true
 done
 make -C "$SOURCE_ROOT" O="$BUILD_ROOT" ARCH=arm64 olddefconfig
+for required_config in \
+    CONFIG_ISO9660_FS=y CONFIG_JOLIET=y CONFIG_EROFS_FS=y \
+    CONFIG_EROFS_FS_ZIP=y CONFIG_DM_SNAPSHOT=m; do
+    grep -qxF "$required_config" "$BUILD_ROOT/.config" || {
+        echo "ERROR: kernel config missing $required_config" >&2
+        exit 1
+    }
+done
 
 make -C "$SOURCE_ROOT" O="$BUILD_ROOT" ARCH=arm64 \
     LOCALVERSION=-x1407qa -j"$(nproc)" Image dtbs modules
