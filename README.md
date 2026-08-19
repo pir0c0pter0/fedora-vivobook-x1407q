@@ -4,6 +4,10 @@
 
 **Author:** Pir0c0pter0 — pir0c0pter0000@gmail.com
 
+> **Build reproduzível de 2026-08-19:** consulte o
+> [relatório completo do Fedora 44 com Linux 7.2](docs/BUILD-REPORT-2026-08-19.md)
+> e o [estado final da construção](BUILD-STATE.md).
+
 ## Hardware
 
 | Component | Details |

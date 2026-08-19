@@ -97,6 +97,22 @@ install_dkms_module() {
     fi
 }
 
+check_core_dkms_sources() {
+    CORE_DKMS_MISSING=()
+    local module
+    for module in wcn-regulator-fix vivobook-kbd-fix vivobook-bl-fix vivobook-hotkey-fix; do
+        [[ -d "/usr/src/${module}-1.0" ]] || CORE_DKMS_MISSING+=("$module")
+    done
+    if [[ ${#CORE_DKMS_MISSING[@]} -gt 0 ]]; then
+        err "Fontes DKMS essenciais ausentes: ${CORE_DKMS_MISSING[*]}"
+        err "WiFi, teclado, brilho e hotkeys não serão declarados como funcionais."
+        if [[ "${ALLOW_MISSING_CORE_DKMS:-0}" != "1" ]]; then
+            err "Abortando com segurança. Use ALLOW_MISSING_CORE_DKMS=1 somente para diagnóstico experimental."
+            exit 2
+        fi
+    fi
+}
+
 # ─── Stage do payload bundled (vindo do ISO, em /opt/vivobook-fixes/) ─────────
 # Copia módulos DKMS -> /usr/src e firmware bundled -> /usr/lib/firmware, para o
 # setup ser self-contained quando rodado de /opt/vivobook-fixes/ (Parte 2).
@@ -130,6 +146,7 @@ echo ""
 
 check_deps
 stage_bundled
+check_core_dkms_sources
 
 # ─── Pre-flight: firmware check ──────────────────────────────────────────────
 FW_DIR="/usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14"

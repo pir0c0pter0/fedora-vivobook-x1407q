@@ -514,6 +514,19 @@ bundle_payload() {
         warn "  modules/ não encontrado no repo"
     fi
 
+    local CORE_DKMS_MISSING=()
+    local core_module
+    for core_module in wcn-regulator-fix vivobook-kbd-fix vivobook-bl-fix vivobook-hotkey-fix; do
+        if [[ ! -d "${SCRIPT_DIR}/modules/${core_module}-1.0" ]]; then
+            CORE_DKMS_MISSING+=("$core_module")
+        fi
+    done
+    if [[ ${#CORE_DKMS_MISSING[@]} -gt 0 ]]; then
+        warn "  FONTES DKMS ESSENCIAIS AUSENTES: ${CORE_DKMS_MISSING[*]}"
+        printf '%s\n' "${CORE_DKMS_MISSING[@]}" | sudo tee "${dest}/CORE_DKMS_MISSING" >/dev/null
+        warn "  A ISO será de recuperação/experimentos; esses recursos não serão declarados funcionais."
+    fi
+
     # Firmware bundled (opcional). Se ausente, a Parte 2 extrai do Windows.
     if [[ -d "$FW_BUNDLE" ]]; then
         sudo cp -a "$FW_BUNDLE" "${dest}/firmware"

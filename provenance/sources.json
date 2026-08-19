@@ -1,0 +1,51 @@
+[
+  {
+    "name": "Ubuntu Noble WSL ARM64 rootfs",
+    "url": "https://cloud-images.ubuntu.com/wsl/noble/current/ubuntu-noble-wsl-arm64-24.04lts.rootfs.tar.gz",
+    "local_path": "C:\\LinuxBuild\\downloads\\wsl\\ubuntu-noble-wsl-arm64-24.04lts.rootfs.tar.gz",
+    "expected_sha256": "e113b8c49af3ab49b992b8e29550fc921e689f211abc338176f8243786173a32",
+    "provenance": "Official Ubuntu WSL ARM64 rootfs; checksum enforced before import"
+  },
+  {
+    "name": "Fedora 44 Workstation aarch64 ISO",
+    "url": "https://download-ib01.fedoraproject.org/pub/fedora/linux/releases/44/Workstation/aarch64/iso/Fedora-Workstation-Live-44-1.7.aarch64.iso",
+    "local_path": "C:\\LinuxBuild\\downloads\\fedora\\Fedora-Workstation-Live-44-1.7.aarch64.iso",
+    "expected_sha256": "162ba3c552a2d241c7c63ec26777af0255ee1b5a135adc0be986ceed999933ef",
+    "provenance": "Official Fedora release mirror; digest is carried by the Fedora PGP-signed checksum file"
+  },
+  {
+    "name": "Fedora signed checksum",
+    "url": "https://download.fedoraproject.org/pub/fedora/linux/releases/44/Workstation/aarch64/iso/Fedora-Workstation-44-1.7-aarch64-CHECKSUM",
+    "local_path": "C:\\LinuxBuild\\downloads\\fedora\\Fedora-Workstation-44-1.7-aarch64-CHECKSUM",
+    "expected_sha256": "self-authenticated-by-fedora-openpgp-signature",
+    "provenance": "Fedora Project release checksum with embedded OpenPGP signature"
+  },
+  {
+    "name": "Linux 7.2",
+    "url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.tar.xz",
+    "local_path": "C:\\LinuxBuild\\downloads\\kernel\\linux-7.2.tar.xz",
+    "expected_sha256": "f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3",
+    "provenance": "Final Linux 7.2 release tarball from the official kernel.org archive"
+  },
+  {
+    "name": "Linux 7.2 signed checksums",
+    "url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/sha256sums.asc",
+    "local_path": "C:\\LinuxBuild\\downloads\\kernel\\sha256sums.asc",
+    "expected_sha256": "self-authenticated-by-kernel.org-openpgp-signature",
+    "provenance": "Kernel.org SHA-256 list with embedded OpenPGP signature"
+  },
+  {
+    "name": "pir0c0pter0 X1407QA project",
+    "url": "https://github.com/pir0c0pter0/fedora-vivobook-x1407q/archive/refs/heads/main.zip",
+    "local_path": "C:\\LinuxBuild\\fedora-vivobook-main.zip",
+    "expected_sha256": "5cf5dd8135db56902a261d374cd17ddd27cceddebaF21e3538ffa33092007611",
+    "provenance": "GitHub archive of public main branch, observed HEAD e36aa2f83fed8243a27689cf667054b9a76a5896"
+  },
+  {
+    "name": "FreyDragon X1407QA research",
+    "url": "https://github.com/FreyDragon/vivobook-x1407qa-linux/archive/refs/heads/main.zip",
+    "local_path": "C:\\LinuxBuild\\downloads\\research\\FreyDragon-vivobook-x1407qa-linux-main.zip",
+    "expected_sha256": "ac7b3e72b76f144dadcf7b841fd2645b8e46a1cf92c16dfd9c9808df618c47ce",
+    "provenance": "GitHub archive of the related public X1407QA research project"
+  }
+]
