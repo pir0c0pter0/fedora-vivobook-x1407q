@@ -31,7 +31,30 @@ have() {
 }
 
 boot_journal_has() {
-    journalctl -b --no-pager 2>/dev/null | grep -Eqi -- "$1"
+    local journal
+
+    journal=$(journalctl -b --no-pager 2>/dev/null) || return 2
+    grep -Eqi -- "$1" <<<"$journal"
+}
+
+report_unavailable_boot_journal() {
+    local component=$1
+
+    if [[ $mode == --pre-reboot ]]; then
+        skip "$component" 'current boot journal is unavailable before reboot'
+    else
+        fail "$component" 'current boot journal is unavailable'
+    fi
+    return 1
+}
+
+require_boot_journal() {
+    local component=$1
+
+    if have journalctl && journalctl -b --no-pager >/dev/null 2>&1; then
+        return 0
+    fi
+    report_unavailable_boot_journal "$component"
 }
 
 remoteproc_state() {
@@ -84,8 +107,14 @@ check_wifi() {
         fail wifi 'no Wi-Fi network interface is present'
         return
     fi
+    if ! require_boot_journal wifi; then
+        return
+    fi
     if boot_journal_has 'failed to power up mhi|mhi.*-110'; then
         fail wifi 'current boot journal reports an MHI power-up timeout'
+        return
+    elif [[ $? -eq 2 ]]; then
+        report_unavailable_boot_journal wifi
         return
     fi
     pass wifi 'ath11k_pci, NetworkManager, interface, and current boot journal are healthy'
@@ -148,15 +177,21 @@ check_remoteproc() {
         fail "$component" "remoteproc state is ${state}"
         return
     fi
+    if ! require_boot_journal "$component"; then
+        return
+    fi
     if boot_journal_has "${name_pattern}.*(defer|deferred)|((defer|deferred).*)${name_pattern}"; then
         fail "$component" 'current boot journal has a deferred probe'
+        return
+    elif [[ $? -eq 2 ]]; then
+        report_unavailable_boot_journal "$component"
         return
     fi
     pass "$component" "${module} is available and remoteproc is running"
 }
 
 check_gpu() {
-    local render_node
+    local render_node='' drm_class=${AUDIT_DRM_CLASS:-/sys/class/drm}
 
     if ! have modinfo; then
         fail gpu 'modinfo is unavailable'
@@ -166,18 +201,24 @@ check_gpu() {
         fail gpu 'msm DRM module is unavailable'
         return
     fi
-    for render_node in /sys/class/drm/renderD*; do
-        [[ -e $render_node ]] || continue
-        if [[ -c $render_node/dev || -r $render_node/dev ]]; then
+    for render_node in "$drm_class"/renderD*; do
+        if [[ -e $render_node && -r $render_node/dev ]]; then
             break
         fi
+        render_node=''
     done
-    if [[ ! -e ${render_node:-} ]]; then
-        fail gpu 'no DRM render node is present'
+    if [[ -z $render_node ]]; then
+        fail gpu 'no readable DRM render node is present'
+        return
+    fi
+    if ! require_boot_journal gpu; then
         return
     fi
     if boot_journal_has '(msm|adreno|gpu).*(failed to load firmware|firmware.*(not found|failed))'; then
         fail gpu 'current boot journal reports missing GPU firmware'
+        return
+    elif [[ $? -eq 2 ]]; then
+        report_unavailable_boot_journal gpu
         return
     fi
     pass gpu 'msm DRM module and render node are present without a firmware failure in this boot'
@@ -330,25 +371,51 @@ check_color_control() {
     pass color-control 'saturation and contrast controls are readable'
 }
 
-check_lid_safety() {
-    local target status
+effective_logind_policy() {
+    local policy=$1 configuration
 
-    if ! have systemctl; then
-        fail lid-safety 'systemctl is unavailable'
+    configuration=$(systemd-analyze cat-config systemd/logind.conf 2>/dev/null) || return 1
+    awk -F= -v policy="$policy" '
+        $0 ~ "^[[:space:]]*" policy "=" {
+            value = $2
+            sub(/^[[:space:]]+/, "", value)
+            sub(/[[:space:]]+$/, "", value)
+        }
+        END {
+            if (value != "") {
+                print value
+            } else {
+                exit 1
+            }
+        }
+    ' <<<"$configuration"
+}
+
+check_lid_safety() {
+    local target status policy value
+
+    if ! have systemctl || ! have systemd-analyze; then
+        fail lid-safety 'systemctl or systemd-analyze is unavailable'
         return
     fi
-    for target in suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target; do
+    for target in sleep.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target; do
         status=$(systemctl is-enabled "$target" 2>&1 || true)
         if [[ $status != masked ]]; then
             fail lid-safety "${target} is ${status:-not-found}, expected masked"
             return
         fi
     done
-    if ! grep -Rqs '^HandleLidSwitch=lock$' /etc/systemd/logind.conf /etc/systemd/logind.conf.d 2>/dev/null; then
-        fail lid-safety 'no logind configuration keeps lid close at lock'
-        return
-    fi
-    pass lid-safety 'lid close locks the session and all sleep targets remain masked'
+    for policy in HandleLidSwitch HandleLidSwitchExternalPower HandleLidSwitchDocked; do
+        if ! value=$(effective_logind_policy "$policy"); then
+            fail lid-safety "cannot determine effective ${policy} policy"
+            return
+        fi
+        if [[ $value != lock ]]; then
+            fail lid-safety "effective ${policy} policy is ${value}, expected lock"
+            return
+        fi
+    done
+    pass lid-safety 'effective lid policies lock the session and all sleep targets remain masked'
 }
 
 check_wifi
