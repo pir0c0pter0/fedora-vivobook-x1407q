@@ -13,6 +13,13 @@ export RECOVERY_ROOT="$test_root/recovery"
 # shellcheck source=../tools/recover-stable-hardware.sh
 source "$runner"
 
+DRACUT_CONFIG_DIR="$test_root/managed/dracut"
+MODULES_LOAD_CONFIG_DIR="$test_root/managed/modules-load"
+RECOVERY_SYSTEMD_DIR="$test_root/managed/systemd"
+RECOVERY_BOOT_ROOT="$test_root/managed/boot"
+mkdir -p "$DRACUT_CONFIG_DIR" "$MODULES_LOAD_CONFIG_DIR" \
+    "$RECOVERY_SYSTEMD_DIR" "$RECOVERY_BOOT_ROOT"
+
 reset_recovery_root() {
     rm -rf -- "$RECOVERY_ROOT"
     mkdir -p "$RECOVERY_ROOT"
@@ -145,6 +152,16 @@ prepare_locked_manifest() {
     initialize_recovery_manifest
 }
 
+prepare_expected_managed_records() {
+    local kernel=$1 list="$test_root/managed-paths" path
+
+    : > "$list"
+    write_expected_managed_paths "$kernel" "$list"
+    while IFS= read -r path; do
+        backup_managed_path "$path"
+    done < "$list"
+}
+
 case_manifest_integrity() {
     local source_file="$test_root/source.conf" backup_file
 
@@ -156,13 +173,13 @@ case_manifest_integrity() {
     }
     printf 'original\n' > "$source_file"
     backup_managed_path "$source_file"
-    validate_recovery_manifest
+    validate_manifest_file "$RECOVERY_MANIFEST"
     backup_file="$RECOVERY_ROOT/$(awk -F '\t' -v path="$source_file" \
         '$1 == "BACKUP" && $2 == path { print $3 }' "$RECOVERY_MANIFEST")"
 
     rm "$backup_file"
     expect_failure 'manifest accepted a missing backup artifact' \
-        validate_recovery_manifest
+        validate_manifest_file "$RECOVERY_MANIFEST"
 
     prepare_locked_manifest
     printf 'original\n' > "$source_file"
@@ -171,7 +188,7 @@ case_manifest_integrity() {
         '$1 == "BACKUP" && $2 == path { print $3 }' "$RECOVERY_MANIFEST")"
     printf 'corrupt\n' > "$backup_file"
     expect_failure 'manifest accepted a checksum-mismatched backup' \
-        validate_recovery_manifest
+        validate_manifest_file "$RECOVERY_MANIFEST"
 
     prepare_locked_manifest
     append_manifest_record $'CREATED\t/tmp/duplicate\t-'
@@ -221,6 +238,9 @@ case_state_archive_coverage() {
         "$RECOVERY_MODULES_ROOT/$kernel/build"
     printf 'module\n' > "$RECOVERY_MODULES_ROOT/$kernel/extra/wcn_regulator_fix.ko"
     printf 'metadata\n' > "$RECOVERY_MODULES_ROOT/$kernel/modules.dep"
+    RECOVERY_MODULES_CANONICAL_ROOT=$RECOVERY_MODULES_ROOT
+    RECOVERY_MODULES_ALIAS_ROOT=$RECOVERY_MODULES_ROOT
+    prepare_expected_managed_records "$kernel"
 
     modinfo() {
         if [[ $* == *'-n wcn_regulator_fix'* ]]; then
@@ -260,6 +280,8 @@ case_installed_vermagic() {
     }
 
     RECOVERY_MODULES_ROOT="$test_root/checkpoint/modules"
+    RECOVERY_MODULES_CANONICAL_ROOT=$RECOVERY_MODULES_ROOT
+    RECOVERY_MODULES_ALIAS_ROOT=$RECOVERY_MODULES_ROOT
     RECOVERY_BOOT_ROOT="$test_root/checkpoint/boot"
     mkdir -p "$RECOVERY_MODULES_ROOT/$kernel/extra" "$RECOVERY_BOOT_ROOT"
     printf 'image\n' > "$RECOVERY_BOOT_ROOT/initramfs-${kernel}.img"
@@ -317,6 +339,8 @@ case_mutable_root_no_follow() {
     RECOVERY_USR_SRC_ROOT="$state/usr-src"
     RECOVERY_DKMS_STATE_ROOT="$state/dkms"
     RECOVERY_MODULES_ROOT="$state/modules"
+    RECOVERY_MODULES_CANONICAL_ROOT=$RECOVERY_MODULES_ROOT
+    RECOVERY_MODULES_ALIAS_ROOT=$RECOVERY_MODULES_ROOT
     mkdir -p "$RECOVERY_BUILD_STATE_ROOT/module-build" "$RECOVERY_USR_SRC_ROOT" \
         "$RECOVERY_DKMS_STATE_ROOT" "$RECOVERY_MODULES_ROOT/$kernel" "$victim"
     ln -s "$RECOVERY_BUILD_STATE_ROOT/module-build" "$RECOVERY_MODULES_ROOT/$kernel/build"
@@ -372,7 +396,7 @@ case_disk_preflight() {
         exit 1
     }
     recovery_archive_apparent_bytes() { printf '1000\n'; }
-    recovery_available_bytes() { printf '1500\n'; }
+    recovery_filesystem_info() { printf 'same-fs\t1500\n'; }
     RECOVERY_BUILD_SCRATCH_BYTES=1000
     RECOVERY_CANDIDATE_SCRATCH_BYTES=1000
     RECOVERY_SPACE_MARGIN_BYTES=1000
@@ -410,10 +434,13 @@ prepare_capture_fixture() {
     RECOVERY_USR_SRC_ROOT="$state/usr-src"
     RECOVERY_DKMS_STATE_ROOT="$state/dkms"
     RECOVERY_MODULES_ROOT="$state/modules"
+    RECOVERY_MODULES_CANONICAL_ROOT=$RECOVERY_MODULES_ROOT
+    RECOVERY_MODULES_ALIAS_ROOT=$RECOVERY_MODULES_ROOT
     mkdir -p "$RECOVERY_BUILD_STATE_ROOT/module-build" "$RECOVERY_USR_SRC_ROOT" \
         "$RECOVERY_DKMS_STATE_ROOT" "$RECOVERY_MODULES_ROOT/$kernel/extra"
     ln -s "$RECOVERY_BUILD_STATE_ROOT/module-build" "$RECOVERY_MODULES_ROOT/$kernel/build"
     modinfo() { return 1; }
+    prepare_expected_managed_records "$kernel"
 }
 
 case_find_failure() {

@@ -37,7 +37,7 @@ for token in \
     'make -j8 vmlinux' \
     'make -j8 modules' \
     'Module.symvers' \
-    '/lib/modules/${kernel}/build' \
+    '${KERNEL_MODULES_ROOT}/${kernel}/build' \
     'dkms add' \
     'dkms build' \
     'dkms install' \
@@ -129,7 +129,7 @@ namespace_line=$(grep -n 'if ! preflight_dkms_namespace; then' "$setup" | tail -
 preflight_body=$(sed -n '/^preflight_core_paths()/,/^}/p' "$setup")
 for type_contract in \
     '[[ ! -f "/boot/config-${kernel}" || -L "/boot/config-${kernel}" ]]' \
-    '[[ ! -d "/lib/modules/${kernel}" || -L "/lib/modules/${kernel}" ]]' \
+    '[[ ! -d "${KERNEL_MODULES_ROOT}/${kernel}" || -L "${KERNEL_MODULES_ROOT}/${kernel}" ]]' \
     '[[ ! -d /usr/src || -L /usr/src ]]'; do
     grep -qF "$type_contract" <<< "$preflight_body" || {
         echo "core preflight lacks exact path type contract: $type_contract" >&2

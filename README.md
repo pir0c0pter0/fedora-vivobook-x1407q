@@ -275,7 +275,9 @@ are missing, builds and vermagic-checks all four core DKMS modules, runs one
 inspected with `lsinitrd`, set to mode `0600`, and atomically promoted only
 after every module and selected firmware file is present. The final gate
 rechecks that every core module, plus the camera module when installed, resolves
-inside `/lib/modules/7.2.0-x1407qa/` with exact `7.2.0-x1407qa` vermagic. It
+inside canonical `/usr/lib/modules/7.2.0-x1407qa/` with exact
+`7.2.0-x1407qa` vermagic. The `/lib/modules` usrmerge alias is accepted only
+when it resolves exactly to `/usr/lib/modules`. It
 prints `READY FOR REBOOT` only after the installed modules, initramfs, and
 masked sleep targets pass. The reboot itself is always manual.
 
@@ -296,12 +298,16 @@ sudo -n bash tools/restore-stable-hardware-backup.sh --apply
 
 The helper takes the same exclusive lock, validates the exact manifest grammar,
 archive and backup checksums, and rejects every path outside the recovery
-allowlists. It removes each recorded `STATE ARCHIVED` or `STATE CREATED` root
-without following symlinks before extracting the archive, so descendants added
-by a failed attempt cannot survive the restore. It then atomically restores
-`BACKUP` files, recreates recorded `SYMLINK` values and removes only recorded
-`CREATED` paths. It does not reboot. This helper is deliberately never called by
-the recovery runner.
+allowlists. Exact or nested mountpoints, including bind mounts, abort before
+publication. Each archived root and each `BACKUP`/`SYMLINK` replacement is
+fully staged on the target filesystem first. Publication atomically renames the
+current object into a retained rollback directory and the staged object into
+place; any later tar/copy/sync/rename failure rolls every already-published
+object back. Only after all roots and files succeed are rollback directories
+removed. Consequently, descendants added by a failed recovery attempt cannot
+survive a successful restore, while a failed restore leaves the prior objects
+intact. It removes only paths recorded as `CREATED`, does not reboot, and is
+deliberately never called by the recovery runner.
 
 Every rerun validates the manifest grammar, rejects duplicate/unknown records,
 and verifies every backup/archive checksum before proceeding. An exclusive

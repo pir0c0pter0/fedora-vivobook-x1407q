@@ -3,7 +3,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 kernel=$(uname -r)
-kdir=${KDIR:-/lib/modules/${kernel}/build}
+kdir=${KDIR:-/usr/lib/modules/${kernel}/build}
 modules=(wcn-regulator-fix vivobook-kbd-fix vivobook-bl-fix vivobook-hotkey-fix)
 
 cleanup() {

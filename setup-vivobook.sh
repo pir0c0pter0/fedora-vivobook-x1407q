@@ -23,6 +23,7 @@ REAL_USER="${SUDO_USER:-$USER}"
 REAL_HOME=$(eval echo "~${REAL_USER}")
 FIRMWARE_ROOT="${FIRMWARE_ROOT:-/usr/lib/firmware}"
 DRACUT_CONFIG_DIR="${DRACUT_CONFIG_DIR:-/etc/dracut.conf.d}"
+KERNEL_MODULES_ROOT="${KERNEL_MODULES_ROOT:-/usr/lib/modules}"
 REAL_USER_UID=$(id -u "$REAL_USER" 2>/dev/null || true)
 REAL_RUNTIME_DIR="/run/user/${REAL_USER_UID}"
 # Test-only override: production always derives /run/user/<uid> above.
@@ -261,7 +262,7 @@ preflight_core_paths() {
     local work_root=/var/lib/x1407qa-kernel-7.2
     local build_tree="${work_root}/module-build"
     local tarball="${work_root}/linux-7.2.tar.xz"
-    local build_link="/lib/modules/${kernel}/build"
+    local build_link="${KERNEL_MODULES_ROOT}/${kernel}/build"
     local build_link_tmp="${build_link}.x1407qa-new"
     local initramfs_dir=${INITRAMFS_BOOT_DIR:-/boot}
     local initramfs_target="${initramfs_dir}/initramfs-${kernel}.img"
@@ -275,8 +276,8 @@ preflight_core_paths() {
         err "Config do kernel ausente, não regular ou symlink: /boot/config-${kernel}"
         return 1
     fi
-    if [[ ! -d "/lib/modules/${kernel}" || -L "/lib/modules/${kernel}" ]]; then
-        err "Diretório de módulos ausente, não diretório ou symlink: /lib/modules/${kernel}"
+    if [[ ! -d "${KERNEL_MODULES_ROOT}/${kernel}" || -L "${KERNEL_MODULES_ROOT}/${kernel}" ]]; then
+        err "Diretório de módulos ausente, não diretório ou symlink: ${KERNEL_MODULES_ROOT}/${kernel}"
         return 1
     fi
     if [[ ! -d /usr/src || -L /usr/src ]]; then
@@ -445,7 +446,7 @@ prepare_core_module_build_tree() (
     local work_root=/var/lib/x1407qa-kernel-7.2
     local tarball="${work_root}/linux-7.2.tar.xz"
     local build_tree=/var/lib/x1407qa-kernel-7.2/module-build
-    local build_link="/lib/modules/${kernel}/build"
+    local build_link="${KERNEL_MODULES_ROOT}/${kernel}/build"
     local kernel_suffix=${kernel#7.2.0}
     local download_tmp= prepare_root= prepared_source= link_tmp=
     local previous_tree= marker_tmp= config_input_sha256 config_final_sha256
