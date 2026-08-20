@@ -287,12 +287,21 @@ record is `/var/lib/vivobook-recovery/2026-08-20/manifest.txt`. `BACKUP`,
 targets, relevant `/var/lib/dkms` state, installed extra modules and all
 `modules.*` metadata that `depmod` may replace. The archive preserves numeric
 ownership, ACLs, xattrs and SELinux metadata. Recovery never rolls this state
-back automatically; after reviewing the manifest, an administrator can restore
-the `STATE ARCHIVED` entries with GNU tar using `--same-owner`, `--acls`,
-`--xattrs`, `--selinux`, `--numeric-owner` and
-`-C / -xf backups/state-before.tar`, restore each
-`BACKUP` path from its recorded file, recreate recorded `SYMLINK` values, and
-remove only paths explicitly marked `CREATED`.
+back automatically. After reviewing the manifest, an administrator can invoke
+the separate, explicit restore boundary:
+
+```bash
+sudo -n bash tools/restore-stable-hardware-backup.sh --apply
+```
+
+The helper takes the same exclusive lock, validates the exact manifest grammar,
+archive and backup checksums, and rejects every path outside the recovery
+allowlists. It removes each recorded `STATE ARCHIVED` or `STATE CREATED` root
+without following symlinks before extracting the archive, so descendants added
+by a failed attempt cannot survive the restore. It then atomically restores
+`BACKUP` files, recreates recorded `SYMLINK` values and removes only recorded
+`CREATED` paths. It does not reboot. This helper is deliberately never called by
+the recovery runner.
 
 Every rerun validates the manifest grammar, rejects duplicate/unknown records,
 and verifies every backup/archive checksum before proceeding. An exclusive

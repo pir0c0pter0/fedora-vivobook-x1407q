@@ -80,6 +80,7 @@ case_fedora_gate() {
     local os_release="$test_root/os-release" os_line lock_line
 
     RECOVERY_OS_RELEASE_PATH="$os_release"
+    RECOVERY_OS_RELEASE_CANONICAL="$os_release"
     printf 'ID=fedora\nVERSION_ID=43\n' > "$os_release"
     expect_failure 'runner accepted Fedora other than version 44' \
         verify_operating_system
@@ -289,6 +290,171 @@ case_installed_vermagic() {
         verify_recovery_checkpoint "$kernel"
 }
 
+case_fedora_real_layout() {
+    local os_root="$test_root/os-layout"
+
+    mkdir -p "$os_root/usr/lib" "$os_root/etc"
+    printf 'ID=fedora\nVERSION_ID=44\n' > "$os_root/usr/lib/os-release"
+    ln -s ../usr/lib/os-release "$os_root/etc/os-release"
+    RECOVERY_OS_RELEASE_CANONICAL="$os_root/usr/lib/os-release"
+    RECOVERY_OS_RELEASE_PATH="$os_root/etc/os-release"
+    verify_operating_system
+
+    rm "$os_root/etc/os-release"
+    printf 'ID=fedora\nVERSION_ID=44\n' > "$os_root/etc/os-release"
+    expect_failure 'runner accepted a noncanonical regular /etc/os-release' \
+        verify_operating_system
+    rm "$os_root/etc/os-release"
+    ln -s ../usr/lib/not-os-release "$os_root/etc/os-release"
+    expect_failure 'runner accepted /etc/os-release resolving elsewhere' \
+        verify_operating_system
+}
+
+case_mutable_root_no_follow() {
+    local kernel=7.2.0-x1407qa state="$test_root/mutable" victim="$test_root/victim-dir"
+
+    RECOVERY_BUILD_STATE_ROOT="$state/build-root"
+    RECOVERY_USR_SRC_ROOT="$state/usr-src"
+    RECOVERY_DKMS_STATE_ROOT="$state/dkms"
+    RECOVERY_MODULES_ROOT="$state/modules"
+    mkdir -p "$RECOVERY_BUILD_STATE_ROOT/module-build" "$RECOVERY_USR_SRC_ROOT" \
+        "$RECOVERY_DKMS_STATE_ROOT" "$RECOVERY_MODULES_ROOT/$kernel" "$victim"
+    ln -s "$RECOVERY_BUILD_STATE_ROOT/module-build" "$RECOVERY_MODULES_ROOT/$kernel/build"
+
+    ln -s "$victim" "$RECOVERY_DKMS_STATE_ROOT/wcn-regulator-fix"
+    expect_failure 'archive preflight accepted a symlinked DKMS package root' \
+        preflight_mutable_state_paths "$kernel"
+    rm "$RECOVERY_DKMS_STATE_ROOT/wcn-regulator-fix"
+    mkdir "$RECOVERY_DKMS_STATE_ROOT/wcn-regulator-fix"
+
+    ln -s "$victim" "$RECOVERY_MODULES_ROOT/$kernel/extra"
+    expect_failure 'archive preflight accepted a symlinked kernel extra root' \
+        preflight_mutable_state_paths "$kernel"
+    rm "$RECOVERY_MODULES_ROOT/$kernel/extra"
+    mkdir "$RECOVERY_MODULES_ROOT/$kernel/extra"
+
+    ln -s "$victim" "$RECOVERY_MODULES_ROOT/$kernel/updates"
+    expect_failure 'archive preflight accepted a symlinked kernel updates root' \
+        preflight_mutable_state_paths "$kernel"
+    rm "$RECOVERY_MODULES_ROOT/$kernel/updates"
+
+    rm "$RECOVERY_MODULES_ROOT/$kernel/build"
+    ln -s "$victim" "$RECOVERY_MODULES_ROOT/$kernel/build"
+    expect_failure 'archive preflight accepted the explicit build link with a wrong target' \
+        preflight_mutable_state_paths "$kernel"
+    rm "$RECOVERY_MODULES_ROOT/$kernel/build"
+    ln -s "$RECOVERY_BUILD_STATE_ROOT/module-build" "$RECOVERY_MODULES_ROOT/$kernel/build"
+
+    printf 'module\n' > "$victim/module.ko"
+    ln -s "$victim/module.ko" "$RECOVERY_MODULES_ROOT/$kernel/extra/wcn_regulator_fix.ko"
+    modinfo() {
+        [[ $* == *'-n wcn_regulator_fix'* ]] || return 1
+        printf '%s\n' "$RECOVERY_MODULES_ROOT/$kernel/extra/wcn_regulator_fix.ko"
+    }
+    expect_failure 'archive preflight accepted a symlinked installed module target' \
+        preflight_mutable_state_paths "$kernel"
+    unset -f modinfo
+
+    local first_line second_line
+    first_line=$(grep -n 'preflight_mutable_state_paths.*kernel.*return 1' "$runner" | head -1 | cut -d: -f1)
+    second_line=$(grep -n 'preflight_mutable_state_paths.*kernel.*return 1' "$runner" | tail -1 | cut -d: -f1)
+    [[ $first_line -ne $second_line ]] || {
+        echo 'mutable roots are not revalidated before DKMS' >&2
+        exit 1
+    }
+}
+
+case_disk_preflight() {
+    local disk_tree="$test_root/disk-tree" state_list="$test_root/disk-list" measured
+
+    declare -F preflight_recovery_disk_space >/dev/null || {
+        echo 'disk-space recovery preflight is missing' >&2
+        exit 1
+    }
+    recovery_archive_apparent_bytes() { printf '1000\n'; }
+    recovery_available_bytes() { printf '1500\n'; }
+    RECOVERY_BUILD_SCRATCH_BYTES=1000
+    RECOVERY_CANDIDATE_SCRATCH_BYTES=1000
+    RECOVERY_SPACE_MARGIN_BYTES=1000
+    expect_failure 'disk preflight accepted insufficient recovery filesystem space' \
+        preflight_recovery_disk_space 7.2.0-x1407qa "$test_root/state-list"
+    mkdir -p "$disk_tree"
+    mkdir -p "$RECOVERY_ROOT"
+    printf '1234567' > "$disk_tree/payload"
+    printf '%s\n%s\n' "$disk_tree" "$disk_tree" > "$state_list"
+    measured=$(VIVOBOOK_RECOVERY_LIBRARY_ONLY=1 RECOVERY_ROOT="$RECOVERY_ROOT" \
+        bash -c 'source "$1"; recovery_archive_apparent_bytes "$2"' \
+        _ "$runner" "$state_list")
+    [[ $measured -eq 7 ]] || {
+        echo "archive apparent size double-counted duplicate roots: $measured" >&2
+        exit 1
+    }
+}
+
+case_manifest_semantics() {
+    local archive checksum
+
+    prepare_locked_manifest
+    archive="$RECOVERY_ROOT/backups/state-before.tar"
+    tar -cf "$archive" --files-from=/dev/null
+    checksum=$(sha256sum "$archive" | cut -d' ' -f1)
+    expect_failure 'manifest accepted ARCHIVE without the exact STATE set' \
+        append_manifest_record $'ARCHIVE\tbackups/state-before.tar\t'"$checksum"
+}
+
+prepare_capture_fixture() {
+    local kernel=$1 state="$test_root/capture"
+
+    prepare_locked_manifest
+    RECOVERY_BUILD_STATE_ROOT="$state/build-root"
+    RECOVERY_USR_SRC_ROOT="$state/usr-src"
+    RECOVERY_DKMS_STATE_ROOT="$state/dkms"
+    RECOVERY_MODULES_ROOT="$state/modules"
+    mkdir -p "$RECOVERY_BUILD_STATE_ROOT/module-build" "$RECOVERY_USR_SRC_ROOT" \
+        "$RECOVERY_DKMS_STATE_ROOT" "$RECOVERY_MODULES_ROOT/$kernel/extra"
+    ln -s "$RECOVERY_BUILD_STATE_ROOT/module-build" "$RECOVERY_MODULES_ROOT/$kernel/build"
+    modinfo() { return 1; }
+}
+
+case_find_failure() {
+    local kernel=7.2.0-x1407qa
+
+    prepare_capture_fixture "$kernel"
+    find() { return 7; }
+    expect_failure 'state capture ignored an injected find failure' \
+        capture_recovery_state "$kernel"
+    unset -f find modinfo
+}
+
+case_archive_durability() {
+    local kernel=7.2.0-x1407qa events="$test_root/durability-events"
+
+    prepare_capture_fixture "$kernel"
+    sync() { printf 'sync:%s\n' "$*" >> "$events"; }
+    append_manifest_records_file() {
+        printf 'manifest\n' >> "$events"
+    }
+    capture_recovery_state "$kernel"
+    unset -f sync append_manifest_records_file modinfo
+    local backups_sync manifest_line
+    backups_sync=$(grep -nFx "sync:-f $RECOVERY_ROOT/backups" "$events" | tail -1 | cut -d: -f1 || true)
+    manifest_line=$(grep -n '^manifest$' "$events" | cut -d: -f1 || true)
+    [[ -n $backups_sync && -n $manifest_line && $backups_sync -lt $manifest_line ]] || {
+        echo 'archive directory was not synced after rename and before manifest publication' >&2
+        exit 1
+    }
+}
+
+case_atomic_temp_glob() {
+    local config_root="$test_root/glob-config" stale
+
+    mkdir -p "$config_root"
+    stale="$config_root/.qcom-remoteproc.conf.new.attack"
+    : > "$stale"
+    expect_failure 'config preflight ignored its actual hidden mktemp glob' \
+        preflight_atomic_config_target "$config_root/qcom-remoteproc.conf"
+}
+
 run_case() {
     case "$1" in
         symlink) case_symlink_and_atomic_writers ;;
@@ -299,12 +465,20 @@ run_case() {
         lock) case_exclusive_lock ;;
         state) case_state_archive_coverage ;;
         vermagic) case_installed_vermagic ;;
+        oslayout) case_fedora_real_layout ;;
+        mutable) case_mutable_root_no_follow ;;
+        disk) case_disk_preflight ;;
+        semantic) case_manifest_semantics ;;
+        findfail) case_find_failure ;;
+        durability) case_archive_durability ;;
+        tempglob) case_atomic_temp_glob ;;
         *) echo "unknown case: $1" >&2; exit 2 ;;
     esac
 }
 
 if [[ $case_name == all ]]; then
-    for name in symlink fedora audit bc manifest lock state vermagic; do
+    for name in symlink fedora audit bc manifest lock state vermagic \
+        oslayout mutable disk semantic findfail durability tempglob; do
         run_case "$name"
     done
 else

@@ -787,7 +787,8 @@ EOF
 }
 
 preflight_atomic_config_target() {
-    local target=$1 target_dir
+    local target=$1 allowed_temp=${2:-} target_dir temp_glob temp_path
+    local -a temp_paths=()
 
     target_dir=$(dirname "$target") || return 1
     if [[ ! -d $target_dir || -L $target_dir ]]; then
@@ -800,10 +801,15 @@ preflight_atomic_config_target() {
             return 1
         fi
     fi
-    if compgen -G "${target}.new.*" >/dev/null; then
-        err "Temporário de configuração preexistente: ${target}.new.*"
+    temp_glob="${target_dir}/.$(basename "$target").new.*"
+    shopt -s nullglob
+    temp_paths=("${target_dir}/.$(basename "$target").new."*)
+    shopt -u nullglob
+    for temp_path in "${temp_paths[@]}"; do
+        [[ -n $allowed_temp && $temp_path == "$allowed_temp" ]] && continue
+        err "Temporário de configuração preexistente: $temp_glob"
         return 1
-    fi
+    done
 }
 
 atomic_write_config() (
@@ -822,7 +828,7 @@ atomic_write_config() (
     [[ -f $candidate && ! -L $candidate ]] || return 1
     sync -f "$candidate" || return 1
     sync -f "$target_dir" || return 1
-    preflight_atomic_config_target "$target" || return 1
+    preflight_atomic_config_target "$target" "$candidate" || return 1
     mv -Tf -- "$candidate" "$target" || return 1
     candidate=
     sync -f "$target_dir"

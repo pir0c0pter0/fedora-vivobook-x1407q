@@ -111,6 +111,8 @@ record_prior_incident() { :; }
 install_exact_dependencies() { :; }
 preflight_core_paths() { :; }
 preflight_recovery_mutation_paths() { :; }
+preflight_mutable_state_paths() { :; }
+preflight_recovery_disk_space() { :; }
 preflight_dkms_namespace() { :; }
 resolve_kernel_requested_firmware() { :; }
 backup_recovery_paths() { :; }
