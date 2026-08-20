@@ -31,6 +31,7 @@ fi
 TARGET_UID=$(id -u "$TARGET_USER" 2>/dev/null || true)
 TARGET_HOME=$(getent passwd "$TARGET_USER" 2>/dev/null | cut -d: -f6 || true)
 if [[ ${BATTERY_TIME_TEST_MODE:-0} == 1 ]]; then
+    # Test-only path overrides are inert unless this explicit mode is set.
     TARGET_HOME=${BATTERY_TIME_TEST_HOME:?BATTERY_TIME_TEST_HOME is required in test mode}
 fi
 if [[ -z "$TARGET_HOME" || ! -d "$TARGET_HOME" ]]; then
@@ -50,7 +51,10 @@ STATE_DIR="$TARGET_HOME/.local/state/battery-time-extension"
 STATUS_FILE="$STATE_DIR/status"
 AUTOSTART_DIR="$TARGET_HOME/.config/autostart"
 AUTOSTART_FILE="$AUTOSTART_DIR/battery-time-extension-activation.desktop"
-TARGET_RUNTIME_DIR="${BATTERY_TIME_RUNTIME_DIR:-/run/user/${TARGET_UID}}"
+TARGET_RUNTIME_DIR="/run/user/${TARGET_UID}"
+if [[ ${BATTERY_TIME_TEST_MODE:-0} == 1 ]]; then
+    TARGET_RUNTIME_DIR=${BATTERY_TIME_TEST_RUNTIME_DIR:?BATTERY_TIME_TEST_RUNTIME_DIR is required in test mode}
+fi
 SESSION_BUS="$TARGET_RUNTIME_DIR/bus"
 SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
 
@@ -76,7 +80,41 @@ EOF
 }
 
 session_bus_available() {
-    [[ -n "$TARGET_UID" && -S "$SESSION_BUS" ]]
+    [[ -n "$TARGET_UID" && -d "$TARGET_RUNTIME_DIR" && ! -L "$TARGET_RUNTIME_DIR" &&
+        -S "$SESSION_BUS" && ! -L "$SESSION_BUS" ]] || return 3
+    [[ $(stat -c %u "$TARGET_RUNTIME_DIR") == "$TARGET_UID" &&
+        $(stat -c %u "$SESSION_BUS") == "$TARGET_UID" ]] || return 3
+}
+
+gnome_shell_owner_available() {
+    local owner_reply
+
+    session_bus_available || return 3
+    if command -v gdbus >/dev/null 2>&1; then
+        owner_reply=$(XDG_RUNTIME_DIR="$TARGET_RUNTIME_DIR" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=$SESSION_BUS" \
+            gdbus call --session --dest org.freedesktop.DBus \
+            --object-path /org/freedesktop/DBus \
+            --method org.freedesktop.DBus.NameHasOwner org.gnome.Shell 2>/dev/null) || {
+            echo 'Não foi possível consultar o owner org.gnome.Shell no D-Bus; mantendo pending-login.' >&2
+            return 3
+        }
+        [[ $owner_reply == *true* ]] && return 0
+    elif command -v busctl >/dev/null 2>&1; then
+        owner_reply=$(XDG_RUNTIME_DIR="$TARGET_RUNTIME_DIR" \
+            DBUS_SESSION_BUS_ADDRESS="unix:path=$SESSION_BUS" \
+            busctl --user call org.freedesktop.DBus /org/freedesktop/DBus \
+            org.freedesktop.DBus NameHasOwner s org.gnome.Shell 2>/dev/null) || {
+            echo 'Não foi possível consultar o owner org.gnome.Shell no D-Bus; mantendo pending-login.' >&2
+            return 3
+        }
+        [[ $owner_reply == *true* ]] && return 0
+    else
+        echo 'gdbus/busctl indisponível; não assumindo uma Shell ativa.' >&2
+        return 3
+    fi
+    echo 'org.gnome.Shell não possui o bus da sessão; mantendo pending-login.' >&2
+    return 3
 }
 
 verify_and_activate_session() {
@@ -114,7 +152,7 @@ verify_and_activate_session() {
 
 activate_or_queue() {
     install_pending_autostart || return 1
-    if ! session_bus_available; then
+    if ! gnome_shell_owner_available; then
         write_status pending-login || return 1
         echo 'Status: pending-login; ativação será repetida pelo autostart no próximo login.'
         return 3

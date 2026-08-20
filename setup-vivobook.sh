@@ -24,7 +24,11 @@ REAL_HOME=$(eval echo "~${REAL_USER}")
 FIRMWARE_ROOT="${FIRMWARE_ROOT:-/usr/lib/firmware}"
 DRACUT_CONFIG_DIR="${DRACUT_CONFIG_DIR:-/etc/dracut.conf.d}"
 REAL_USER_UID=$(id -u "$REAL_USER" 2>/dev/null || true)
-REAL_RUNTIME_DIR="${VIVOBOOK_REAL_RUNTIME_DIR:-/run/user/${REAL_USER_UID}}"
+REAL_RUNTIME_DIR="/run/user/${REAL_USER_UID}"
+# Test-only override: production always derives /run/user/<uid> above.
+if [[ ${VIVOBOOK_SETUP_TEST_MODE:-0} == 1 ]]; then
+    REAL_RUNTIME_DIR=${VIVOBOOK_TEST_RUNTIME_DIR:?VIVOBOOK_TEST_RUNTIME_DIR is required in test mode}
+fi
 REAL_DBUS_SESSION_BUS_ADDRESS="unix:path=${REAL_RUNTIME_DIR}/bus"
 
 # ─── Colors & logging ────────────────────────────────────────────────────────
@@ -115,7 +119,28 @@ prompt_yn() {
 # GNOME settings must be sent to the invoking user's live session, never to a
 # root/default dconf database.  A missing bus is an explicit pending state.
 real_user_session_available() {
-    [[ -n "$REAL_USER_UID" && -S "${REAL_RUNTIME_DIR}/bus" ]]
+    local owner_reply
+
+    [[ -n "$REAL_USER_UID" && -d "$REAL_RUNTIME_DIR" && ! -L "$REAL_RUNTIME_DIR" &&
+        -S "${REAL_RUNTIME_DIR}/bus" && ! -L "${REAL_RUNTIME_DIR}/bus" ]] || return 3
+    [[ $(stat -c %u "$REAL_RUNTIME_DIR") == "$REAL_USER_UID" &&
+        $(stat -c %u "${REAL_RUNTIME_DIR}/bus") == "$REAL_USER_UID" ]] || return 3
+    if command -v gdbus >/dev/null 2>&1; then
+        owner_reply=$(run_as_real_user env XDG_RUNTIME_DIR="$REAL_RUNTIME_DIR" \
+            DBUS_SESSION_BUS_ADDRESS="$REAL_DBUS_SESSION_BUS_ADDRESS" \
+            gdbus call --session --dest org.freedesktop.DBus \
+            --object-path /org/freedesktop/DBus \
+            --method org.freedesktop.DBus.NameHasOwner org.gnome.Shell 2>/dev/null) || return 3
+        [[ $owner_reply == *true* ]] || return 3
+    elif command -v busctl >/dev/null 2>&1; then
+        owner_reply=$(run_as_real_user env XDG_RUNTIME_DIR="$REAL_RUNTIME_DIR" \
+            DBUS_SESSION_BUS_ADDRESS="$REAL_DBUS_SESSION_BUS_ADDRESS" \
+            busctl --user call org.freedesktop.DBus /org/freedesktop/DBus \
+            org.freedesktop.DBus NameHasOwner s org.gnome.Shell 2>/dev/null) || return 3
+        [[ $owner_reply == *true* ]] || return 3
+    else
+        return 3
+    fi
 }
 
 run_as_real_user() {
