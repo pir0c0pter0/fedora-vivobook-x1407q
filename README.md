@@ -258,6 +258,43 @@ control, cpufreq, dconf defaults, on-demand camera, and cleans up old scripts.
 When run from the bundled payload it also auto-stages `modules/` → `/usr/src`
 and bundled `firmware/` → `/usr/lib/firmware` first, so it is self-contained.
 
+### Safe recovery for the stable kernel 7.2 hardware path
+
+For an existing X1407QA installation already booted on exactly
+`7.2.0-x1407qa`, use the focused recovery runner instead of rerunning the
+monolithic setup:
+
+```bash
+sudo -n bash tools/recover-stable-hardware.sh
+```
+
+The runner verifies the DMI model and active kernel, captures a read-only
+pre-reboot audit, installs only explicitly named dependencies that are missing,
+builds and vermagic-checks all four core DKMS modules, runs one `depmod`, and
+uses the tested candidate-initramfs primitive. The candidate is inspected with
+`lsinitrd`, set to mode `0600`, and atomically promoted only after every module
+and selected firmware file is present. It prints `READY FOR REBOOT` only after
+the installed modules, initramfs, and masked sleep targets pass their final
+gates. The reboot itself is always manual.
+
+The first observed version of every overwritten non-RPM file is retained under
+`/var/lib/vivobook-recovery/2026-08-20/backups/`; the idempotent record is
+`/var/lib/vivobook-recovery/2026-08-20/manifest.txt`. A pre-reboot audit exit 1
+is recorded as the broken baseline being repaired; an invocation/prerequisite
+error still stops the runner.
+
+Camera IR, experimental USB4/TB3, and suspend/hibernate enablement are outside
+this workflow. Sleep targets remain masked. The runner does not load the RGB
+camera or display color-control modules; it leaves their existing activation
+state unchanged, and the RGB camera remains on demand. It also does not perform
+a general package update.
+
+Historical safety note: an earlier DKMS hook rewrote only the old
+`/boot/initramfs-6.19.10-300.fc44.aarch64.img`; the active 7.2 image remained
+intact and both images passed `lsinitrd`. The leftover
+`/var/tmp/dracut.dRkFu6m` is intentionally documented in the recovery manifest.
+This runner performs no automatic rollback or cleanup of either artifact.
+
 Or apply each fix manually — see [Detailed Fix Guide](#detailed-fix-guide) below.
 
 ### Step 7 — Reboot and Verify

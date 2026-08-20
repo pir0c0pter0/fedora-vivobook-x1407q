@@ -73,34 +73,56 @@ if [[ $EUID -ne 0 && ${VIVOBOOK_SETUP_LIBRARY_ONLY:-0} != 1 ]]; then
 fi
 
 # ─── Dependencies ────────────────────────────────────────────────────────────
-check_deps() {
-    local package command_name
+install_exact_dependencies() {
+    local scope=${1:-setup} package command_name
     local -a build_packages=(gcc make dkms perl elfutils-libelf-devel openssl-devel flex bison)
+    local -a runtime_packages=(curl tar xz dracut kmod util-linux)
+    if [[ $scope == setup ]]; then
+        runtime_packages+=(grubby)
+    elif [[ $scope != recovery ]]; then
+        err "Escopo de dependências desconhecido: $scope"
+        return 1
+    fi
+    local -a approved_packages=("${build_packages[@]}" "${runtime_packages[@]}")
     local -a missing_packages=()
 
-    for package in "${build_packages[@]}"; do
+    for package in "${approved_packages[@]}"; do
         rpm -q "$package" &>/dev/null || missing_packages+=("$package")
     done
     if [[ ${#missing_packages[@]} -gt 0 ]]; then
-        warn "Dependências de build faltando: ${missing_packages[*]}"
-        info "Instalando somente as dependências de build aprovadas..."
+        warn "Dependências aprovadas faltando: ${missing_packages[*]}"
+        info "Instalando somente as dependências nomeadas que estão ausentes..."
         if ! dnf install -y "${missing_packages[@]}"; then
-            err "Falha ao instalar dependências de build aprovadas"
-            exit 1
+            err "Falha ao instalar dependências aprovadas"
+            return 1
         fi
     fi
-    for package in "${build_packages[@]}"; do
+    for package in "${approved_packages[@]}"; do
         if ! rpm -q "$package" &>/dev/null; then
-            err "Dependência de build obrigatória ausente: $package"
-            exit 1
+            err "Dependência obrigatória ausente: $package"
+            return 1
         fi
     done
-    for command_name in dracut grubby grub2-mkconfig modprobe unshare mount; do
+    for command_name in \
+        awk curl depmod dkms dnf dracut grep install lsinitrd make modinfo mount \
+        mv rpm sha256sum systemctl tar unshare xz; do
         if ! command -v "$command_name" &>/dev/null; then
             err "Comando obrigatório ausente: $command_name"
-            exit 1
+            return 1
         fi
     done
+    if [[ $scope == setup ]]; then
+        for command_name in grubby grub2-mkconfig modprobe; do
+            if ! command -v "$command_name" &>/dev/null; then
+                err "Comando obrigatório do setup ausente: $command_name"
+                return 1
+            fi
+        done
+    fi
+}
+
+check_deps() {
+    install_exact_dependencies
 }
 
 # ─── Prompt ───────────────────────────────────────────────────────────────────
@@ -774,6 +796,31 @@ EOF
     fi
 }
 
+write_core_module_boot_configs() {
+    local modules_load_dir=${MODULES_LOAD_CONFIG_DIR:-/etc/modules-load.d}
+
+    mkdir -p "$modules_load_dir" "$DRACUT_CONFIG_DIR" || return 1
+    printf '%s\n' \
+        wcn_regulator_fix vivobook_kbd_fix vivobook_bl_fix \
+        vivobook_hotkey_fix > "${modules_load_dir}/vivobook-core.conf" || return 1
+    printf '%s\n' \
+        'force_drivers+=" wcn_regulator_fix vivobook_kbd_fix vivobook_bl_fix vivobook_hotkey_fix "' \
+        > "${DRACUT_CONFIG_DIR}/vivobook-core.conf"
+}
+
+keep_sleep_targets_masked() {
+    local target
+
+    for target in sleep.target suspend.target hibernate.target \
+        hybrid-sleep.target suspend-then-hibernate.target; do
+        systemctl mask "$target" >/dev/null || return 1
+        [[ $(systemctl is-enabled "$target" 2>&1 || true) == masked ]] || {
+            err "Target de sleep não permaneceu masked: $target"
+            return 1
+        }
+    done
+}
+
 # ─── Early boot remoteproc contract ──────────────────────────────────────────
 require_remoteproc_early_boot_assets() {
     local module
@@ -874,6 +921,12 @@ publish_initramfs_candidate() (
         fi
     done
 
+    chmod 0600 "$candidate" || return 1
+    [[ $(stat -c %a "$candidate") == 600 ]] || {
+        err "Modo inesperado no candidato initramfs"
+        return 1
+    }
+
     sync_initramfs_path "$candidate" || return 1
     if [[ -L "$target" ]] || [[ -e "$target" && ! -f "$target" ]] ||
         [[ -L "$backup" ]] || [[ -e "$backup" && ! -f "$backup" ]]; then
@@ -927,6 +980,11 @@ if ! preflight_core_paths "$ACTIVE_KERNEL"; then
     exit 1
 fi
 check_deps
+dependency_status=$?
+if [[ $dependency_status -ne 0 ]]; then
+    err "Dependências exatas não puderam ser satisfeitas"
+    exit 1
+fi
 if ! preflight_dkms_namespace; then
     err "Preflight do namespace DKMS falhou antes de qualquer ação DKMS"
     exit 1
@@ -1021,6 +1079,11 @@ else
     ((dkms_fail++))
 fi
 echo "vivobook_hotkey_fix" > /etc/modules-load.d/vivobook-hotkey-fix.conf
+
+if ! write_core_module_boot_configs; then
+    err "Não foi possível gravar o contrato de boot dos módulos core"
+    exit 1
+fi
 
 # ─── 7. GPU — Firmware no initramfs ─────────────────────────────────────────
 step 7 $TOTAL "GPU (firmware initramfs)..."
@@ -1181,9 +1244,10 @@ HandleLidSwitchExternalPower=lock
 HandleLidSwitchDocked=lock
 IdleAction=ignore
 EOF
-for target in suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target sleep.target; do
-    systemctl mask "$target" 2>/dev/null || true
-done
+if ! keep_sleep_targets_masked; then
+    err "Targets de suspend/hibernate não permaneceram masked"
+    exit 1
+fi
 systemctl mask dev-tpm0.device dev-tpmrm0.device 2>/dev/null || true
 log "  Suspend disabled, lid = lock screen"
 
