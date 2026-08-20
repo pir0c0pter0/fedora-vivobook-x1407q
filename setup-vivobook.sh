@@ -133,6 +133,31 @@ stage_bundled() {
     fi
 }
 
+# ─── Early boot remoteproc contract ──────────────────────────────────────────
+require_remoteproc_early_boot_assets() {
+    local module firmware_path
+    local -a modules=(qcom_q6v5_pas qcom_q6v5_adsp qcom_glink_smem)
+    local -a firmware=(
+        /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcadsp8380.mbn
+        /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsp_dtbs.elf
+        /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qccdsp8380.mbn
+        /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdsp_dtbs.elf
+    )
+
+    for module in "${modules[@]}"; do
+        if ! modinfo -n "$module" &>/dev/null; then
+            err "Módulo remoteproc obrigatório ausente: $module"
+            exit 1
+        fi
+    done
+    for firmware_path in "${firmware[@]}"; do
+        if [[ ! -f "$firmware_path" ]]; then
+            err "Firmware remoteproc obrigatório ausente: $firmware_path"
+            exit 1
+        fi
+    done
+}
+
 # =============================================================================
 #  MAIN
 # =============================================================================
@@ -190,12 +215,15 @@ fi
 echo "vivobook_kbd_fix" > /etc/modules-load.d/vivobook-kbd-fix.conf
 echo 'force_drivers+=" vivobook_kbd_fix "' > /etc/dracut.conf.d/vivobook-kbd-fix.conf
 
-# ─── 4. Bateria — ADSP firmware no initramfs ────────────────────────────────
-step 4 $TOTAL "Bateria (ADSP firmware initramfs)..."
-cat > /etc/dracut.conf.d/qcom-adsp-firmware.conf << 'EOF'
-install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcadsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsp_dtbs.elf /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspr.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsps.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspua.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/battmgr.jsn "
+# ─── 4. ADSP/CDSP — remoteproc e firmware no initramfs ──────────────────────
+step 4 $TOTAL "ADSP/CDSP (remoteproc initramfs)..."
+require_remoteproc_early_boot_assets
+cat > /etc/dracut.conf.d/qcom-remoteproc.conf << 'EOF'
+force_drivers+=" qcom_q6v5_pas qcom_q6v5_adsp qcom_glink_smem "
+install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcadsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsp_dtbs.elf /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qccdsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdsp_dtbs.elf "
+install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspr.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsps.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspua.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/battmgr.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdspr.jsn "
 EOF
-log "  dracut ADSP config"
+log "  dracut remoteproc ADSP/CDSP config"
 
 # ─── 5. Brilho — DKMS vivobook_bl_fix ───────────────────────────────────────
 step 5 $TOTAL "Brilho (vivobook_bl_fix)..."
@@ -361,12 +389,9 @@ echo "scmi_cpufreq" > /etc/modules-load.d/scmi-cpufreq.conf
 modprobe scmi_cpufreq 2>/dev/null || true
 log "  cpufreq autoload"
 
-# ─── 15. CDSP/NPU — Firmware no initramfs ───────────────────────────────────
-step 15 $TOTAL "CDSP/NPU (firmware initramfs)..."
-cat > /etc/dracut.conf.d/qcom-cdsp-firmware.conf << 'EOF'
-install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qccdsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdsp_dtbs.elf /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdspr.jsn "
-EOF
-log "  dracut CDSP config"
+# ─── 15. CDSP/NPU — contrato early boot já configurado ──────────────────────
+step 15 $TOTAL "CDSP/NPU (firmware early boot)..."
+log "  firmware CDSP incluído em qcom-remoteproc.conf"
 
 # ─── 16. Charge control — udev rule 80% ─────────────────────────────────────
 step 16 $TOTAL "Charge control (limite 80%)..."

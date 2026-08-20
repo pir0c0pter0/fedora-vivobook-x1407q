@@ -15,7 +15,9 @@ file "$IMAGE" | grep -Eq 'ARM64|ARM aarch64' || { file "$IMAGE" >&2; exit 1; }
 [[ -s $CONFIG ]] || { echo 'ERROR: kernel config missing' >&2; exit 1; }
 for required_config in \
     CONFIG_ISO9660_FS=y CONFIG_JOLIET=y CONFIG_EROFS_FS=y \
-    CONFIG_EROFS_FS_ZIP=y CONFIG_DM_SNAPSHOT=m; do
+    CONFIG_EROFS_FS_ZIP=y CONFIG_DM_SNAPSHOT=m \
+    CONFIG_QCOM_Q6V5_PAS=m CONFIG_QCOM_Q6V5_ADSP=m \
+    CONFIG_QCOM_PMIC_GLINK=m CONFIG_BATTERY_QCOM_BATTMGR=m; do
     grep -qxF "$required_config" "$CONFIG" || {
         echo "ERROR: kernel config missing $required_config" >&2
         exit 1
