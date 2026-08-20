@@ -582,7 +582,6 @@ install_built_core_dkms_modules() {
             "${module}/1.0" -k "$kernel" || return 1
         log "  ${module}/1.0 compilado e instalado para ${kernel}"
     done
-    depmod "$kernel" || return 1
 }
 
 check_core_dkms_sources() {
@@ -1126,6 +1125,10 @@ fi
 
 # ─── Rebuild initramfs ──────────────────────────────────────────────────────
 log "Regenerando initramfs..."
+depmod "$ACTIVE_KERNEL" || {
+    err "depmod falhou após os installs DKMS"
+    exit 1
+}
 if ! publish_initramfs_candidate "$ACTIVE_KERNEL"; then
     err "Candidato initramfs falhou; setup abortado sem declarar sucesso"
     exit 1

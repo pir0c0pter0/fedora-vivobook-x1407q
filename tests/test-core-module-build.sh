@@ -137,14 +137,23 @@ for type_contract in \
     }
 done
 
-[[ $(grep -c '^[[:space:]]*depmod "\$kernel"' "$setup") -eq 1 ]] || {
-    echo 'core path must run exactly one depmod for the active kernel' >&2
+[[ $(grep -c '^[[:space:]]*depmod "\$ACTIVE_KERNEL"' "$setup") -eq 1 ]] || {
+    echo 'setup must run exactly one depmod for the active kernel' >&2
     exit 1
 }
-if grep -qF 'depmod "$ACTIVE_KERNEL"' "$setup"; then
-    echo 'setup retains a redundant late depmod' >&2
+if grep -qE '^[[:space:]]*depmod "\$kernel"' "$setup"; then
+    echo 'core install phase retains an early depmod' >&2
     exit 1
 fi
+
+camera_install_line=$(grep -n 'run_dkms_without_runtime_hooks dkms install --no-depmod' "$setup" | tail -1 | cut -d: -f1 || true)
+depmod_line=$(grep -n '^[[:space:]]*depmod "\$ACTIVE_KERNEL"' "$setup" | cut -d: -f1 || true)
+candidate_line=$(grep -n 'publish_initramfs_candidate "\$ACTIVE_KERNEL"' "$setup" | tail -1 | cut -d: -f1 || true)
+[[ -n $camera_install_line && -n $depmod_line && -n $candidate_line &&
+   $camera_install_line -lt $depmod_line && $depmod_line -lt $candidate_line ]] || {
+    echo 'depmod does not run after camera install and immediately before candidate publication' >&2
+    exit 1
+}
 
 build_line=$(grep -n 'build_core_dkms_modules "$ACTIVE_KERNEL"' "$setup" | tail -1 | cut -d: -f1 || true)
 vermagic_line=$(grep -n 'verify_core_dkms_vermagic "$ACTIVE_KERNEL"' "$setup" | tail -1 | cut -d: -f1 || true)
