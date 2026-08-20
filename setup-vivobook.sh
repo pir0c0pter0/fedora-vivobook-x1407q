@@ -44,19 +44,33 @@ fi
 
 # ─── Dependencies ────────────────────────────────────────────────────────────
 check_deps() {
-    local missing=()
-    for cmd in dkms dracut grubby grub2-mkconfig modprobe; do
-        command -v "$cmd" &>/dev/null || missing+=("$cmd")
+    local package command_name
+    local -a build_packages=(gcc make dkms perl elfutils-libelf-devel openssl-devel flex bison)
+    local -a missing_packages=()
+
+    for package in "${build_packages[@]}"; do
+        rpm -q "$package" &>/dev/null || missing_packages+=("$package")
     done
-    if [[ ${#missing[@]} -gt 0 ]]; then
-        warn "Dependências faltando: ${missing[*]}"
-        info "Instalando..."
-        dnf install -y dkms dracut grub2-tools kmod 2>/dev/null || true
+    if [[ ${#missing_packages[@]} -gt 0 ]]; then
+        warn "Dependências de build faltando: ${missing_packages[*]}"
+        info "Instalando somente as dependências de build aprovadas..."
+        if ! dnf install -y "${missing_packages[@]}"; then
+            err "Falha ao instalar dependências de build aprovadas"
+            exit 1
+        fi
     fi
-    if ! command -v gcc &>/dev/null; then
-        warn "gcc não encontrado — instalando para compilar DKMS e vk_pool_fix.so"
-        dnf install -y gcc kernel-devel 2>/dev/null || true
-    fi
+    for package in "${build_packages[@]}"; do
+        if ! rpm -q "$package" &>/dev/null; then
+            err "Dependência de build obrigatória ausente: $package"
+            exit 1
+        fi
+    done
+    for command_name in dracut grubby grub2-mkconfig modprobe unshare mount; do
+        if ! command -v "$command_name" &>/dev/null; then
+            err "Comando obrigatório ausente: $command_name"
+            exit 1
+        fi
+    done
 }
 
 # ─── Prompt ───────────────────────────────────────────────────────────────────
@@ -73,6 +87,52 @@ prompt_yn() {
 }
 
 # ─── DKMS helper ─────────────────────────────────────────────────────────────
+run_dkms_without_runtime_hooks() {
+    local override_root result
+
+    override_root=$(mktemp -d /run/vivobook-dkms.XXXXXX) || return 1
+    mkdir -p "$override_root/framework.conf.d" || {
+        rm -rf -- "$override_root"
+        return 1
+    }
+    if ! printf '%s\n' \
+        'post_transaction=""' \
+        'modprobe_on_install=""' > "$override_root/framework.conf"; then
+        rm -rf -- "$override_root"
+        return 1
+    fi
+
+    unshare --mount --propagation private -- bash -c '
+        set -euo pipefail
+        override_root=$1
+        shift
+        mount --bind "$override_root/framework.conf" /etc/dkms/framework.conf
+        mount --bind "$override_root/framework.conf.d" /etc/dkms/framework.conf.d
+        exec "$@"
+    ' vivobook-dkms "$override_root" "$@"
+    result=$?
+    rm -rf -- "$override_root"
+    return "$result"
+}
+
+preflight_dkms_namespace() {
+    if [[ ! -f /etc/dkms/framework.conf ]] ||
+        [[ ! -d /etc/dkms/framework.conf.d ]]; then
+        err "Layout de configuração DKMS não suportado"
+        return 1
+    fi
+    if ! run_dkms_without_runtime_hooks bash -c '
+        set -euo pipefail
+        source /etc/dkms/framework.conf
+        [[ ${post_transaction+x} && -z $post_transaction ]]
+        [[ ${modprobe_on_install+x} && -z $modprobe_on_install ]]
+        [[ -z $(find /etc/dkms/framework.conf.d -mindepth 1 -print -quit) ]]
+    '; then
+        err "Namespace DKMS privado não suprimiu hooks de runtime"
+        return 1
+    fi
+}
+
 install_dkms_module() {
     local mod_name="$1"  # e.g. wcn-regulator-fix
     local mod_src="/usr/src/${mod_name}-1.0"
@@ -87,14 +147,204 @@ install_dkms_module() {
         return 0
     fi
 
-    dkms add "$mod_src" 2>/dev/null || true
-    if dkms build "${mod_name}/1.0" && dkms install "${mod_name}/1.0"; then
+    run_dkms_without_runtime_hooks dkms add "$mod_src" 2>/dev/null || true
+    if run_dkms_without_runtime_hooks dkms build "${mod_name}/1.0" &&
+        run_dkms_without_runtime_hooks dkms install --no-depmod \
+            "${mod_name}/1.0"; then
         log "  ${mod_name} compilado e instalado"
         return 0
     else
         err "  ${mod_name} FALHOU — verificar kernel-devel e gcc"
         return 1
     fi
+}
+
+verify_repository_core_sources() {
+    local source_record relative_path expected_hash
+    local -a verified_sources=(
+        "modules/vivobook-kbd-fix-1.0/vivobook_kbd_fix.c:1148c3c615355bd67a689f453d4d4264f6529f9ee00b403e08ee08eda6581bed"
+        "modules/vivobook-bl-fix-1.0/vivobook_bl_fix.c:b8da1abc280585d11d093c462df4197ac62871d2bb8d324ba0e52b5cba2691f1"
+        "modules/vivobook-hotkey-fix-1.0/vivobook_hotkey_fix.c:b70a6204b5ee88ee8f2cadac2ed8864764cef051a2a526bf419867dbb3eac1ab"
+    )
+
+    for source_record in "${verified_sources[@]}"; do
+        relative_path=${source_record%%:*}
+        expected_hash=${source_record##*:}
+        if ! printf '%s  %s\n' "$expected_hash" "${SCRIPT_DIR}/${relative_path}" |
+            sha256sum --check --status; then
+            err "Fonte principal ausente ou com SHA-256 inesperado: $relative_path"
+            return 1
+        fi
+    done
+}
+
+stage_core_dkms_sources() {
+    local package_record module source_name source_path destination
+    local -a core_packages=(
+        "wcn-regulator-fix:wcn_regulator_fix.c"
+        "vivobook-kbd-fix:vivobook_kbd_fix.c"
+        "vivobook-bl-fix:vivobook_bl_fix.c"
+        "vivobook-hotkey-fix:vivobook_hotkey_fix.c"
+    )
+
+    for package_record in "${core_packages[@]}"; do
+        module=${package_record%%:*}
+        source_name=${package_record##*:}
+        for source_path in "$source_name" Makefile dkms.conf; do
+            destination="/usr/src/${module}-1.0/${source_path}"
+            if ! install -D -m 0644 \
+                "${SCRIPT_DIR}/modules/${module}-1.0/${source_path}" "$destination"; then
+                err "Falha ao instalar fonte DKMS do repositório: ${module}/${source_path}"
+                return 1
+            fi
+        done
+        log "  DKMS source verificado e staged: ${module}-1.0"
+    done
+}
+
+prepare_core_module_build_tree() {
+    local kernel=$1
+    local expected_sha256=f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3
+    local source_url=https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.tar.xz
+    local work_root=/var/lib/x1407qa-kernel-7.2
+    local tarball="${work_root}/linux-7.2.tar.xz"
+    local build_tree=/var/lib/x1407qa-kernel-7.2/module-build
+    local checksum_marker="${build_tree}/.x1407qa-source-sha256"
+    local build_link="/lib/modules/${kernel}/build"
+    local kernel_suffix=${kernel#7.2.0}
+    local download_tmp prepare_root prepared_source link_tmp
+
+    if [[ "$kernel" != 7.2.0-x1407qa ]]; then
+        err "Kernel ativo inesperado para os módulos core: $kernel"
+        return 1
+    fi
+    if [[ ! -r "/boot/config-${kernel}" ]]; then
+        err "Config do kernel ativo ausente: /boot/config-${kernel}"
+        return 1
+    fi
+    mkdir -p "$work_root" || return 1
+
+    if [[ ! -f "$tarball" ]]; then
+        download_tmp="${tarball}.part.$$"
+        if ! curl --fail --location --proto '=https' --tlsv1.2 \
+            --output "$download_tmp" "$source_url"; then
+            rm -f -- "$download_tmp"
+            err "Falha ao baixar Linux 7.2"
+            return 1
+        fi
+        if ! printf '%s  %s\n' "$expected_sha256" "$download_tmp" |
+            sha256sum --check --status; then
+            rm -f -- "$download_tmp"
+            err "SHA-256 do tarball Linux 7.2 não confere"
+            return 1
+        fi
+        mv -f -- "$download_tmp" "$tarball" || return 1
+    fi
+    if ! printf '%s  %s\n' "$expected_sha256" "$tarball" |
+        sha256sum --check --status; then
+        err "SHA-256 do tarball Linux 7.2 não confere"
+        return 1
+    fi
+
+    if [[ -e "$build_tree" ]]; then
+        if [[ ! -f "$build_tree/include/generated/utsrelease.h" ]] ||
+            ! grep -qxF "#define UTS_RELEASE \"${kernel}\"" \
+                "$build_tree/include/generated/utsrelease.h" ||
+            [[ ! -f "$checksum_marker" ]] ||
+            [[ $(<"$checksum_marker") != "$expected_sha256" ]]; then
+            err "Build tree existente não é verificável: $build_tree"
+            return 1
+        fi
+    else
+        prepare_root=$(mktemp -d "${work_root}/.module-build.XXXXXX") || return 1
+        if ! tar -xJf "$tarball" -C "$prepare_root"; then
+            rm -rf -- "$prepare_root"
+            err "Falha ao extrair o tarball Linux 7.2 verificado"
+            return 1
+        fi
+        prepared_source="${prepare_root}/linux-7.2"
+        if ! install -m 0644 "/boot/config-${kernel}" "${prepared_source}/.config"; then
+            rm -rf -- "$prepare_root"
+            return 1
+        fi
+        if ! (
+            cd "$prepared_source" || exit 1
+            export LOCALVERSION="$kernel_suffix"
+            make olddefconfig modules_prepare
+        ); then
+            rm -rf -- "$prepare_root"
+            err "Falha em make olddefconfig modules_prepare"
+            return 1
+        fi
+        if ! grep -qxF "#define UTS_RELEASE \"${kernel}\"" \
+            "$prepared_source/include/generated/utsrelease.h"; then
+            rm -rf -- "$prepare_root"
+            err "Build tree preparado não corresponde a ${kernel}"
+            return 1
+        fi
+        if ! printf '%s\n' "$expected_sha256" \
+            > "${prepared_source}/.x1407qa-source-sha256"; then
+            rm -rf -- "$prepare_root"
+            return 1
+        fi
+        if ! mv -- "$prepared_source" "$build_tree"; then
+            rm -rf -- "$prepare_root"
+            return 1
+        fi
+        rmdir "$prepare_root" || return 1
+    fi
+
+    if [[ ! -s "$build_tree/Module.symvers" ]]; then
+        if ! (
+            cd "$build_tree" || exit 1
+            export LOCALVERSION="$kernel_suffix"
+            make -j8 vmlinux
+            make -j8 modules
+        ); then
+            err "Falha ao gerar Module.symvers no build tree verificado"
+            return 1
+        fi
+    fi
+    if [[ ! -s "$build_tree/Module.symvers" ]] ||
+        ! awk -F '\t' 'NF >= 4 { found=1 } END { exit(found ? 0 : 1) }' \
+            "$build_tree/Module.symvers"; then
+        err "Module.symvers ausente ou inválido no build tree verificado"
+        return 1
+    fi
+
+    if [[ -e "$build_link" && ! -L "$build_link" ]]; then
+        err "Recusando substituir build path que não é symlink: $build_link"
+        return 1
+    fi
+    link_tmp="${build_link}.x1407qa-new"
+    ln -sfn "$build_tree" "$link_tmp" || return 1
+    mv -Tf -- "$link_tmp" "$build_link" || return 1
+    if [[ $(readlink -f "$build_link") != "$build_tree" ]]; then
+        err "Build link não aponta para o tree verificado"
+        return 1
+    fi
+    log "  Build tree verificado: $build_tree"
+}
+
+install_core_dkms_modules() {
+    local kernel=$1 module mod_src
+    local -a core_modules=(
+        wcn-regulator-fix vivobook-kbd-fix vivobook-bl-fix vivobook-hotkey-fix
+    )
+
+    preflight_dkms_namespace || return 1
+    for module in "${core_modules[@]}"; do
+        mod_src="/usr/src/${module}-1.0"
+        if ! dkms status "${module}/1.0" -k "$kernel" 2>/dev/null |
+            grep -qE 'added|built|installed'; then
+            run_dkms_without_runtime_hooks dkms add "$mod_src" || return 1
+        fi
+        run_dkms_without_runtime_hooks dkms build --force \
+            "${module}/1.0" -k "$kernel" || return 1
+        run_dkms_without_runtime_hooks dkms install --no-depmod --force \
+            "${module}/1.0" -k "$kernel" || return 1
+        log "  ${module}/1.0 compilado e instalado para ${kernel}"
+    done
 }
 
 check_core_dkms_sources() {
@@ -170,8 +420,25 @@ echo -e "${BOLD}═════════════════════�
 echo ""
 
 check_deps
+if ! verify_repository_core_sources; then
+    err "Falha na verificação das fontes core; abortando antes do dracut"
+    exit 1
+fi
 stage_bundled
+if ! stage_core_dkms_sources; then
+    err "Falha no stage das fontes core; abortando antes do dracut"
+    exit 1
+fi
 check_core_dkms_sources
+ACTIVE_KERNEL=$(uname -r)
+if ! prepare_core_module_build_tree "$ACTIVE_KERNEL"; then
+    err "Falha ao preparar build tree; abortando antes do dracut"
+    exit 1
+fi
+if ! install_core_dkms_modules "$ACTIVE_KERNEL"; then
+    err "Falha ao instalar módulos core; abortando antes do dracut"
+    exit 1
+fi
 
 # ─── Pre-flight: firmware check ──────────────────────────────────────────────
 FW_DIR="/usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14"
@@ -406,8 +673,10 @@ log "Câmera RGB (vivobook_cam_fix — on-demand)..."
 CAM_SRC="/usr/src/vivobook-cam-fix-2.0"
 if [[ -d "$CAM_SRC" ]]; then
     if ! dkms status 2>/dev/null | grep -q "vivobook-cam-fix.*installed"; then
-        dkms add "$CAM_SRC" 2>/dev/null || true
-        dkms build "vivobook-cam-fix/2.0" && dkms install "vivobook-cam-fix/2.0" && \
+        run_dkms_without_runtime_hooks dkms add "$CAM_SRC" 2>/dev/null || true
+        run_dkms_without_runtime_hooks dkms build "vivobook-cam-fix/2.0" &&
+            run_dkms_without_runtime_hooks dkms install --no-depmod \
+                "vivobook-cam-fix/2.0" && \
             log "  vivobook-cam-fix compilado e instalado" || \
             warn "  vivobook-cam-fix FALHOU"
     else
@@ -497,6 +766,12 @@ fi'
 fi
 
 # ─── Rebuild initramfs ──────────────────────────────────────────────────────
+# Task 7 application phase: publish module dependency metadata only when the
+# controlled initramfs candidate is about to be generated.
+if ! depmod "$ACTIVE_KERNEL"; then
+    err "depmod falhou antes da criação do initramfs candidato"
+    exit 1
+fi
 log "Regenerando initramfs..."
 if ! dracut --force; then
     err "dracut falhou! Verificar configs em /etc/dracut.conf.d/"
