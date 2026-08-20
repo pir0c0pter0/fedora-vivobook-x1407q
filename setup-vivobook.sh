@@ -23,6 +23,9 @@ REAL_USER="${SUDO_USER:-$USER}"
 REAL_HOME=$(eval echo "~${REAL_USER}")
 FIRMWARE_ROOT="${FIRMWARE_ROOT:-/usr/lib/firmware}"
 DRACUT_CONFIG_DIR="${DRACUT_CONFIG_DIR:-/etc/dracut.conf.d}"
+REAL_USER_UID=$(id -u "$REAL_USER" 2>/dev/null || true)
+REAL_RUNTIME_DIR="${VIVOBOOK_REAL_RUNTIME_DIR:-/run/user/${REAL_USER_UID}}"
+REAL_DBUS_SESSION_BUS_ADDRESS="unix:path=${REAL_RUNTIME_DIR}/bus"
 
 # ─── Colors & logging ────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -107,6 +110,23 @@ prompt_yn() {
         read -rp "$(echo -e "${msg} [s/${BOLD}N${NC}]: ")" choice </dev/tty || choice=""
         [[ "$choice" =~ ^[Ss]$ ]]
     fi
+}
+
+# GNOME settings must be sent to the invoking user's live session, never to a
+# root/default dconf database.  A missing bus is an explicit pending state.
+real_user_session_available() {
+    [[ -n "$REAL_USER_UID" && -S "${REAL_RUNTIME_DIR}/bus" ]]
+}
+
+run_as_real_user() {
+    sudo -u "$REAL_USER" env HOME="$REAL_HOME" SUDO_USER="$REAL_USER" "$@"
+}
+
+run_as_real_user_session() {
+    real_user_session_available || return 3
+    run_as_real_user env \
+        XDG_RUNTIME_DIR="$REAL_RUNTIME_DIR" \
+        DBUS_SESSION_BUS_ADDRESS="$REAL_DBUS_SESSION_BUS_ADDRESS" "$@"
 }
 
 # ─── DKMS helper ─────────────────────────────────────────────────────────────
@@ -767,10 +787,27 @@ publish_initramfs_candidate() (
     local candidate= listing= backup_tmp= required
     local -a required_items=(
         qcom_q6v5_pas.ko qcom_q6v5_adsp.ko qcom_glink_smem.ko
-        qcadsp8380.mbn adsp_dtbs.elf qccdsp8380.mbn cdsp_dtbs.elf
         wcn_regulator_fix.ko vivobook_kbd_fix.ko
         vivobook_bl_fix.ko vivobook_hotkey_fix.ko
     )
+    local -a resolved_firmware=(
+        "${RESOLVED_REMOTEPROC_FIRMWARE[@]}"
+        "${RESOLVED_GPU_FIRMWARE[@]}"
+        "${RESOLVED_BLUETOOTH_FIRMWARE[@]}"
+    )
+    local firmware_path
+
+    if [[ ${#resolved_firmware[@]} -eq 0 ]]; then
+        err "Nenhum firmware resolvido para validar no candidato initramfs"
+        return 1
+    fi
+    for firmware_path in "${resolved_firmware[@]}"; do
+        if [[ -z "$firmware_path" || "$firmware_path" != "${FIRMWARE_ROOT}/"* ]]; then
+            err "Path de firmware resolvido inválido: $firmware_path"
+            return 1
+        fi
+        required_items+=("${firmware_path#/}")
+    done
 
     cleanup_initramfs_candidate() {
         [[ -z "$candidate" ]] || rm -f -- "$candidate"
@@ -903,6 +940,7 @@ fi
 TOTAL=16
 dkms_ok=0
 dkms_fail=0
+desktop_extension_status=0
 
 # ─── 1. GRUB kernel parameters ──────────────────────────────────────────────
 step 1 $TOTAL "Parâmetros de kernel (GRUB)..."
@@ -1039,28 +1077,34 @@ chown -R "${REAL_USER}:${REAL_USER}" "${REAL_HOME}/.local/share/dbus-1" "${REAL_
 # ─── 10. Tempo bateria — Extensão GNOME ─────────────────────────────────────
 step 10 $TOTAL "Tempo bateria (extensão GNOME)..."
 if [[ -f "${SCRIPT_DIR}/install-battery-time-ext.sh" ]]; then
-    if sudo -u "${REAL_USER}" env HOME="${REAL_HOME}" \
-        SUDO_USER="${REAL_USER}" \
-        gsettings set org.gnome.desktop.interface show-battery-percentage true; then
-        log "  Percentual da bateria habilitado para ${REAL_USER}"
+    if real_user_session_available; then
+        run_as_real_user_session bash "${SCRIPT_DIR}/install-battery-time-ext.sh"
+        desktop_extension_status=$?
     else
-        warn "  Percentual da bateria pendente até a sessão GNOME de ${REAL_USER}"
+        run_as_real_user bash "${SCRIPT_DIR}/install-battery-time-ext.sh"
+        desktop_extension_status=$?
     fi
-    extension_status=0
-    if sudo -u "${REAL_USER}" env HOME="${REAL_HOME}" \
-        SUDO_USER="${REAL_USER}" \
-        bash "${SCRIPT_DIR}/install-battery-time-ext.sh"; then
-        log "  Extensão battery-time instalada e habilitada"
-    else
-        extension_status=$?
-        if [[ $extension_status -eq 3 ]]; then
-            warn "  Extensão instalada; confirmação pendente após logout/login"
-        else
-            err "  Falha ao instalar/habilitar extensão battery-time (status ${extension_status})"
-        fi
-    fi
+    case "$desktop_extension_status" in
+        0)
+            log "  Percentual e extensão battery-time verificados na sessão de ${REAL_USER}"
+            ;;
+        3)
+            warn "  Extensão instalada; ativação e verificação pendentes no próximo login"
+            ;;
+        *)
+            err "  Falha ao configurar/verificar extensão battery-time (status ${desktop_extension_status})"
+            exit "$desktop_extension_status"
+            ;;
+    esac
 else
-    warn "  install-battery-time-ext.sh não encontrado — pulando"
+    err "  install-battery-time-ext.sh não encontrado"
+    exit 1
+fi
+
+# A pending desktop activation intentionally prevents the final setup-success
+# banner.  The remaining non-desktop steps may still make their safe changes.
+if [[ $desktop_extension_status -eq 3 ]]; then
+    info "  Estado desktop: pending-login (autostart do usuário instalado)"
 fi
 
 # ─── 11. Touchpad — click-method areas ──────────────────────────────────────
@@ -1274,7 +1318,11 @@ fi
 
 echo ""
 echo -e "${BOLD}════════════════════════════════════════════${NC}"
-echo -e "${BOLD}  SETUP COMPLETO — 16/16 MELHORIAS${NC}"
+if [[ $desktop_extension_status -eq 3 ]]; then
+    echo -e "${BOLD}  SETUP PENDENTE — ATIVAÇÃO GNOME NO PRÓXIMO LOGIN${NC}"
+else
+    echo -e "${BOLD}  SETUP CONCLUÍDO — DESKTOP VERIFICADO${NC}"
+fi
 echo -e "${BOLD}════════════════════════════════════════════${NC}"
 echo ""
 echo -e "  DKMS: ${GREEN}${dkms_ok} OK${NC}, ${RED}${dkms_fail} falhas${NC}"
@@ -1303,8 +1351,10 @@ echo "    Carga:    cat /sys/class/power_supply/qcom-battmgr-bat/charge_control_
 echo "    Suspend:  systemctl is-enabled suspend.target"
 echo "    Câmera:   vivobook-camera start  (on-demand, não auto-load)"
 echo ""
-info "Fazer logout/login para ativar a extensão de bateria"
-echo ""
+
+if [[ $desktop_extension_status -eq 3 ]]; then
+    exit 3
+fi
 info "Scripts atuais:"
 echo "    build-vivobook-iso.sh  — Criar ISO customizada"
 echo "    setup-vivobook.sh      — Este script (setup pós-install)"

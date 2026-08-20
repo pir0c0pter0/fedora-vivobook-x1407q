@@ -6,12 +6,33 @@
 set -euo pipefail
 
 EXT_UUID="battery-time@wifiteste"
-TARGET_USER="${SUDO_USER:-${USER:-}}"
+MODE=install
+REQUESTED_USER=
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --activate-only) MODE=activate-only ;;
+        --user)
+            shift
+            REQUESTED_USER=${1:-}
+            ;;
+        *)
+            echo "Opção desconhecida: $1" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+TARGET_USER="${REQUESTED_USER:-${SUDO_USER:-${USER:-}}}"
 if [[ -z "$TARGET_USER" ]]; then
     echo 'Não foi possível identificar o usuário desktop (SUDO_USER).' >&2
     exit 1
 fi
+TARGET_UID=$(id -u "$TARGET_USER" 2>/dev/null || true)
 TARGET_HOME=$(getent passwd "$TARGET_USER" 2>/dev/null | cut -d: -f6 || true)
+if [[ ${BATTERY_TIME_TEST_MODE:-0} == 1 ]]; then
+    TARGET_HOME=${BATTERY_TIME_TEST_HOME:?BATTERY_TIME_TEST_HOME is required in test mode}
+fi
 if [[ -z "$TARGET_HOME" || ! -d "$TARGET_HOME" ]]; then
     echo "Home inválida para o usuário desktop: $TARGET_USER" >&2
     exit 1
@@ -25,6 +46,86 @@ if [[ $(id -un) != "$TARGET_USER" ]]; then
     exit 1
 fi
 EXT_DIR="$TARGET_HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
+STATE_DIR="$TARGET_HOME/.local/state/battery-time-extension"
+STATUS_FILE="$STATE_DIR/status"
+AUTOSTART_DIR="$TARGET_HOME/.config/autostart"
+AUTOSTART_FILE="$AUTOSTART_DIR/battery-time-extension-activation.desktop"
+TARGET_RUNTIME_DIR="${BATTERY_TIME_RUNTIME_DIR:-/run/user/${TARGET_UID}}"
+SESSION_BUS="$TARGET_RUNTIME_DIR/bus"
+SCRIPT_PATH=$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")
+
+write_status() {
+    local state=$1 status_tmp
+
+    mkdir -p "$STATE_DIR" || return 1
+    status_tmp="${STATUS_FILE}.new.$$"
+    printf '%s\n' "$state" > "$status_tmp" || return 1
+    mv -Tf -- "$status_tmp" "$STATUS_FILE"
+}
+
+install_pending_autostart() {
+    mkdir -p "$AUTOSTART_DIR" || return 1
+    cat > "$AUTOSTART_FILE" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Battery Time Extension Activation
+Exec=${SCRIPT_PATH} --activate-only --user ${TARGET_USER}
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+EOF
+}
+
+session_bus_available() {
+    [[ -n "$TARGET_UID" && -S "$SESSION_BUS" ]]
+}
+
+verify_and_activate_session() {
+    local extension_info
+
+    # The caller has proved that this is the real user's bus socket.  Export
+    # the matching session coordinates for every GNOME command below.
+    export XDG_RUNTIME_DIR="$TARGET_RUNTIME_DIR"
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$SESSION_BUS"
+    if ! gsettings set org.gnome.desktop.interface show-battery-percentage true ||
+        [[ $(gsettings get org.gnome.desktop.interface show-battery-percentage) != true ]]; then
+        write_status fatal || true
+        echo 'Falha ao habilitar/verificar o percentual da bateria na sessão GNOME.' >&2
+        return 1
+    fi
+    if ! gnome-extensions enable "$EXT_UUID"; then
+        write_status fatal || true
+        echo 'Falha ao habilitar a extensão na sessão GNOME.' >&2
+        return 1
+    fi
+    if ! extension_info=$(gnome-extensions info "$EXT_UUID" 2>&1); then
+        write_status fatal || true
+        echo 'gnome-extensions info falhou na sessão GNOME.' >&2
+        return 1
+    fi
+    if ! grep -Eq 'State: (ACTIVE|ENABLED)' <<<"$extension_info"; then
+        write_status fatal || true
+        echo 'A extensão não ficou habilitada segundo gnome-extensions info.' >&2
+        return 1
+    fi
+    write_status enabled || return 1
+    rm -f -- "$AUTOSTART_FILE" || return 1
+    echo "Extensão e percentual verificados na sessão de $TARGET_USER."
+}
+
+activate_or_queue() {
+    install_pending_autostart || return 1
+    if ! session_bus_available; then
+        write_status pending-login || return 1
+        echo 'Status: pending-login; ativação será repetida pelo autostart no próximo login.'
+        return 3
+    fi
+    verify_and_activate_session
+}
+
+if [[ "$MODE" == activate-only ]]; then
+    activate_or_queue
+    exit $?
+fi
 
 echo "=== Instalando extensão Battery Time Remaining ==="
 
@@ -269,23 +370,5 @@ export default class BatteryTimeExtension extends Extension {
 }
 EXTJS
 
-# Configure the same user profile that owns the extension.  A non-zero result
-# is expected when this script runs before that user's GNOME session exists.
-if ! gsettings set org.gnome.desktop.interface show-battery-percentage true; then
-    echo 'Percentual da bateria pendente até existir uma sessão GNOME.' >&2
-fi
-if ! gnome-extensions enable "$EXT_UUID"; then
-    echo 'Habilitação da extensão pendente até existir uma sessão GNOME.' >&2
-fi
-
-if extension_info=$(gnome-extensions info "$EXT_UUID" 2>&1) &&
-    grep -Eq 'State: (ACTIVE|ENABLED)' <<<"$extension_info"; then
-    echo "Extensão instalada e habilitada para $TARGET_USER: $EXT_DIR"
-    exit 0
-fi
-
-echo "Extensão instalada em: $EXT_DIR"
-echo "Status: pending-login (habilitação será confirmada após logout/login)"
-echo '>>> FAÇA LOGOUT E LOGIN para ativar e confirmar a extensão <<<'
-# Do not claim that gnome-extensions enabled the extension until info reports it.
-exit 3
+activate_or_queue
+exit $?
