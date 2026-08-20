@@ -125,7 +125,10 @@ cat > "$fake_bin/gnome-extensions" <<'EOF'
 [[ ${XDG_RUNTIME_DIR:-} == "${FAKE_RUNTIME_DIR:-}" ]] || exit 90
 [[ ${DBUS_SESSION_BUS_ADDRESS:-} == "unix:path=${FAKE_RUNTIME_DIR:-}/bus" ]] || exit 91
 case "$1" in
-    enable) exit "${FAKE_EXTENSION_ENABLE_RC:-0}" ;;
+    enable)
+        [[ -z ${FAKE_EXTENSION_ENABLE_MESSAGE:-} ]] || printf '%s\n' "$FAKE_EXTENSION_ENABLE_MESSAGE" >&2
+        exit "${FAKE_EXTENSION_ENABLE_RC:-0}"
+        ;;
     info) printf 'State: %s\n' "${FAKE_EXTENSION_INFO_STATE:-ENABLED}"; exit 0 ;;
 esac
 exit 2
@@ -225,6 +228,23 @@ else
 fi
 [[ -f $autostart && $(<"$status_file") == fatal ]] || {
     echo 'fatal activation did not retain autostart/fatal marker' >&2
+    exit 1
+}
+
+# GNOME Shell does not discover every newly copied extension in an already
+# running Wayland session.  This specific enable result is pending-login, not
+# a broken extension.
+if FAKE_SHELL_OWNER=true FAKE_EXTENSION_ENABLE_RC=2 \
+    FAKE_EXTENSION_ENABLE_MESSAGE='Extension “battery-time@wifiteste” does not exist' \
+    run_installer --activate-only --user "$USER"; then
+    echo 'installer claimed immediate activation for an undiscovered extension' >&2
+    exit 1
+else
+    status=$?
+    [[ $status -eq 3 ]] || { echo "expected pending status 3, got $status" >&2; exit 1; }
+fi
+[[ -f $autostart && $(<"$status_file") == pending-login ]] || {
+    echo 'undiscovered extension did not retain pending autostart/status state' >&2
     exit 1
 }
 

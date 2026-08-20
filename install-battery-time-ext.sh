@@ -118,7 +118,7 @@ gnome_shell_owner_available() {
 }
 
 verify_and_activate_session() {
-    local extension_info
+    local enable_output extension_info
 
     # The caller has proved that this is the real user's bus socket.  Export
     # the matching session coordinates for every GNOME command below.
@@ -130,8 +130,14 @@ verify_and_activate_session() {
         echo 'Falha ao habilitar/verificar o percentual da bateria na sessão GNOME.' >&2
         return 1
     fi
-    if ! gnome-extensions enable "$EXT_UUID"; then
+    if ! enable_output=$(gnome-extensions enable "$EXT_UUID" 2>&1); then
+        if grep -Eqi 'does not exist|doesn.t exist|não existe' <<<"$enable_output"; then
+            write_status pending-login || return 1
+            echo 'A Shell atual ainda não descobriu a extensão; mantendo pending-login.' >&2
+            return 3
+        fi
         write_status fatal || true
+        [[ -z $enable_output ]] || echo "$enable_output" >&2
         echo 'Falha ao habilitar a extensão na sessão GNOME.' >&2
         return 1
     fi

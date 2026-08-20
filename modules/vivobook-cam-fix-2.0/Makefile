@@ -45,10 +45,10 @@ $(foreach ov,$(OVERLAYS),$(eval $(call OVERLAY_RULES_STANDALONE,$(ov))))
 OVERLAY_HEADERS := $(addsuffix .dtbo.h,$(OVERLAYS))
 
 all: $(OVERLAY_HEADERS)
-	$(MAKE) -C $(KDIR) M=$(PWD) modules
+	$(MAKE) -C $(KDIR) M=$(CURDIR) modules
 
 clean:
-	$(MAKE) -C $(KDIR) M=$(PWD) clean
+	$(MAKE) -C $(KDIR) M=$(CURDIR) clean
 	rm -f $(addsuffix .dtbo,$(OVERLAYS)) $(addsuffix .dtbo.h,$(OVERLAYS))
 
 endif

@@ -95,7 +95,7 @@ remoteproc_state() {
         [[ -r "$remoteproc/name" && -r "$remoteproc/state" ]] || continue
         name=$(<"$remoteproc/name")
         if [[ $name =~ $wanted ]]; then
-            <"$remoteproc/state"
+            cat "$remoteproc/state"
             return 0
         fi
     done
@@ -162,7 +162,7 @@ check_battery() {
         fail battery 'no battery power-supply device is present'
         return
     fi
-    for attribute in capacity status energy_now power_now; do
+    for attribute in status energy_now energy_full power_now; do
         if [[ ! -r "$battery/$attribute" || -z $(<"$battery/$attribute") ]]; then
             fail battery "${attribute} is not readable at ${battery}"
             return
@@ -174,7 +174,7 @@ check_battery() {
         return
     fi
     percentage=$(upower -i "$upower_device" 2>/dev/null | awk '/^[[:space:]]*percentage:/ { print $2; exit }')
-    if [[ ! $percentage =~ ^[0-9]+%$ ]]; then
+    if [[ ! $percentage =~ ^[0-9]+([.][0-9]+)?%$ ]]; then
         fail battery 'UPower does not report a numeric battery percentage'
         return
     fi
@@ -279,6 +279,9 @@ check_input() {
         return
     fi
     devices=$(libinput list-devices 2>/dev/null || true)
+    if [[ -z $devices ]] && have sudo && sudo -n true >/dev/null 2>&1; then
+        devices=$(sudo -n libinput list-devices 2>/dev/null || true)
+    fi
     if [[ -z $devices ]]; then
         fail "$component" 'libinput cannot enumerate input devices'
         return

@@ -212,7 +212,7 @@ static int apply_color(int sat_m, int con_m)
 {
 	struct drm_modeset_acquire_ctx ctx;
 	struct drm_crtc *crtc;
-	struct drm_atomic_state *state;
+	struct drm_atomic_commit *state;
 	struct drm_crtc_state *crtc_state;
 	struct drm_color_ctm ctm_data;
 	struct drm_property_blob *ctm_blob;
@@ -231,7 +231,7 @@ static int apply_color(int sat_m, int con_m)
 
 	drm_modeset_acquire_init(&ctx, 0);
 
-	state = drm_atomic_state_alloc(g_drm_dev);
+	state = drm_atomic_commit_alloc(g_drm_dev);
 	if (!state) {
 		drm_modeset_acquire_fini(&ctx);
 		return -ENOMEM;
@@ -278,12 +278,12 @@ retry:
 
 backoff:
 	if (ret == -EDEADLK) {
-		drm_atomic_state_clear(state);
+		drm_atomic_commit_clear(state);
 		drm_modeset_backoff(&ctx);
 		goto retry;
 	}
 
-	drm_atomic_state_put(state);
+	drm_atomic_commit_put(state);
 	drm_modeset_drop_locks(&ctx);
 	drm_modeset_acquire_fini(&ctx);
 	return ret;

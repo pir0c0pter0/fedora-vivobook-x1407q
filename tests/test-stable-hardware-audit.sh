@@ -94,6 +94,15 @@ gpu_output=$(AUDIT_DRM_CLASS="$tmpdir/drm" bash "$audit" --post-reboot 2>&1 || t
 expect 'GPU accepts a render node whose dev attribute is unreadable' \
     grep -q '^FAIL gpu: no readable DRM render node is present$' <<<"$gpu_output"
 
+expect 'remoteproc state helper discards the state instead of printing it' \
+    grep -q 'cat "\$remoteproc/state"' "$audit"
+expect 'battery audit still requires the optional capacity attribute' \
+    bash -c '! grep -q '\''for attribute in capacity status energy_now power_now'\'' "$1"' _ "$audit"
+expect 'battery audit rejects the decimal percentage emitted by UPower' \
+    grep -qF '([.][0-9]+)?%' "$audit"
+expect 'input audit has no privileged read-only fallback for /dev/input' \
+    grep -q 'sudo -n libinput list-devices' "$audit"
+
 if (( failures )); then
     exit 1
 fi
