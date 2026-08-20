@@ -6,7 +6,25 @@
 set -euo pipefail
 
 EXT_UUID="battery-time@wifiteste"
-EXT_DIR="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
+TARGET_USER="${SUDO_USER:-${USER:-}}"
+if [[ -z "$TARGET_USER" ]]; then
+    echo 'Não foi possível identificar o usuário desktop (SUDO_USER).' >&2
+    exit 1
+fi
+TARGET_HOME=$(getent passwd "$TARGET_USER" 2>/dev/null | cut -d: -f6 || true)
+if [[ -z "$TARGET_HOME" || ! -d "$TARGET_HOME" ]]; then
+    echo "Home inválida para o usuário desktop: $TARGET_USER" >&2
+    exit 1
+fi
+if [[ $EUID -eq 0 && "$TARGET_USER" != root ]]; then
+    exec sudo -u "$TARGET_USER" env HOME="$TARGET_HOME" SUDO_USER="$TARGET_USER" \
+        bash "$0" "$@"
+fi
+if [[ $(id -un) != "$TARGET_USER" ]]; then
+    echo "A extensão deve ser instalada como $TARGET_USER, não como $(id -un)." >&2
+    exit 1
+fi
+EXT_DIR="$TARGET_HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
 
 echo "=== Instalando extensão Battery Time Remaining ==="
 
@@ -251,26 +269,23 @@ export default class BatteryTimeExtension extends Extension {
 }
 EXTJS
 
-# Habilitar a extensão
-ENABLED=$(gsettings get org.gnome.shell enabled-extensions)
-if [[ "$ENABLED" != *"$EXT_UUID"* ]]; then
-    # Adicionar à lista
-    if [[ "$ENABLED" == "@as []" ]]; then
-        gsettings set org.gnome.shell enabled-extensions "['$EXT_UUID']"
-    else
-        NEW_LIST=$(echo "$ENABLED" | sed "s/]/, '$EXT_UUID']/")
-        gsettings set org.gnome.shell enabled-extensions "$NEW_LIST"
-    fi
+# Configure the same user profile that owns the extension.  A non-zero result
+# is expected when this script runs before that user's GNOME session exists.
+if ! gsettings set org.gnome.desktop.interface show-battery-percentage true; then
+    echo 'Percentual da bateria pendente até existir uma sessão GNOME.' >&2
+fi
+if ! gnome-extensions enable "$EXT_UUID"; then
+    echo 'Habilitação da extensão pendente até existir uma sessão GNOME.' >&2
 fi
 
-echo ""
+if extension_info=$(gnome-extensions info "$EXT_UUID" 2>&1) &&
+    grep -Eq 'State: (ACTIVE|ENABLED)' <<<"$extension_info"; then
+    echo "Extensão instalada e habilitada para $TARGET_USER: $EXT_DIR"
+    exit 0
+fi
+
 echo "Extensão instalada em: $EXT_DIR"
-echo "Status: habilitada nas configurações"
-echo ""
-echo ">>> FAÇA LOGOUT E LOGIN para ativar <<<"
-echo "    (Wayland exige reinício da sessão para extensões novas)"
-echo ""
-echo "Após o login, passe o mouse sobre o ícone da bateria para ver o tempo"
-echo "  - Hover mostra tempo restante (hh:mm)"
-echo "  - Atualiza a cada 30s com média ponderada do consumo"
-echo "  - Funciona tanto descarregando quanto carregando"
+echo "Status: pending-login (habilitação será confirmada após logout/login)"
+echo '>>> FAÇA LOGOUT E LOGIN para ativar e confirmar a extensão <<<'
+# Do not claim that gnome-extensions enabled the extension until info reports it.
+exit 3

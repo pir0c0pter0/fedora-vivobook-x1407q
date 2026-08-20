@@ -21,6 +21,8 @@ VERSION="2.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REAL_USER="${SUDO_USER:-$USER}"
 REAL_HOME=$(eval echo "~${REAL_USER}")
+FIRMWARE_ROOT="${FIRMWARE_ROOT:-/usr/lib/firmware}"
+DRACUT_CONFIG_DIR="${DRACUT_CONFIG_DIR:-/etc/dracut.conf.d}"
 
 # ─── Colors & logging ────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -620,29 +622,125 @@ stage_bundled() {
     fi
 }
 
+# ─── Firmware runtime / initramfs contract ──────────────────────────────────
+# Fedora packages may store firmware compressed, while vendor extracts usually
+# provide a plain file.  Keep the basename requested by the kernel and select
+# the file that actually exists; dracut must receive that selected path.
+REMOTEPROC_FIRMWARE_BASENAMES=(
+    qcom/x1p42100/ASUSTeK/zenbook-a14/qcadsp8380.mbn
+    qcom/x1p42100/ASUSTeK/zenbook-a14/adsp_dtbs.elf
+    qcom/x1p42100/ASUSTeK/zenbook-a14/qccdsp8380.mbn
+    qcom/x1p42100/ASUSTeK/zenbook-a14/cdsp_dtbs.elf
+    qcom/x1p42100/ASUSTeK/zenbook-a14/adspr.jsn
+    qcom/x1p42100/ASUSTeK/zenbook-a14/adsps.jsn
+    qcom/x1p42100/ASUSTeK/zenbook-a14/adspua.jsn
+    qcom/x1p42100/ASUSTeK/zenbook-a14/battmgr.jsn
+    qcom/x1p42100/ASUSTeK/zenbook-a14/cdspr.jsn
+)
+GPU_FIRMWARE_BASENAMES=(
+    qcom/gen71500_sqe.fw
+    qcom/gen71500_gmu.bin
+    qcom/x1p42100/ASUSTeK/zenbook-a14/qcdxkmsucpurwa.mbn
+)
+BLUETOOTH_FIRMWARE_BASENAMES=(
+    qca/hpbtfw21.tlv
+    qca/hpnv21.bin
+)
+RESOLVED_REMOTEPROC_FIRMWARE=()
+RESOLVED_GPU_FIRMWARE=()
+RESOLVED_BLUETOOTH_FIRMWARE=()
+
+resolve_firmware_variant() {
+    local basename=$1 candidate
+
+    case "$basename" in
+        /*|*'..'*|"")
+            err "Basename de firmware inseguro: $basename" >&2
+            return 1
+            ;;
+    esac
+    for candidate in "${FIRMWARE_ROOT}/${basename}.xz" \
+        "${FIRMWARE_ROOT}/${basename}"; do
+        if [[ -f "$candidate" && ! -L "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    err "Firmware obrigatório ausente (testados .xz e plano): $basename" >&2
+    return 1
+}
+
+resolve_firmware_group() {
+    local group_name=$1 basename selected
+    local -n group="$group_name"
+
+    group=()
+    shift
+    for basename in "$@"; do
+        selected=$(resolve_firmware_variant "$basename") || return 1
+        group+=("$selected")
+    done
+}
+
+resolve_kernel_requested_firmware() {
+    resolve_firmware_group RESOLVED_REMOTEPROC_FIRMWARE \
+        "${REMOTEPROC_FIRMWARE_BASENAMES[@]}" || return 1
+    resolve_firmware_group RESOLVED_GPU_FIRMWARE \
+        "${GPU_FIRMWARE_BASENAMES[@]}" || return 1
+    resolve_firmware_group RESOLVED_BLUETOOTH_FIRMWARE \
+        "${BLUETOOTH_FIRMWARE_BASENAMES[@]}"
+}
+
+# Do not create a plain Bluetooth alias merely because Fedora supplied .xz.
+# A future recovery must use `xz -dc` only after a controlled modprobe test
+# proves that this running kernel cannot request the compressed firmware.
+
+write_remoteproc_firmware_dracut_config() {
+    mkdir -p "$DRACUT_CONFIG_DIR" || return 1
+    if [[ "$DRACUT_CONFIG_DIR" == /etc/dracut.conf.d ]]; then
+        cat > /etc/dracut.conf.d/qcom-remoteproc.conf <<EOF
+force_drivers+=" qcom_q6v5_pas qcom_q6v5_adsp qcom_glink_smem "
+# Required basenames: qcadsp8380.mbn adsp_dtbs.elf qccdsp8380.mbn cdsp_dtbs.elf
+# Required basenames: adspr.jsn adsps.jsn adspua.jsn battmgr.jsn cdspr.jsn
+install_items+=" ${RESOLVED_REMOTEPROC_FIRMWARE[*]} "
+EOF
+    else
+        cat > "${DRACUT_CONFIG_DIR}/qcom-remoteproc.conf" <<EOF
+force_drivers+=" qcom_q6v5_pas qcom_q6v5_adsp qcom_glink_smem "
+# Required basenames: qcadsp8380.mbn adsp_dtbs.elf qccdsp8380.mbn cdsp_dtbs.elf
+# Required basenames: adspr.jsn adsps.jsn adspua.jsn battmgr.jsn cdspr.jsn
+install_items+=" ${RESOLVED_REMOTEPROC_FIRMWARE[*]} "
+EOF
+    fi
+}
+
+write_gpu_bluetooth_firmware_dracut_config() {
+    mkdir -p "$DRACUT_CONFIG_DIR" || return 1
+    if [[ "$DRACUT_CONFIG_DIR" == /etc/dracut.conf.d ]]; then
+        cat > /etc/dracut.conf.d/qcom-gpu-firmware.conf <<EOF
+# Selected existing paths for GPU/ZAP and Bluetooth firmware.
+install_items+=" ${RESOLVED_GPU_FIRMWARE[*]} ${RESOLVED_BLUETOOTH_FIRMWARE[*]} "
+EOF
+    else
+        cat > "${DRACUT_CONFIG_DIR}/qcom-gpu-firmware.conf" <<EOF
+# Selected existing paths for GPU/ZAP and Bluetooth firmware.
+install_items+=" ${RESOLVED_GPU_FIRMWARE[*]} ${RESOLVED_BLUETOOTH_FIRMWARE[*]} "
+EOF
+    fi
+}
+
 # ─── Early boot remoteproc contract ──────────────────────────────────────────
 require_remoteproc_early_boot_assets() {
-    local module firmware_path
+    local module
     local -a modules=(qcom_q6v5_pas qcom_q6v5_adsp qcom_glink_smem)
-    local -a firmware=(
-        /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcadsp8380.mbn
-        /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsp_dtbs.elf
-        /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qccdsp8380.mbn
-        /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdsp_dtbs.elf
-    )
-
     for module in "${modules[@]}"; do
         if ! modinfo -n "$module" &>/dev/null; then
             err "Módulo remoteproc obrigatório ausente: $module"
             exit 1
         fi
     done
-    for firmware_path in "${firmware[@]}"; do
-        if [[ ! -f "$firmware_path" ]]; then
-            err "Firmware remoteproc obrigatório ausente: $firmware_path"
-            exit 1
-        fi
-    done
+    resolve_firmware_group RESOLVED_REMOTEPROC_FIRMWARE \
+        "${REMOTEPROC_FIRMWARE_BASENAMES[@]}" || exit 1
 }
 
 run_dracut_candidate() {
@@ -772,6 +870,10 @@ if ! preflight_dkms_namespace; then
     exit 1
 fi
 stage_bundled
+if ! resolve_kernel_requested_firmware; then
+    err "Firmware obrigatório ausente; abortando sem publicar um initramfs ou declarar sucesso"
+    exit 1
+fi
 if ! stage_core_dkms_sources; then
     err "Falha no stage das fontes core; abortando antes do dracut"
     exit 1
@@ -796,16 +898,6 @@ fi
 if ! install_built_core_dkms_modules "$ACTIVE_KERNEL"; then
     err "Falha ao instalar módulos core; abortando antes do dracut"
     exit 1
-fi
-
-# ─── Pre-flight: firmware check ──────────────────────────────────────────────
-FW_DIR="/usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14"
-if [[ ! -f "${FW_DIR}/qcadsp8380.mbn" ]]; then
-    warn "Firmware ADSP não encontrado em ${FW_DIR}/"
-    warn "Extraia o firmware do Windows primeiro: extract-qcom-firmware.sh"
-    if ! prompt_yn "Continuar sem firmware? (bateria e GPU podem não funcionar)" "n"; then
-        exit 1
-    fi
 fi
 
 TOTAL=16
@@ -843,11 +935,10 @@ echo 'force_drivers+=" vivobook_kbd_fix "' > /etc/dracut.conf.d/vivobook-kbd-fix
 # ─── 4. ADSP/CDSP — remoteproc e firmware no initramfs ──────────────────────
 step 4 $TOTAL "ADSP/CDSP (remoteproc initramfs)..."
 require_remoteproc_early_boot_assets
-cat > /etc/dracut.conf.d/qcom-remoteproc.conf << 'EOF'
-force_drivers+=" qcom_q6v5_pas qcom_q6v5_adsp qcom_glink_smem "
-install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcadsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsp_dtbs.elf /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qccdsp8380.mbn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdsp_dtbs.elf "
-install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspr.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adsps.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/adspua.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/battmgr.jsn /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdspr.jsn "
-EOF
+if ! write_remoteproc_firmware_dracut_config; then
+    err "Não foi possível gravar a configuração dracut do remoteproc"
+    exit 1
+fi
 log "  dracut remoteproc ADSP/CDSP config"
 
 # ─── 5. Brilho — DKMS vivobook_bl_fix ───────────────────────────────────────
@@ -870,10 +961,11 @@ echo "vivobook_hotkey_fix" > /etc/modules-load.d/vivobook-hotkey-fix.conf
 
 # ─── 7. GPU — Firmware no initramfs ─────────────────────────────────────────
 step 7 $TOTAL "GPU (firmware initramfs)..."
-cat > /etc/dracut.conf.d/qcom-gpu-firmware.conf << 'EOF'
-install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmware/qcom/gen71500_gmu.bin.xz /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qcdxkmsucpurwa.mbn "
-EOF
-log "  dracut GPU config"
+if ! write_gpu_bluetooth_firmware_dracut_config; then
+    err "Não foi possível gravar a configuração dracut de GPU/Bluetooth"
+    exit 1
+fi
+log "  dracut GPU, ZAP e Bluetooth config"
 
 # ─── 8. Boot time — Mask TPM fantasma ───────────────────────────────────────
 step 8 $TOTAL "Boot time (mask TPM fantasma)..."
@@ -947,8 +1039,26 @@ chown -R "${REAL_USER}:${REAL_USER}" "${REAL_HOME}/.local/share/dbus-1" "${REAL_
 # ─── 10. Tempo bateria — Extensão GNOME ─────────────────────────────────────
 step 10 $TOTAL "Tempo bateria (extensão GNOME)..."
 if [[ -f "${SCRIPT_DIR}/install-battery-time-ext.sh" ]]; then
-    sudo -u "${REAL_USER}" bash "${SCRIPT_DIR}/install-battery-time-ext.sh"
-    log "  Extensão battery-time instalada"
+    if sudo -u "${REAL_USER}" env HOME="${REAL_HOME}" \
+        SUDO_USER="${REAL_USER}" \
+        gsettings set org.gnome.desktop.interface show-battery-percentage true; then
+        log "  Percentual da bateria habilitado para ${REAL_USER}"
+    else
+        warn "  Percentual da bateria pendente até a sessão GNOME de ${REAL_USER}"
+    fi
+    extension_status=0
+    if sudo -u "${REAL_USER}" env HOME="${REAL_HOME}" \
+        SUDO_USER="${REAL_USER}" \
+        bash "${SCRIPT_DIR}/install-battery-time-ext.sh"; then
+        log "  Extensão battery-time instalada e habilitada"
+    else
+        extension_status=$?
+        if [[ $extension_status -eq 3 ]]; then
+            warn "  Extensão instalada; confirmação pendente após logout/login"
+        else
+            err "  Falha ao instalar/habilitar extensão battery-time (status ${extension_status})"
+        fi
+    fi
 else
     warn "  install-battery-time-ext.sh não encontrado — pulando"
 fi
