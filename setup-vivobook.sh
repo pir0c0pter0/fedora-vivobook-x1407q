@@ -36,8 +36,29 @@ err()    { echo -e "${RED}[x]${NC} $*"; }
 info()   { echo -e "${CYAN}[i]${NC} $*"; }
 step()   { echo -e "${GREEN}[${1}/${2}]${NC} ${3}"; }
 
+CORE_DKMS_PACKAGES=(
+    "wcn-regulator-fix:wcn_regulator_fix.c:wcn_regulator_fix"
+    "vivobook-kbd-fix:vivobook_kbd_fix.c:vivobook_kbd_fix"
+    "vivobook-bl-fix:vivobook_bl_fix.c:vivobook_bl_fix"
+    "vivobook-hotkey-fix:vivobook_hotkey_fix.c:vivobook_hotkey_fix"
+)
+CORE_SOURCE_MANIFEST=(
+    "modules/wcn-regulator-fix-1.0/wcn_regulator_fix.c:471793ec12df3785b652857aec4800c957fe3518bc33bae229daf1f326ce4180"
+    "modules/wcn-regulator-fix-1.0/Makefile:2c73bfe02197b0fc21d9fe3e3a430cdc679374754425bb16e4036b72accb945e"
+    "modules/wcn-regulator-fix-1.0/dkms.conf:197fa6ebbfcae133677ee673cbcfd4a8eccb5049594b63211cfcb4f691accd32"
+    "modules/vivobook-kbd-fix-1.0/vivobook_kbd_fix.c:1148c3c615355bd67a689f453d4d4264f6529f9ee00b403e08ee08eda6581bed"
+    "modules/vivobook-kbd-fix-1.0/Makefile:3949986b88aa04977031137720e58263bcdfe4dfb0dafba8b0ad016568f58967"
+    "modules/vivobook-kbd-fix-1.0/dkms.conf:8a9f059d3b7028026b42582212257e1d0131fbe8f72b50c2dbf8c18664097a7c"
+    "modules/vivobook-bl-fix-1.0/vivobook_bl_fix.c:b8da1abc280585d11d093c462df4197ac62871d2bb8d324ba0e52b5cba2691f1"
+    "modules/vivobook-bl-fix-1.0/Makefile:129514b245ff3532e8a6db91f9e811893799f82868fb72d35f1f4adb8718f0b3"
+    "modules/vivobook-bl-fix-1.0/dkms.conf:c2ffc9c6003dea39bbd55ef60dff1f2986b447d6f15333448518c7a8355e2ed4"
+    "modules/vivobook-hotkey-fix-1.0/vivobook_hotkey_fix.c:b70a6204b5ee88ee8f2cadac2ed8864764cef051a2a526bf419867dbb3eac1ab"
+    "modules/vivobook-hotkey-fix-1.0/Makefile:d93e53b7385906b9e8e9dce967dc542af2682e84ab5426ce7ca7fa791bbda1da"
+    "modules/vivobook-hotkey-fix-1.0/dkms.conf:4eca02cf4a530456e6173cd0409692a05ef9c37bd63c95987224caebfe4df72b"
+)
+
 # ─── Root check ──────────────────────────────────────────────────────────────
-if [[ $EUID -ne 0 ]]; then
+if [[ $EUID -ne 0 && ${VIVOBOOK_SETUP_LIBRARY_ONLY:-0} != 1 ]]; then
     err "Execute como root: sudo bash setup-vivobook.sh"
     exit 1
 fi
@@ -87,18 +108,20 @@ prompt_yn() {
 }
 
 # ─── DKMS helper ─────────────────────────────────────────────────────────────
-run_dkms_without_runtime_hooks() {
+run_dkms_without_runtime_hooks() (
     local override_root result
 
     override_root=$(mktemp -d /run/vivobook-dkms.XXXXXX) || return 1
-    mkdir -p "$override_root/framework.conf.d" || {
+    cleanup_dkms_namespace() {
         rm -rf -- "$override_root"
+    }
+    trap cleanup_dkms_namespace EXIT HUP INT TERM
+    mkdir -p "$override_root/etc-dkms" || {
         return 1
     }
     if ! printf '%s\n' \
         'post_transaction=""' \
-        'modprobe_on_install=""' > "$override_root/framework.conf"; then
-        rm -rf -- "$override_root"
+        'modprobe_on_install=""' > "$override_root/etc-dkms/framework.conf"; then
         return 1
     fi
 
@@ -106,18 +129,15 @@ run_dkms_without_runtime_hooks() {
         set -euo pipefail
         override_root=$1
         shift
-        mount --bind "$override_root/framework.conf" /etc/dkms/framework.conf
-        mount --bind "$override_root/framework.conf.d" /etc/dkms/framework.conf.d
+        mount --bind "$override_root/etc-dkms" /etc/dkms
         exec "$@"
     ' vivobook-dkms "$override_root" "$@"
     result=$?
-    rm -rf -- "$override_root"
     return "$result"
-}
+)
 
 preflight_dkms_namespace() {
-    if [[ ! -f /etc/dkms/framework.conf ]] ||
-        [[ ! -d /etc/dkms/framework.conf.d ]]; then
+    if [[ ! -d /etc/dkms ]] || [[ -L /etc/dkms ]]; then
         err "Layout de configuração DKMS não suportado"
         return 1
     fi
@@ -126,7 +146,7 @@ preflight_dkms_namespace() {
         source /etc/dkms/framework.conf
         [[ ${post_transaction+x} && -z $post_transaction ]]
         [[ ${modprobe_on_install+x} && -z $modprobe_on_install ]]
-        [[ -z $(find /etc/dkms/framework.conf.d -mindepth 1 -print -quit) ]]
+        [[ -z $(find /etc/dkms -mindepth 1 ! -name framework.conf -print -quit) ]]
     '; then
         err "Namespace DKMS privado não suprimiu hooks de runtime"
         return 1
@@ -147,81 +167,242 @@ install_dkms_module() {
         return 0
     fi
 
-    run_dkms_without_runtime_hooks dkms add "$mod_src" 2>/dev/null || true
-    if run_dkms_without_runtime_hooks dkms build "${mod_name}/1.0" &&
-        run_dkms_without_runtime_hooks dkms install --no-depmod \
-            "${mod_name}/1.0"; then
-        log "  ${mod_name} compilado e instalado"
-        return 0
-    else
-        err "  ${mod_name} FALHOU — verificar kernel-devel e gcc"
-        return 1
-    fi
+    err "  ${mod_name} não foi instalado pela fase core transacional"
+    return 1
 }
 
 verify_repository_core_sources() {
-    local source_record relative_path expected_hash
-    local -a verified_sources=(
-        "modules/vivobook-kbd-fix-1.0/vivobook_kbd_fix.c:1148c3c615355bd67a689f453d4d4264f6529f9ee00b403e08ee08eda6581bed"
-        "modules/vivobook-bl-fix-1.0/vivobook_bl_fix.c:b8da1abc280585d11d093c462df4197ac62871d2bb8d324ba0e52b5cba2691f1"
-        "modules/vivobook-hotkey-fix-1.0/vivobook_hotkey_fix.c:b70a6204b5ee88ee8f2cadac2ed8864764cef051a2a526bf419867dbb3eac1ab"
-    )
+    local source_record relative_path expected_hash source_path
 
-    for source_record in "${verified_sources[@]}"; do
+    for source_record in "${CORE_SOURCE_MANIFEST[@]}"; do
         relative_path=${source_record%%:*}
         expected_hash=${source_record##*:}
-        if ! printf '%s  %s\n' "$expected_hash" "${SCRIPT_DIR}/${relative_path}" |
+        source_path="${SCRIPT_DIR}/${relative_path}"
+        if [[ ! -f "$source_path" || -L "$source_path" ]] ||
+            ! printf '%s  %s\n' "$expected_hash" "$source_path" |
             sha256sum --check --status; then
-            err "Fonte principal ausente ou com SHA-256 inesperado: $relative_path"
+            err "Artefato core ausente, symlink ou com SHA-256 inesperado: $relative_path"
             return 1
         fi
     done
 }
 
-stage_core_dkms_sources() {
-    local package_record module source_name source_path destination
-    local -a core_packages=(
-        "wcn-regulator-fix:wcn_regulator_fix.c"
-        "vivobook-kbd-fix:vivobook_kbd_fix.c"
-        "vivobook-bl-fix:vivobook_bl_fix.c"
-        "vivobook-hotkey-fix:vivobook_hotkey_fix.c"
-    )
+preflight_core_paths() {
+    local kernel=$1 package_record module source_name artifact path destination
+    local work_root=/var/lib/x1407qa-kernel-7.2
+    local build_tree="${work_root}/module-build"
+    local tarball="${work_root}/linux-7.2.tar.xz"
+    local build_link="/lib/modules/${kernel}/build"
+    local build_link_tmp="${build_link}.x1407qa-new"
+    local initramfs_dir=${INITRAMFS_BOOT_DIR:-/boot}
+    local initramfs_target="${initramfs_dir}/initramfs-${kernel}.img"
+    local initramfs_backup="${initramfs_target}.vivobook-backup"
 
-    for package_record in "${core_packages[@]}"; do
-        module=${package_record%%:*}
-        source_name=${package_record##*:}
-        for source_path in "$source_name" Makefile dkms.conf; do
-            destination="/usr/src/${module}-1.0/${source_path}"
-            if ! install -D -m 0644 \
-                "${SCRIPT_DIR}/modules/${module}-1.0/${source_path}" "$destination"; then
-                err "Falha ao instalar fonte DKMS do repositório: ${module}/${source_path}"
+    if [[ "$kernel" != 7.2.0-x1407qa ]]; then
+        err "Kernel ativo inesperado para os módulos core: $kernel"
+        return 1
+    fi
+    for path in "/boot/config-${kernel}" "/lib/modules/${kernel}" /usr/src; do
+        if [[ ! -e "$path" || -L "$path" ]]; then
+            err "Path obrigatório ausente ou symlink: $path"
+            return 1
+        fi
+    done
+    for path in "$work_root" "$build_tree"; do
+        if [[ -L "$path" ]] || [[ -e "$path" && ! -d "$path" ]]; then
+            err "Diretório de build inseguro: $path"
+            return 1
+        fi
+    done
+    if [[ -L "$tarball" ]] || [[ -e "$tarball" && ! -f "$tarball" ]]; then
+        err "Tarball path inseguro: $tarball"
+        return 1
+    fi
+    if [[ -e "$build_link" && ! -L "$build_link" ]]; then
+        err "Build link existente não é symlink: $build_link"
+        return 1
+    fi
+    if [[ -e "$build_link_tmp" || -L "$build_link_tmp" ]]; then
+        err "Link temporário preexistente: $build_link_tmp"
+        return 1
+    fi
+    if [[ ! -d "$initramfs_dir" || -L "$initramfs_dir" ]]; then
+        err "Diretório initramfs inseguro: $initramfs_dir"
+        return 1
+    fi
+    for path in "$initramfs_target" "$initramfs_backup"; do
+        if [[ -L "$path" ]] || [[ -e "$path" && ! -f "$path" ]]; then
+            err "Destino initramfs inseguro: $path"
+            return 1
+        fi
+    done
+    verify_repository_core_sources || return 1
+
+    for package_record in "${CORE_DKMS_PACKAGES[@]}"; do
+        IFS=: read -r module source_name artifact <<< "$package_record"
+        path="${SCRIPT_DIR}/modules/${module}-1.0"
+        if [[ ! -d "$path" || -L "$path" ]]; then
+            err "Pacote core inseguro: $path"
+            return 1
+        fi
+        destination="/usr/src/${module}-1.0"
+        if [[ -L "$destination" ]] ||
+            [[ -e "$destination" && ! -d "$destination" ]]; then
+            err "Destino DKMS inseguro: $destination"
+            return 1
+        fi
+        for path in "$destination/$source_name" "$destination/Makefile" \
+            "$destination/dkms.conf"; do
+            if [[ -L "$path" ]]; then
+                err "Destino DKMS contém symlink: $path"
+                return 1
+            fi
+            if compgen -G "${path}.new.*" >/dev/null; then
+                err "Stage DKMS temporário preexistente: ${path}.new.*"
                 return 1
             fi
         done
-        log "  DKMS source verificado e staged: ${module}-1.0"
     done
 }
 
-prepare_core_module_build_tree() {
+verify_staged_core_sources() {
+    local source_record relative_path expected_hash staged_path
+
+    for source_record in "${CORE_SOURCE_MANIFEST[@]}"; do
+        relative_path=${source_record%%:*}
+        expected_hash=${source_record##*:}
+        staged_path="/usr/src/${relative_path#modules/}"
+        if [[ ! -f "$staged_path" || -L "$staged_path" ]] ||
+            ! printf '%s  %s\n' "$expected_hash" "$staged_path" |
+                sha256sum --check --status; then
+            err "Stage DKMS não preservou provenance: $staged_path"
+            return 1
+        fi
+    done
+}
+
+stage_core_dkms_sources() (
+    local package_record module source_name artifact source_path destination stage_tmp=
+
+    cleanup_core_stage() {
+        [[ -z "$stage_tmp" ]] || rm -f -- "$stage_tmp"
+    }
+    trap cleanup_core_stage EXIT HUP INT TERM
+
+    for package_record in "${CORE_DKMS_PACKAGES[@]}"; do
+        IFS=: read -r module source_name artifact <<< "$package_record"
+        if [[ -L "/usr/src/${module}-1.0" ]] ||
+            [[ -e "/usr/src/${module}-1.0" && ! -d "/usr/src/${module}-1.0" ]]; then
+            err "Destino DKMS tornou-se inseguro: /usr/src/${module}-1.0"
+            return 1
+        fi
+        for source_path in "$source_name" Makefile dkms.conf; do
+            destination="/usr/src/${module}-1.0/${source_path}"
+            if [[ -L "$destination" ]]; then
+                err "Recusando sobrescrever symlink DKMS: $destination"
+                return 1
+            fi
+            stage_tmp="${destination}.new.$$"
+            if [[ -e "$stage_tmp" || -L "$stage_tmp" ]]; then
+                err "Stage temporário preexistente: $stage_tmp"
+                return 1
+            fi
+            if ! install -D -m 0644 \
+                "${SCRIPT_DIR}/modules/${module}-1.0/${source_path}" "$stage_tmp" ||
+                ! mv -Tf -- "$stage_tmp" "$destination"; then
+                err "Falha ao instalar fonte DKMS do repositório: ${module}/${source_path}"
+                return 1
+            fi
+            stage_tmp=
+        done
+        log "  DKMS source verificado e staged: ${module}-1.0"
+    done
+)
+
+validate_core_module_symvers() {
+    local symvers=$1
+
+    [[ -f "$symvers" && ! -L "$symvers" ]] || return 1
+    awk -F '\t' '
+        NF < 4 || $1 !~ /^0x[[:xdigit:]]{8}$/ { invalid=1 }
+        { records++ }
+        END { exit(!(records >= 10000 && !invalid)) }
+    ' "$symvers"
+}
+
+build_marker_value() {
+    local marker=$1 key=$2
+
+    [[ $(grep -c "^${key}=" "$marker") -eq 1 ]] || return 1
+    sed -n "s/^${key}=//p" "$marker"
+}
+
+validate_core_module_build_tree() {
+    local build_tree=$1 kernel=$2 source_sha256=$3 config_input_sha256=$4
+    local marker="${build_tree}/.x1407qa-build-complete"
+    local config_final_sha256 module_symvers_sha256 records
+
+    [[ -d "$build_tree" && ! -L "$build_tree" ]] || return 1
+    [[ -f "$marker" && ! -L "$marker" ]] || return 1
+    [[ $(build_marker_value "$marker" kernel) == "$kernel" ]] || return 1
+    [[ $(build_marker_value "$marker" source_archive_sha256) == "$source_sha256" ]] || return 1
+    [[ $(build_marker_value "$marker" config_input_sha256) == "$config_input_sha256" ]] || return 1
+    [[ -f "$build_tree/include/generated/utsrelease.h" &&
+       ! -L "$build_tree/include/generated/utsrelease.h" ]] || return 1
+    grep -qxF "#define UTS_RELEASE \"${kernel}\"" \
+        "$build_tree/include/generated/utsrelease.h" || return 1
+    [[ -f "$build_tree/.config" && ! -L "$build_tree/.config" ]] || return 1
+    config_final_sha256=$(sha256sum "$build_tree/.config" | cut -d' ' -f1)
+    [[ $(build_marker_value "$marker" config_final_sha256) == "$config_final_sha256" ]] || return 1
+    validate_core_module_symvers "$build_tree/Module.symvers" || return 1
+    module_symvers_sha256=$(sha256sum "$build_tree/Module.symvers" | cut -d' ' -f1)
+    records=$(wc -l < "$build_tree/Module.symvers")
+    [[ $(build_marker_value "$marker" module_symvers_sha256) == "$module_symvers_sha256" ]] || return 1
+    [[ $(build_marker_value "$marker" module_symvers_records) == "$records" ]] || return 1
+    [[ -s "$build_tree/vmlinux" && ! -L "$build_tree/vmlinux" &&
+       -s "$build_tree/vmlinux.o" && ! -L "$build_tree/vmlinux.o" ]] || return 1
+}
+
+prepare_core_module_build_tree() (
     local kernel=$1
     local expected_sha256=f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3
     local source_url=https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.tar.xz
     local work_root=/var/lib/x1407qa-kernel-7.2
     local tarball="${work_root}/linux-7.2.tar.xz"
     local build_tree=/var/lib/x1407qa-kernel-7.2/module-build
-    local checksum_marker="${build_tree}/.x1407qa-source-sha256"
     local build_link="/lib/modules/${kernel}/build"
     local kernel_suffix=${kernel#7.2.0}
-    local download_tmp prepare_root prepared_source link_tmp
+    local download_tmp= prepare_root= prepared_source= link_tmp=
+    local previous_tree= marker_tmp= config_input_sha256 config_final_sha256
+    local module_symvers_sha256 module_symvers_records
+
+    cleanup_core_build_prepare() {
+        [[ -z "$download_tmp" ]] || rm -f -- "$download_tmp"
+        [[ -z "$link_tmp" ]] || rm -f -- "$link_tmp"
+        [[ -z "$prepare_root" ]] || rm -rf -- "$prepare_root"
+        if [[ -n "$previous_tree" && -d "$previous_tree" && ! -e "$build_tree" ]]; then
+            mv -T -- "$previous_tree" "$build_tree" || true
+        fi
+    }
+    trap cleanup_core_build_prepare EXIT HUP INT TERM
+
+    if [[ -L "$work_root" ]] || [[ -e "$work_root" && ! -d "$work_root" ]] ||
+        [[ -L "$build_tree" ]] || [[ -e "$build_tree" && ! -d "$build_tree" ]] ||
+        [[ -L "$tarball" ]] || [[ -e "$tarball" && ! -f "$tarball" ]] ||
+        [[ -e "${build_link}.x1407qa-new" || -L "${build_link}.x1407qa-new" ]]; then
+        err "Paths do build tree mudaram após o preflight"
+        return 1
+    fi
 
     if [[ "$kernel" != 7.2.0-x1407qa ]]; then
         err "Kernel ativo inesperado para os módulos core: $kernel"
         return 1
     fi
-    if [[ ! -r "/boot/config-${kernel}" ]]; then
+    if [[ ! -f "/boot/config-${kernel}" || -L "/boot/config-${kernel}" ]]; then
         err "Config do kernel ativo ausente: /boot/config-${kernel}"
         return 1
     fi
+    config_input_sha256=$(sha256sum "/boot/config-${kernel}" | cut -d' ' -f1) || return 1
     mkdir -p "$work_root" || return 1
 
     if [[ ! -f "$tarball" ]]; then
@@ -238,7 +419,8 @@ prepare_core_module_build_tree() {
             err "SHA-256 do tarball Linux 7.2 não confere"
             return 1
         fi
-        mv -f -- "$download_tmp" "$tarball" || return 1
+        mv -Tf -- "$download_tmp" "$tarball" || return 1
+        download_tmp=
     fi
     if ! printf '%s  %s\n' "$expected_sha256" "$tarball" |
         sha256sum --check --status; then
@@ -246,16 +428,9 @@ prepare_core_module_build_tree() {
         return 1
     fi
 
-    if [[ -e "$build_tree" ]]; then
-        if [[ ! -f "$build_tree/include/generated/utsrelease.h" ]] ||
-            ! grep -qxF "#define UTS_RELEASE \"${kernel}\"" \
-                "$build_tree/include/generated/utsrelease.h" ||
-            [[ ! -f "$checksum_marker" ]] ||
-            [[ $(<"$checksum_marker") != "$expected_sha256" ]]; then
-            err "Build tree existente não é verificável: $build_tree"
-            return 1
-        fi
-    else
+    if ! validate_core_module_build_tree "$build_tree" "$kernel" \
+        "$expected_sha256" "$config_input_sha256"; then
+        warn "Build tree ausente, parcial ou stale; reconstruindo de fonte verificada"
         prepare_root=$(mktemp -d "${work_root}/.module-build.XXXXXX") || return 1
         if ! tar -xJf "$tarball" -C "$prepare_root"; then
             rm -rf -- "$prepare_root"
@@ -282,21 +457,8 @@ prepare_core_module_build_tree() {
             err "Build tree preparado não corresponde a ${kernel}"
             return 1
         fi
-        if ! printf '%s\n' "$expected_sha256" \
-            > "${prepared_source}/.x1407qa-source-sha256"; then
-            rm -rf -- "$prepare_root"
-            return 1
-        fi
-        if ! mv -- "$prepared_source" "$build_tree"; then
-            rm -rf -- "$prepare_root"
-            return 1
-        fi
-        rmdir "$prepare_root" || return 1
-    fi
-
-    if [[ ! -s "$build_tree/Module.symvers" ]]; then
         if ! (
-            cd "$build_tree" || exit 1
+            cd "$prepared_source" || exit 1
             export LOCALVERSION="$kernel_suffix"
             make -j8 vmlinux
             make -j8 modules
@@ -304,10 +466,47 @@ prepare_core_module_build_tree() {
             err "Falha ao gerar Module.symvers no build tree verificado"
             return 1
         fi
+        if ! validate_core_module_symvers "$prepared_source/Module.symvers"; then
+            err "Module.symvers ausente, pequeno ou malformado"
+            return 1
+        fi
+        config_final_sha256=$(sha256sum "$prepared_source/.config" | cut -d' ' -f1) || return 1
+        module_symvers_sha256=$(sha256sum "$prepared_source/Module.symvers" | cut -d' ' -f1) || return 1
+        module_symvers_records=$(wc -l < "$prepared_source/Module.symvers") || return 1
+        marker_tmp="${prepared_source}/.x1407qa-build-complete.tmp"
+        if ! printf '%s\n' \
+            "kernel=${kernel}" \
+            "source_archive_sha256=${expected_sha256}" \
+            "config_input_sha256=${config_input_sha256}" \
+            "config_final_sha256=${config_final_sha256}" \
+            "module_symvers_sha256=${module_symvers_sha256}" \
+            "module_symvers_records=${module_symvers_records}" > "$marker_tmp"; then
+            return 1
+        fi
+        mv -Tf -- "$marker_tmp" "${prepared_source}/.x1407qa-build-complete" || return 1
+        marker_tmp=
+        validate_core_module_build_tree "$prepared_source" "$kernel" \
+            "$expected_sha256" "$config_input_sha256" || return 1
+
+        if [[ -e "$build_tree" ]]; then
+            previous_tree="${work_root}/.module-build.previous.$$"
+            mv -T -- "$build_tree" "$previous_tree" || return 1
+        fi
+        if ! mv -T -- "$prepared_source" "$build_tree"; then
+            err "Falha ao promover build tree validado"
+            return 1
+        fi
+        prepared_source=
+        rmdir "$prepare_root" || return 1
+        prepare_root=
+        if [[ -n "$previous_tree" ]]; then
+            rm -rf -- "$previous_tree"
+            previous_tree=
+        fi
     fi
-    if [[ ! -s "$build_tree/Module.symvers" ]] ||
-        ! awk -F '\t' 'NF >= 4 { found=1 } END { exit(found ? 0 : 1) }' \
-            "$build_tree/Module.symvers"; then
+
+    if ! validate_core_module_build_tree "$build_tree" "$kernel" \
+        "$expected_sha256" "$config_input_sha256"; then
         err "Module.symvers ausente ou inválido no build tree verificado"
         return 1
     fi
@@ -324,16 +523,15 @@ prepare_core_module_build_tree() {
         return 1
     fi
     log "  Build tree verificado: $build_tree"
-}
+)
 
-install_core_dkms_modules() {
-    local kernel=$1 module mod_src
-    local -a core_modules=(
-        wcn-regulator-fix vivobook-kbd-fix vivobook-bl-fix vivobook-hotkey-fix
-    )
+build_core_dkms_modules() {
+    local kernel=$1 package_record module source_name artifact mod_src
 
     preflight_dkms_namespace || return 1
-    for module in "${core_modules[@]}"; do
+    verify_staged_core_sources || return 1
+    for package_record in "${CORE_DKMS_PACKAGES[@]}"; do
+        IFS=: read -r module source_name artifact <<< "$package_record"
         mod_src="/usr/src/${module}-1.0"
         if ! dkms status "${module}/1.0" -k "$kernel" 2>/dev/null |
             grep -qE 'added|built|installed'; then
@@ -341,10 +539,44 @@ install_core_dkms_modules() {
         fi
         run_dkms_without_runtime_hooks dkms build --force \
             "${module}/1.0" -k "$kernel" || return 1
+        log "  ${module}/1.0 compilado para ${kernel}"
+    done
+}
+
+verify_core_dkms_vermagic() {
+    local kernel=$1 package_record module source_name artifact vermagic release
+    local -a artifacts
+
+    for package_record in "${CORE_DKMS_PACKAGES[@]}"; do
+        IFS=: read -r module source_name artifact <<< "$package_record"
+        mapfile -t artifacts < <(find "/var/lib/dkms/${module}/1.0/${kernel}" \
+            -type f -path '*/module/*.ko*' -name "${artifact}.ko*" -print 2>/dev/null)
+        if [[ ${#artifacts[@]} -ne 1 ]]; then
+            err "Artefato DKMS único não encontrado para ${module}: ${#artifacts[@]}"
+            return 1
+        fi
+        vermagic=$(modinfo -F vermagic "${artifacts[0]}") || return 1
+        release=${vermagic%% *}
+        if [[ "$release" != "$kernel" ]]; then
+            err "Vermagic incorreto para ${module}: ${vermagic}"
+            return 1
+        fi
+        log "  ${module}/1.0 vermagic validado: ${vermagic}"
+    done
+}
+
+install_built_core_dkms_modules() {
+    local kernel=$1 package_record module source_name artifact
+
+    preflight_dkms_namespace || return 1
+    verify_core_dkms_vermagic "$kernel" || return 1
+    for package_record in "${CORE_DKMS_PACKAGES[@]}"; do
+        IFS=: read -r module source_name artifact <<< "$package_record"
         run_dkms_without_runtime_hooks dkms install --no-depmod --force \
             "${module}/1.0" -k "$kernel" || return 1
         log "  ${module}/1.0 compilado e instalado para ${kernel}"
     done
+    depmod "$kernel" || return 1
 }
 
 check_core_dkms_sources() {
@@ -408,6 +640,101 @@ require_remoteproc_early_boot_assets() {
     done
 }
 
+run_dracut_candidate() {
+    local kernel=$1 candidate=$2
+
+    dracut --force --kver "$kernel" "$candidate"
+}
+
+inspect_initramfs_candidate() {
+    local candidate=$1
+
+    lsinitrd "$candidate"
+}
+
+publish_initramfs_candidate() (
+    local kernel=$1
+    local target_dir=${INITRAMFS_BOOT_DIR:-/boot}
+    local target="${target_dir}/initramfs-${kernel}.img"
+    local backup="${target}.vivobook-backup"
+    local candidate= listing= backup_tmp= required
+    local -a required_items=(
+        qcom_q6v5_pas.ko qcom_q6v5_adsp.ko qcom_glink_smem.ko
+        qcadsp8380.mbn adsp_dtbs.elf qccdsp8380.mbn cdsp_dtbs.elf
+        wcn_regulator_fix.ko vivobook_kbd_fix.ko
+        vivobook_bl_fix.ko vivobook_hotkey_fix.ko
+    )
+
+    cleanup_initramfs_candidate() {
+        [[ -z "$candidate" ]] || rm -f -- "$candidate"
+        [[ -z "$listing" ]] || rm -f -- "$listing"
+        [[ -z "$backup_tmp" ]] || rm -f -- "$backup_tmp"
+    }
+    trap cleanup_initramfs_candidate EXIT HUP INT TERM
+
+    if [[ ! -d "$target_dir" || -L "$target_dir" ]]; then
+        err "Diretório do initramfs ausente ou symlink: $target_dir"
+        return 1
+    fi
+    if [[ -L "$target" ]] || [[ -e "$target" && ! -f "$target" ]] ||
+        [[ -L "$backup" ]] || [[ -e "$backup" && ! -f "$backup" ]]; then
+        err "Target ou backup initramfs inseguro"
+        return 1
+    fi
+    candidate=$(mktemp --tmpdir="$target_dir" \
+        ".initramfs-${kernel}.candidate.XXXXXX") || return 1
+    listing=$(mktemp --tmpdir="$target_dir" \
+        ".initramfs-${kernel}.listing.XXXXXX") || return 1
+    if ! run_dracut_candidate "$kernel" "$candidate"; then
+        err "Falha ao gerar candidato initramfs para ${kernel}"
+        return 1
+    fi
+    if [[ ! -f "$candidate" || -L "$candidate" ]] ||
+        [[ $(stat -c %s "$candidate") -lt 1048576 ]]; then
+        err "Candidato initramfs ausente, symlink ou pequeno"
+        return 1
+    fi
+    if ! inspect_initramfs_candidate "$candidate" > "$listing"; then
+        err "lsinitrd rejeitou o candidato"
+        return 1
+    fi
+    for required in "${required_items[@]}"; do
+        if ! grep -qF "$required" "$listing"; then
+            err "Candidato initramfs não contém: $required"
+            return 1
+        fi
+    done
+
+    sync -f "$candidate" || return 1
+    if [[ -L "$target" ]] || [[ -e "$target" && ! -f "$target" ]] ||
+        [[ -L "$backup" ]] || [[ -e "$backup" && ! -f "$backup" ]]; then
+        err "Target ou backup initramfs mudou durante a geração"
+        return 1
+    fi
+    if [[ -e "$target" ]]; then
+        backup_tmp="${backup}.new.$$"
+        if [[ -e "$backup_tmp" || -L "$backup_tmp" ]]; then
+            err "Backup initramfs temporário preexistente"
+            return 1
+        fi
+        cp --reflink=auto --sparse=always --preserve=mode,ownership,timestamps \
+            -- "$target" "$backup_tmp" || return 1
+        sync -f "$backup_tmp" || return 1
+        mv -Tf -- "$backup_tmp" "$backup" || return 1
+        backup_tmp=
+    fi
+    mv -Tf -- "$candidate" "$target" || return 1
+    candidate=
+    sync -f "$target_dir" || return 1
+    rm -f -- "$listing"
+    listing=
+    log "Initramfs candidato validado e promovido: $target"
+)
+
+if [[ ${VIVOBOOK_SETUP_LIBRARY_ONLY:-0} == 1 ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+
 # =============================================================================
 #  MAIN
 # =============================================================================
@@ -419,23 +746,39 @@ echo -e "${BOLD}  Todas as 16 melhorias — Fedora 44 aarch64${NC}"
 echo -e "${BOLD}════════════════════════════════════════════${NC}"
 echo ""
 
-check_deps
-if ! verify_repository_core_sources; then
-    err "Falha na verificação das fontes core; abortando antes do dracut"
+ACTIVE_KERNEL=$(uname -r)
+if ! preflight_core_paths "$ACTIVE_KERNEL"; then
+    err "Preflight de paths/hashes falhou antes de qualquer mutação"
     exit 1
 fi
+if ! preflight_dkms_namespace; then
+    err "Preflight do namespace DKMS falhou antes de qualquer mutação"
+    exit 1
+fi
+check_deps
 stage_bundled
 if ! stage_core_dkms_sources; then
     err "Falha no stage das fontes core; abortando antes do dracut"
     exit 1
 fi
+if ! verify_staged_core_sources; then
+    err "Falha de provenance após stage; abortando antes do DKMS"
+    exit 1
+fi
 check_core_dkms_sources
-ACTIVE_KERNEL=$(uname -r)
 if ! prepare_core_module_build_tree "$ACTIVE_KERNEL"; then
     err "Falha ao preparar build tree; abortando antes do dracut"
     exit 1
 fi
-if ! install_core_dkms_modules "$ACTIVE_KERNEL"; then
+if ! build_core_dkms_modules "$ACTIVE_KERNEL"; then
+    err "Falha ao compilar todos os módulos core; nenhum install iniciado"
+    exit 1
+fi
+if ! verify_core_dkms_vermagic "$ACTIVE_KERNEL"; then
+    err "Vermagic core inválido; nenhum install iniciado"
+    exit 1
+fi
+if ! install_built_core_dkms_modules "$ACTIVE_KERNEL"; then
     err "Falha ao instalar módulos core; abortando antes do dracut"
     exit 1
 fi
@@ -773,9 +1116,9 @@ if ! depmod "$ACTIVE_KERNEL"; then
     exit 1
 fi
 log "Regenerando initramfs..."
-if ! dracut --force; then
-    err "dracut falhou! Verificar configs em /etc/dracut.conf.d/"
-    warn "Continuar sem initramfs atualizado pode causar problemas no boot"
+if ! publish_initramfs_candidate "$ACTIVE_KERNEL"; then
+    err "Candidato initramfs falhou; setup abortado sem declarar sucesso"
+    exit 1
 fi
 
 # ─── Update GRUB ────────────────────────────────────────────────────────────
@@ -817,8 +1160,7 @@ echo ""
 if [[ $dkms_fail -gt 0 ]]; then
     warn "Módulos DKMS com falha — verificar gcc e kernel-devel:"
     info "  sudo dnf install gcc kernel-devel-\$(uname -r)"
-    info "  sudo dkms autoinstall"
-    info "  sudo dracut --force"
+    info "  Execute novamente este setup para usar o fluxo DKMS/initramfs validado"
     echo ""
 fi
 

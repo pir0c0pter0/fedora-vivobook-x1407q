@@ -18,6 +18,17 @@ for module in "${!core_sources[@]}"; do
             exit 1
         }
     done
+    grep -qxF 'AUTOINSTALL="no"' "$directory/dkms.conf" || {
+        echo "repository core module enables unsafe autoinstall: $module" >&2
+        exit 1
+    }
+    for file in "${core_sources[$module]}" Makefile dkms.conf; do
+        hash=$(sha256sum "$directory/$file" | cut -d' ' -f1)
+        grep -qF "$directory/$file:$hash" "$setup" || {
+            echo "setup lacks blocking provenance for ${module}-1.0/$file" >&2
+            exit 1
+        }
+    done
 done
 
 for token in \
@@ -41,8 +52,8 @@ for isolation_token in \
     'unshare --mount --propagation private' \
     'post_transaction=""' \
     'modprobe_on_install=""' \
-    'mount --bind "$override_root/framework.conf" /etc/dkms/framework.conf' \
-    'mount --bind "$override_root/framework.conf.d" /etc/dkms/framework.conf.d' \
+    'mount --bind "$override_root/etc-dkms" /etc/dkms' \
+    'cleanup_dkms_namespace' \
     'preflight_dkms_namespace' \
     'dkms install --no-depmod'; do
     grep -qF "$isolation_token" "$setup" || {
@@ -52,6 +63,10 @@ for isolation_token in \
 done
 if grep -qE '^[[:space:]]*dkms (add|build|install)' "$setup"; then
     echo 'setup invokes a mutating DKMS action outside the isolated wrapper' >&2
+    exit 1
+fi
+if grep -qF 'dkms autoinstall' "$setup"; then
+    echo 'setup exposes raw dkms autoinstall guidance' >&2
     exit 1
 fi
 if grep -qE -- '--directive=.*post_transaction' "$setup"; then
@@ -77,6 +92,46 @@ grep -qF '/var/lib/x1407qa-kernel-7.2/module-build' "$setup" || {
 }
 grep -qF 'wcn-regulator-fix:wcn_regulator_fix.c' "$setup" || {
     echo 'setup does not explicitly preserve the repository Wi-Fi source' >&2
+    exit 1
+}
+
+for contract_token in \
+    'preflight_core_paths' \
+    'verify_staged_core_sources' \
+    'build_core_dkms_modules' \
+    'verify_core_dkms_vermagic' \
+    'install_built_core_dkms_modules' \
+    '.x1407qa-build-complete' \
+    'config_input_sha256=' \
+    'config_final_sha256=' \
+    'module_symvers_sha256=' \
+    'records >= 10000' \
+    'publish_initramfs_candidate' \
+    'lsinitrd' \
+    'mv -Tf -- "$candidate" "$target"'; do
+    grep -qF "$contract_token" "$setup" || {
+        echo "setup lacks reviewed safety contract: $contract_token" >&2
+        exit 1
+    }
+done
+
+preflight_line=$(grep -n 'preflight_core_paths "$ACTIVE_KERNEL"' "$setup" | tail -1 | cut -d: -f1 || true)
+deps_line=$(grep -n '^[[:space:]]*check_deps$' "$setup" | tail -1 | cut -d: -f1)
+stage_line=$(grep -n '^[[:space:]]*stage_bundled$' "$setup" | tail -1 | cut -d: -f1)
+namespace_line=$(grep -n 'if ! preflight_dkms_namespace; then' "$setup" | tail -1 | cut -d: -f1 || true)
+[[ -n $preflight_line && -n $deps_line && -n $stage_line &&
+   -n $namespace_line && $preflight_line -lt $deps_line &&
+   $namespace_line -lt $deps_line && $preflight_line -lt $stage_line ]] || {
+    echo 'path/hash preflight does not precede dependency and staging mutations' >&2
+    exit 1
+}
+
+build_line=$(grep -n 'build_core_dkms_modules "$ACTIVE_KERNEL"' "$setup" | tail -1 | cut -d: -f1 || true)
+vermagic_line=$(grep -n 'verify_core_dkms_vermagic "$ACTIVE_KERNEL"' "$setup" | tail -1 | cut -d: -f1 || true)
+install_line=$(grep -n 'install_built_core_dkms_modules "$ACTIVE_KERNEL"' "$setup" | tail -1 | cut -d: -f1 || true)
+[[ -n $build_line && -n $vermagic_line && -n $install_line &&
+   $build_line -lt $vermagic_line && $vermagic_line -lt $install_line ]] || {
+    echo 'core modules are not built, vermagic-gated, then installed in distinct phases' >&2
     exit 1
 }
 
