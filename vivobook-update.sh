@@ -846,6 +846,28 @@ post_update() {
     verify_system_configs
 }
 
+verify_qcom_remoteproc_config() {
+    local config=/etc/dracut.conf.d/qcom-remoteproc.conf
+    local required_item
+    local -a required_items=(
+        qcom_q6v5_pas qcom_q6v5_adsp qcom_glink_smem
+        qcadsp8380.mbn adsp_dtbs.elf qccdsp8380.mbn cdsp_dtbs.elf
+    )
+
+    if [[ ! -f $config ]]; then
+        warn "$config ausente!"
+        return 1
+    fi
+
+    for required_item in "${required_items[@]}"; do
+        if ! grep -Fq "$required_item" "$config"; then
+            warn "$config não contém item remoteproc obrigatório: $required_item"
+            return 1
+        fi
+    done
+    return 0
+}
+
 verify_system_configs() {
     log "Verificando integridade dos configs do sistema..."
     local issues=0
@@ -881,12 +903,15 @@ verify_system_configs() {
     done
 
     # dracut configs
-    for conf in wcn-regulator-fix vivobook-kbd-fix qcom-adsp-firmware qcom-gpu-firmware qcom-cdsp-firmware; do
+    for conf in wcn-regulator-fix vivobook-kbd-fix qcom-gpu-firmware; do
         if [[ ! -f "/etc/dracut.conf.d/${conf}.conf" ]]; then
             warn "/etc/dracut.conf.d/${conf}.conf ausente!"
             ((issues++))
         fi
     done
+    if ! verify_qcom_remoteproc_config; then
+        ((issues++))
+    fi
 
     if [[ $issues -eq 0 ]]; then
         log "Configs do sistema intactos"
