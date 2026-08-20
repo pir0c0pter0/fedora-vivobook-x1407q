@@ -12,6 +12,7 @@ case "$mode" in
 esac
 
 failures=0
+infrastructure_failures=0
 
 pass() {
     printf 'PASS %s: %s\n' "$1" "$2"
@@ -22,12 +23,46 @@ fail() {
     failures=1
 }
 
+infra_fail() {
+    printf 'ERROR infrastructure: %s\n' "$1" >&2
+    infrastructure_failures=1
+}
+
+audit_internal_error() {
+    local status=$1 line=$2
+
+    printf 'ERROR infrastructure: internal audit failure at line %s (status %s)\n' \
+        "$line" "$status" >&2
+    exit 2
+}
+
+trap 'audit_internal_error "$?" "$LINENO"' ERR
+
 skip() {
     printf 'SKIP %s: %s\n' "$1" "$2"
 }
 
 have() {
+    if [[ ${AUDIT_TEST_MODE:-0} == 1 &&
+          ${AUDIT_TEST_MISSING_COMMAND:-} == "$1" ]]; then
+        return 1
+    fi
     command -v "$1" >/dev/null 2>&1
+}
+
+require_audit_tools() {
+    local command_name
+    local -a required_commands=(
+        awk bluetoothctl find gnome-extensions grep gsettings ip journalctl
+        libinput lsmod lspci modinfo nmcli pactl systemctl systemd-analyze upower
+    )
+
+    for command_name in "${required_commands[@]}"; do
+        if ! have "$command_name"; then
+            infra_fail "required command is unavailable: $command_name"
+        fi
+    done
+    [[ $infrastructure_failures -eq 0 ]]
 }
 
 boot_journal_has() {
@@ -40,12 +75,7 @@ boot_journal_has() {
 report_unavailable_boot_journal() {
     local component=$1
 
-    if [[ $mode == --pre-reboot ]]; then
-        skip "$component" 'current boot journal is unavailable before reboot'
-    else
-        fail "$component" 'current boot journal is unavailable'
-    fi
-    return 1
+    infra_fail 'current boot journal is unavailable'
 }
 
 require_boot_journal() {
@@ -55,6 +85,7 @@ require_boot_journal() {
         return 0
     fi
     report_unavailable_boot_journal "$component"
+    return 1
 }
 
 remoteproc_state() {
@@ -418,6 +449,10 @@ check_lid_safety() {
     pass lid-safety 'effective lid policies lock the session and all sleep targets remain masked'
 }
 
+if ! require_audit_tools; then
+    exit 2
+fi
+
 check_wifi
 check_battery
 check_remoteproc adsp adsp qcom_q6v5_adsp
@@ -435,4 +470,7 @@ check_camera_rgb
 check_color_control
 check_lid_safety
 
+if [[ $infrastructure_failures -ne 0 ]]; then
+    exit 2
+fi
 exit "$failures"

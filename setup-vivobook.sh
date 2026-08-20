@@ -75,7 +75,7 @@ fi
 # ─── Dependencies ────────────────────────────────────────────────────────────
 install_exact_dependencies() {
     local scope=${1:-setup} package command_name
-    local -a build_packages=(gcc make dkms perl elfutils-libelf-devel openssl-devel flex bison)
+    local -a build_packages=(gcc make dkms perl elfutils-libelf-devel openssl-devel flex bison bc)
     local -a runtime_packages=(curl tar xz dracut kmod util-linux)
     if [[ $scope == setup ]]; then
         runtime_packages+=(grubby)
@@ -104,8 +104,8 @@ install_exact_dependencies() {
         fi
     done
     for command_name in \
-        awk curl depmod dkms dnf dracut grep install lsinitrd make modinfo mount \
-        mv rpm sha256sum systemctl tar unshare xz; do
+        awk bc curl depmod dkms dnf dracut flock grep install lsinitrd make \
+        modinfo mount mv rpm sha256sum systemctl tar unshare xz; do
         if ! command -v "$command_name" &>/dev/null; then
             err "Comando obrigatório ausente: $command_name"
             return 1
@@ -763,49 +763,94 @@ resolve_kernel_requested_firmware() {
 # proves that this running kernel cannot request the compressed firmware.
 
 write_remoteproc_firmware_dracut_config() {
-    mkdir -p "$DRACUT_CONFIG_DIR" || return 1
-    if [[ "$DRACUT_CONFIG_DIR" == /etc/dracut.conf.d ]]; then
-        cat > /etc/dracut.conf.d/qcom-remoteproc.conf <<EOF
+    local target="${DRACUT_CONFIG_DIR}/qcom-remoteproc.conf" content
+
+    content=$(cat <<EOF
 force_drivers+=" qcom_q6v5_pas qcom_q6v5_adsp qcom_glink_smem "
 # Required basenames: qcadsp8380.mbn adsp_dtbs.elf qccdsp8380.mbn cdsp_dtbs.elf
 # Required basenames: adspr.jsn adsps.jsn adspua.jsn battmgr.jsn cdspr.jsn
 install_items+=" ${RESOLVED_REMOTEPROC_FIRMWARE[*]} "
 EOF
-    else
-        cat > "${DRACUT_CONFIG_DIR}/qcom-remoteproc.conf" <<EOF
-force_drivers+=" qcom_q6v5_pas qcom_q6v5_adsp qcom_glink_smem "
-# Required basenames: qcadsp8380.mbn adsp_dtbs.elf qccdsp8380.mbn cdsp_dtbs.elf
-# Required basenames: adspr.jsn adsps.jsn adspua.jsn battmgr.jsn cdspr.jsn
-install_items+=" ${RESOLVED_REMOTEPROC_FIRMWARE[*]} "
-EOF
-    fi
+    ) || return 1
+    atomic_write_config "$target" 0644 "${content}"$'\n'
 }
 
 write_gpu_bluetooth_firmware_dracut_config() {
-    mkdir -p "$DRACUT_CONFIG_DIR" || return 1
-    if [[ "$DRACUT_CONFIG_DIR" == /etc/dracut.conf.d ]]; then
-        cat > /etc/dracut.conf.d/qcom-gpu-firmware.conf <<EOF
+    local target="${DRACUT_CONFIG_DIR}/qcom-gpu-firmware.conf" content
+
+    content=$(cat <<EOF
 # Selected existing paths for GPU/ZAP and Bluetooth firmware.
 install_items+=" ${RESOLVED_GPU_FIRMWARE[*]} ${RESOLVED_BLUETOOTH_FIRMWARE[*]} "
 EOF
-    else
-        cat > "${DRACUT_CONFIG_DIR}/qcom-gpu-firmware.conf" <<EOF
-# Selected existing paths for GPU/ZAP and Bluetooth firmware.
-install_items+=" ${RESOLVED_GPU_FIRMWARE[*]} ${RESOLVED_BLUETOOTH_FIRMWARE[*]} "
-EOF
+    ) || return 1
+    atomic_write_config "$target" 0644 "${content}"$'\n'
+}
+
+preflight_atomic_config_target() {
+    local target=$1 target_dir
+
+    target_dir=$(dirname "$target") || return 1
+    if [[ ! -d $target_dir || -L $target_dir ]]; then
+        err "Diretório de configuração ausente, não real ou symlink: $target_dir"
+        return 1
     fi
+    if [[ -e $target || -L $target ]]; then
+        if [[ ! -f $target || -L $target ]]; then
+            err "Target de configuração não é arquivo regular seguro: $target"
+            return 1
+        fi
+    fi
+    if compgen -G "${target}.new.*" >/dev/null; then
+        err "Temporário de configuração preexistente: ${target}.new.*"
+        return 1
+    fi
+}
+
+atomic_write_config() (
+    local target=$1 mode=$2 content=$3 target_dir candidate=
+
+    target_dir=$(dirname "$target") || return 1
+    cleanup_atomic_config() {
+        [[ -z $candidate ]] || rm -f -- "$candidate"
+    }
+    trap cleanup_atomic_config EXIT HUP INT TERM
+
+    preflight_atomic_config_target "$target" || return 1
+    candidate=$(mktemp --tmpdir="$target_dir" ".$(basename "$target").new.XXXXXX") || return 1
+    printf '%s' "$content" > "$candidate" || return 1
+    chmod "$mode" "$candidate" || return 1
+    [[ -f $candidate && ! -L $candidate ]] || return 1
+    sync -f "$candidate" || return 1
+    sync -f "$target_dir" || return 1
+    preflight_atomic_config_target "$target" || return 1
+    mv -Tf -- "$candidate" "$target" || return 1
+    candidate=
+    sync -f "$target_dir"
+)
+
+preflight_recovery_config_paths() {
+    local modules_load_dir=${MODULES_LOAD_CONFIG_DIR:-/etc/modules-load.d}
+    local target
+
+    for target in \
+        "${modules_load_dir}/vivobook-core.conf" \
+        "${DRACUT_CONFIG_DIR}/vivobook-core.conf" \
+        "${DRACUT_CONFIG_DIR}/qcom-remoteproc.conf" \
+        "${DRACUT_CONFIG_DIR}/qcom-gpu-firmware.conf"; do
+        preflight_atomic_config_target "$target" || return 1
+    done
 }
 
 write_core_module_boot_configs() {
     local modules_load_dir=${MODULES_LOAD_CONFIG_DIR:-/etc/modules-load.d}
+    local modules_target="${modules_load_dir}/vivobook-core.conf"
+    local dracut_target="${DRACUT_CONFIG_DIR}/vivobook-core.conf"
+    local modules_content dracut_content
 
-    mkdir -p "$modules_load_dir" "$DRACUT_CONFIG_DIR" || return 1
-    printf '%s\n' \
-        wcn_regulator_fix vivobook_kbd_fix vivobook_bl_fix \
-        vivobook_hotkey_fix > "${modules_load_dir}/vivobook-core.conf" || return 1
-    printf '%s\n' \
-        'force_drivers+=" wcn_regulator_fix vivobook_kbd_fix vivobook_bl_fix vivobook_hotkey_fix "' \
-        > "${DRACUT_CONFIG_DIR}/vivobook-core.conf"
+    modules_content=$'wcn_regulator_fix\nvivobook_kbd_fix\nvivobook_bl_fix\nvivobook_hotkey_fix\n'
+    dracut_content=$'force_drivers+=" wcn_regulator_fix vivobook_kbd_fix vivobook_bl_fix vivobook_hotkey_fix "\n'
+    atomic_write_config "$modules_target" 0644 "$modules_content" || return 1
+    atomic_write_config "$dracut_target" 0644 "$dracut_content"
 }
 
 keep_sleep_targets_masked() {

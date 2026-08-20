@@ -79,7 +79,7 @@ if grep -qF 'KBUILD_MODPOST_WARN' "$setup"; then
     exit 1
 fi
 
-for build_dependency in gcc make dkms perl elfutils-libelf-devel openssl-devel flex bison; do
+for build_dependency in gcc make dkms perl elfutils-libelf-devel openssl-devel flex bison bc; do
     grep -qE "build_packages=.*${build_dependency}" "$setup" || {
         echo "setup omits deterministic build dependency: $build_dependency" >&2
         exit 1

@@ -268,20 +268,38 @@ monolithic setup:
 sudo -n bash tools/recover-stable-hardware.sh
 ```
 
-The runner verifies the DMI model and active kernel, captures a read-only
-pre-reboot audit, installs only explicitly named dependencies that are missing,
-builds and vermagic-checks all four core DKMS modules, runs one `depmod`, and
-uses the tested candidate-initramfs primitive. The candidate is inspected with
-`lsinitrd`, set to mode `0600`, and atomically promoted only after every module
-and selected firmware file is present. It prints `READY FOR REBOOT` only after
-the installed modules, initramfs, and masked sleep targets pass their final
-gates. The reboot itself is always manual.
+The runner verifies Fedora 44, the DMI model and active kernel, captures a
+read-only pre-reboot audit, installs only explicitly named dependencies that
+are missing, builds and vermagic-checks all four core DKMS modules, runs one
+`depmod`, and uses the tested candidate-initramfs primitive. The candidate is
+inspected with `lsinitrd`, set to mode `0600`, and atomically promoted only
+after every module and selected firmware file is present. The final gate
+rechecks that every core module, plus the camera module when installed, resolves
+inside `/lib/modules/7.2.0-x1407qa/` with exact `7.2.0-x1407qa` vermagic. It
+prints `READY FOR REBOOT` only after the installed modules, initramfs, and
+masked sleep targets pass. The reboot itself is always manual.
 
 The first observed version of every overwritten non-RPM file is retained under
-`/var/lib/vivobook-recovery/2026-08-20/backups/`; the idempotent record is
-`/var/lib/vivobook-recovery/2026-08-20/manifest.txt`. A pre-reboot audit exit 1
-is recorded as the broken baseline being repaired; an invocation/prerequisite
-error still stops the runner.
+`/var/lib/vivobook-recovery/2026-08-20/backups/`; the strict, tab-delimited
+record is `/var/lib/vivobook-recovery/2026-08-20/manifest.txt`. `BACKUP`,
+`CREATED` and `SYMLINK` distinguish exact restore actions. A checksum-pinned
+`backups/state-before.tar` captures the build tree/link, core `/usr/src`
+targets, relevant `/var/lib/dkms` state, installed extra modules and all
+`modules.*` metadata that `depmod` may replace. The archive preserves numeric
+ownership, ACLs, xattrs and SELinux metadata. Recovery never rolls this state
+back automatically; after reviewing the manifest, an administrator can restore
+the `STATE ARCHIVED` entries with GNU tar using `--same-owner`, `--acls`,
+`--xattrs`, `--selinux`, `--numeric-owner` and
+`-C / -xf backups/state-before.tar`, restore each
+`BACKUP` path from its recorded file, recreate recorded `SYMLINK` values, and
+remove only paths explicitly marked `CREATED`.
+
+Every rerun validates the manifest grammar, rejects duplicate/unknown records,
+and verifies every backup/archive checksum before proceeding. An exclusive
+`runner.lock` serializes the complete mutable workflow. A pre-reboot audit exit
+1 is recorded as the broken hardware baseline being repaired; status 2 or
+higher means missing tooling or another infrastructure/internal audit failure
+and stops the runner.
 
 Camera IR, experimental USB4/TB3, and suspend/hibernate enablement are outside
 this workflow. Sleep targets remain masked. The runner does not load the RGB

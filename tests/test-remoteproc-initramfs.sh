@@ -14,7 +14,11 @@ grep -q '^require_remoteproc_early_boot_assets$' "$setup" || {
     exit 1
 }
 
-remoteproc_config=$(sed -n '/cat > \/etc\/dracut.conf.d\/qcom-remoteproc.conf/,/^EOF$/p' "$setup")
+remoteproc_config=$(awk '
+    /^write_remoteproc_firmware_dracut_config\(\)/ { inside=1 }
+    inside { print }
+    inside && /^}/ { exit }
+' "$setup")
 [[ -n $remoteproc_config ]] || { echo 'setup does not write qcom-remoteproc.conf' >&2; exit 1; }
 for token in qcom_q6v5_pas qcom_q6v5_adsp qcom_glink_smem qcadsp8380.mbn adsp_dtbs.elf qccdsp8380.mbn cdsp_dtbs.elf; do
     grep -q "$token" <<<"$remoteproc_config" || { echo "remoteproc config missing: $token" >&2; exit 1; }

@@ -8,8 +8,20 @@ EXPECTED_MODEL='ASUS Vivobook 14 X1407QA'
 EXPECTED_KERNEL='7.2.0-x1407qa'
 if [[ ${VIVOBOOK_RECOVERY_LIBRARY_ONLY:-0} == 1 ]]; then
     RECOVERY_ROOT=${RECOVERY_ROOT:-/var/lib/vivobook-recovery/2026-08-20}
+    RECOVERY_OS_RELEASE_PATH=${RECOVERY_OS_RELEASE_PATH:-/etc/os-release}
+    RECOVERY_BUILD_STATE_ROOT=${RECOVERY_BUILD_STATE_ROOT:-/var/lib/x1407qa-kernel-7.2}
+    RECOVERY_USR_SRC_ROOT=${RECOVERY_USR_SRC_ROOT:-/usr/src}
+    RECOVERY_DKMS_STATE_ROOT=${RECOVERY_DKMS_STATE_ROOT:-/var/lib/dkms}
+    RECOVERY_MODULES_ROOT=${RECOVERY_MODULES_ROOT:-/lib/modules}
+    RECOVERY_BOOT_ROOT=${RECOVERY_BOOT_ROOT:-/boot}
 else
     RECOVERY_ROOT=/var/lib/vivobook-recovery/2026-08-20
+    RECOVERY_OS_RELEASE_PATH=/etc/os-release
+    RECOVERY_BUILD_STATE_ROOT=/var/lib/x1407qa-kernel-7.2
+    RECOVERY_USR_SRC_ROOT=/usr/src
+    RECOVERY_DKMS_STATE_ROOT=/var/lib/dkms
+    RECOVERY_MODULES_ROOT=/lib/modules
+    RECOVERY_BOOT_ROOT=/boot
     FIRMWARE_ROOT=/usr/lib/firmware
     DRACUT_CONFIG_DIR=/etc/dracut.conf.d
     unset INITRAMFS_BOOT_DIR MODULES_LOAD_CONFIG_DIR RECOVERY_MODEL_PATH
@@ -18,6 +30,8 @@ fi
 RECOVERY_MANIFEST="${RECOVERY_ROOT}/manifest.txt"
 RECOVERY_AUDIT="${RECOVERY_REPO_ROOT}/tools/audit-stable-hardware.sh"
 RECOVERY_BASELINE_STATUS=not-run
+RECOVERY_LOCK_HELD=0
+RECOVERY_LOCK_FD=
 
 export VIVOBOOK_SETUP_LIBRARY_ONLY=1
 if [[ ! -f ${RECOVERY_REPO_ROOT}/setup-vivobook.sh ||
@@ -78,6 +92,25 @@ verify_recovery_target() {
     fi
 }
 
+verify_operating_system() {
+    local os_id version_id
+
+    if [[ ! -f $RECOVERY_OS_RELEASE_PATH || -L $RECOVERY_OS_RELEASE_PATH ]]; then
+        recovery_error "os-release ausente, não regular ou symlink: $RECOVERY_OS_RELEASE_PATH"
+        return 1
+    fi
+    os_id=$(sed -n 's/^ID=//p' "$RECOVERY_OS_RELEASE_PATH") || return 1
+    version_id=$(sed -n 's/^VERSION_ID=//p' "$RECOVERY_OS_RELEASE_PATH") || return 1
+    os_id=${os_id#\"}
+    os_id=${os_id%\"}
+    version_id=${version_id#\"}
+    version_id=${version_id%\"}
+    if [[ $os_id != fedora || $version_id != 44 ]]; then
+        recovery_error "sistema não suportado: ID=${os_id:-missing} VERSION_ID=${version_id:-missing}"
+        return 1
+    fi
+}
+
 verify_repository_entrypoints() {
     local path
 
@@ -89,11 +122,27 @@ verify_repository_entrypoints() {
     done
 }
 
+verify_recovery_base_commands() {
+    local command_name
+
+    for command_name in awk cp find flock install mktemp modinfo mv readlink sed \
+        sha256sum sort stat sync tar; do
+        command -v "$command_name" >/dev/null 2>&1 || {
+            recovery_error "comando básico obrigatório ausente antes do lock/backup: $command_name"
+            return 1
+        }
+    done
+}
+
+run_audit_command() {
+    bash "$RECOVERY_AUDIT" --pre-reboot
+}
+
 run_pre_reboot_audit() {
     local status
 
     printf '%s\n' '=== PRE-REBOOT BASELINE (read-only) ==='
-    if bash "$RECOVERY_AUDIT" --pre-reboot; then
+    if run_audit_command; then
         status=0
     else
         status=$?
@@ -111,96 +160,363 @@ run_pre_reboot_audit() {
     RECOVERY_BASELINE_STATUS=$status
 }
 
+acquire_recovery_lock() {
+    local lock_path="${RECOVERY_ROOT}/runner.lock"
+
+    if [[ -L $RECOVERY_ROOT ]] || [[ -e $RECOVERY_ROOT && ! -d $RECOVERY_ROOT ]]; then
+        recovery_error "diretório de recovery inseguro: $RECOVERY_ROOT"
+        return 1
+    fi
+    install -d -m 0700 "$RECOVERY_ROOT" || return 1
+    if [[ -L $lock_path ]] || [[ -e $lock_path && ! -f $lock_path ]]; then
+        recovery_error "arquivo de lock inseguro: $lock_path"
+        return 1
+    fi
+    if [[ ! -e $lock_path ]]; then
+        install -m 0600 /dev/null "$lock_path" || return 1
+    fi
+    exec {RECOVERY_LOCK_FD}<>"$lock_path" || return 1
+    if ! flock -n "$RECOVERY_LOCK_FD"; then
+        recovery_error 'outra recuperação já mantém o lock exclusivo'
+        exec {RECOVERY_LOCK_FD}>&-
+        RECOVERY_LOCK_FD=
+        return 1
+    fi
+    RECOVERY_LOCK_HELD=1
+}
+
+validate_manifest_file() {
+    local manifest=$1 type source relative expected actual artifact
+
+    [[ -f $manifest && ! -L $manifest ]] || return 1
+    awk -F '\t' '
+        NR == 1 { if (NF != 2 || $1 != "FORMAT" || $2 != "2") exit 1; next }
+        NR == 2 { if (NF != 2 || $1 != "DATE" || $2 != "2026-08-20") exit 1; next }
+        NR > 2 {
+            if ($1 == "BACKUP") { valid=(NF == 4); key="PATH" FS $2 }
+            else if ($1 == "CREATED") { valid=(NF == 3 && $3 == "-"); key="PATH" FS $2 }
+            else if ($1 == "SYMLINK") { valid=(NF == 4 && $4 == "-"); key="PATH" FS $2 }
+            else if ($1 == "ARCHIVE") { valid=(NF == 3); key="ARCHIVE" FS $2 }
+            else if ($1 == "STATE") { valid=(NF == 4 && (($2 == "ARCHIVED" && $4 == "backups/state-before.tar") || ($2 == "CREATED" && $4 == "-"))); key="STATE" FS $3 }
+            else if ($1 == "INCIDENT") { valid=(NF == 3); key="INCIDENT" FS $2 }
+            else if ($1 == "AUDIT") { valid=(NF == 3 && $2 == "pre-reboot" && ($3 == "0" || $3 == "1")); key="AUDIT" FS $2 }
+            else exit 1
+            if (!valid || $2 == "" || seen[key]++) exit 1
+        }
+        END { if (NR < 2) exit 1 }
+    ' "$manifest" || return 1
+
+    while IFS=$'\t' read -r type source relative expected; do
+        case "$type" in
+            BACKUP)
+                [[ $relative == backups/* && $relative != *'..'* &&
+                   $expected =~ ^[[:xdigit:]]{64}$ ]] || return 1
+                artifact="${RECOVERY_ROOT}/${relative}"
+                [[ -f $artifact && ! -L $artifact ]] || return 1
+                actual=$(sha256sum "$artifact" | cut -d' ' -f1) || return 1
+                [[ $actual == "$expected" ]] || return 1
+                ;;
+            ARCHIVE)
+                [[ $source == backups/* && $source != *'..'* &&
+                   $relative =~ ^[[:xdigit:]]{64}$ ]] || return 1
+                artifact="${RECOVERY_ROOT}/${source}"
+                [[ -f $artifact && ! -L $artifact ]] || return 1
+                actual=$(sha256sum "$artifact" | cut -d' ' -f1) || return 1
+                [[ $actual == "$relative" ]] || return 1
+                ;;
+        esac
+    done < "$manifest"
+}
+
+validate_recovery_manifest() {
+    validate_manifest_file "$RECOVERY_MANIFEST" || {
+        recovery_error "manifesto ausente, malformado, duplicado ou corrompido: $RECOVERY_MANIFEST"
+        return 1
+    }
+}
+
 initialize_recovery_manifest() {
+    [[ $RECOVERY_LOCK_HELD == 1 ]] || {
+        recovery_error 'manifesto não pode ser aberto sem lock exclusivo'
+        return 1
+    }
     if [[ -L $RECOVERY_ROOT || -L $RECOVERY_MANIFEST ]] ||
-        [[ -e $RECOVERY_ROOT && ! -d $RECOVERY_ROOT ]] ||
+        [[ ! -d $RECOVERY_ROOT ]] ||
         [[ -e $RECOVERY_MANIFEST && ! -f $RECOVERY_MANIFEST ]]; then
         recovery_error "path de recovery inseguro: $RECOVERY_ROOT"
         return 1
     fi
-    install -d -m 0700 "$RECOVERY_ROOT" "${RECOVERY_ROOT}/backups" || return 1
-    if [[ ! -e $RECOVERY_MANIFEST ]]; then
-        printf '%s\n' \
-            'FORMAT\t1' \
-            'DATE\t2026-08-20' > "$RECOVERY_MANIFEST" || return 1
+    if [[ -L ${RECOVERY_ROOT}/backups || -L ${RECOVERY_ROOT}/backups/files ]] ||
+        [[ -e ${RECOVERY_ROOT}/backups && ! -d ${RECOVERY_ROOT}/backups ]] ||
+        [[ -e ${RECOVERY_ROOT}/backups/files && ! -d ${RECOVERY_ROOT}/backups/files ]]; then
+        recovery_error 'árvore de backups contém path não real ou symlink'
+        return 1
     fi
-    chmod 0600 "$RECOVERY_MANIFEST"
+    install -d -m 0700 "${RECOVERY_ROOT}/backups/files" || return 1
+    if [[ ! -e $RECOVERY_MANIFEST ]]; then
+        printf 'FORMAT\t2\nDATE\t2026-08-20\n' > "$RECOVERY_MANIFEST" || return 1
+        chmod 0600 "$RECOVERY_MANIFEST" || return 1
+        sync -f "$RECOVERY_MANIFEST" || return 1
+    fi
+    validate_recovery_manifest
 }
+
+append_manifest_record() (
+    local record=$1 candidate=
+
+    [[ $RECOVERY_LOCK_HELD == 1 && $record != *$'\n'* ]] || return 1
+    validate_recovery_manifest || return 1
+    candidate=$(mktemp --tmpdir="$RECOVERY_ROOT" '.manifest.new.XXXXXX') || return 1
+    cleanup_manifest_candidate() {
+        [[ -z $candidate ]] || rm -f -- "$candidate"
+    }
+    trap cleanup_manifest_candidate EXIT HUP INT TERM
+    cp --no-dereference --preserve=mode,ownership -- "$RECOVERY_MANIFEST" "$candidate" || return 1
+    printf '%s\n' "$record" >> "$candidate" || return 1
+    validate_manifest_file "$candidate" || return 1
+    sync -f "$candidate" || return 1
+    mv -Tf -- "$candidate" "$RECOVERY_MANIFEST" || return 1
+    candidate=
+    sync -f "$RECOVERY_ROOT"
+)
+
+append_manifest_records_file() (
+    local records_file=$1 candidate=
+
+    [[ $RECOVERY_LOCK_HELD == 1 && -f $records_file && ! -L $records_file ]] || return 1
+    validate_recovery_manifest || return 1
+    candidate=$(mktemp --tmpdir="$RECOVERY_ROOT" '.manifest-batch.new.XXXXXX') || return 1
+    cleanup_manifest_batch() {
+        [[ -z $candidate ]] || rm -f -- "$candidate"
+    }
+    trap cleanup_manifest_batch EXIT HUP INT TERM
+    cp --no-dereference --preserve=mode,ownership -- "$RECOVERY_MANIFEST" "$candidate" || return 1
+    cat "$records_file" >> "$candidate" || return 1
+    validate_manifest_file "$candidate" || return 1
+    sync -f "$candidate" || return 1
+    mv -Tf -- "$candidate" "$RECOVERY_MANIFEST" || return 1
+    candidate=
+    sync -f "$RECOVERY_ROOT"
+)
 
 manifest_has_path() {
     local path=$1
 
+    validate_recovery_manifest || return 2
     awk -F '\t' -v wanted="$path" \
-        '($1 == "BACKUP" || $1 == "ABSENT") && $2 == wanted { found=1 } END { exit !found }' \
+        '($1 == "BACKUP" || $1 == "CREATED" || $1 == "SYMLINK") && $2 == wanted { found=1 } END { exit !found }' \
         "$RECOVERY_MANIFEST"
 }
 
-backup_managed_path() {
-    local path=$1 backup_path relative_backup
+backup_managed_path() (
+    local path=$1 backup_path relative_backup source_type checksum path_id candidate=
+
+    cleanup_backup_candidate() {
+        [[ -z $candidate ]] || rm -f -- "$candidate"
+    }
+    trap cleanup_backup_candidate EXIT HUP INT TERM
 
     if [[ $path != /* || $path == *$'\n'* || $path == *$'\t'* ]]; then
         recovery_error "path de backup inválido: $path"
         return 1
     fi
-    manifest_has_path "$path" && return 0
-
-    relative_backup="backups${path}"
-    backup_path="${RECOVERY_ROOT}/${relative_backup}"
-    if [[ -e $path || -L $path ]]; then
-        if [[ -e $backup_path || -L $backup_path ]]; then
-            recovery_error "backup não manifestado já existe: $backup_path"
-            return 1
-        fi
-        install -d -m 0700 "$(dirname "$backup_path")" || return 1
-        cp -a -- "$path" "$backup_path" || return 1
-        printf 'BACKUP\t%s\t%s\n' "$path" "$relative_backup" >> "$RECOVERY_MANIFEST"
-    else
-        printf 'ABSENT\t%s\t-\n' "$path" >> "$RECOVERY_MANIFEST"
+    if manifest_has_path "$path"; then
+        return 0
+    elif [[ $? -eq 2 ]]; then
+        return 1
     fi
-}
+
+    if [[ -L $path ]]; then
+        source_type=$(readlink -- "$path") || return 1
+        [[ $source_type != *$'\n'* && $source_type != *$'\t'* ]] || return 1
+        append_manifest_record $'SYMLINK\t'"$path"$'\t'"$source_type"$'\t-'
+        return
+    fi
+    if [[ ! -e $path ]]; then
+        append_manifest_record $'CREATED\t'"$path"$'\t-'
+        return
+    fi
+    if [[ ! -f $path ]]; then
+        recovery_error "backup individual exige arquivo regular ou symlink: $path"
+        return 1
+    fi
+
+    path_id=$(printf '%s' "$path" | sha256sum | cut -d' ' -f1) || return 1
+    relative_backup="backups/files/${path_id}.backup"
+    backup_path="${RECOVERY_ROOT}/${relative_backup}"
+    if [[ -e $backup_path || -L $backup_path ]]; then
+        recovery_error "backup não manifestado já existe: $backup_path"
+        return 1
+    fi
+    install -d -m 0700 "$(dirname "$backup_path")" || return 1
+    candidate="${backup_path}.new.$$"
+    [[ ! -e $candidate && ! -L $candidate ]] || return 1
+    cp --no-dereference --preserve=all -- "$path" "$candidate" || return 1
+    [[ -f $candidate && ! -L $candidate ]] || return 1
+    sync -f "$candidate" || return 1
+    mv -Tf -- "$candidate" "$backup_path" || return 1
+    candidate=
+    sync -f "$(dirname "$backup_path")" || return 1
+    checksum=$(sha256sum "$backup_path" | cut -d' ' -f1) || return 1
+    append_manifest_record $'BACKUP\t'"$path"$'\t'"$relative_backup"$'\t'"$checksum"
+)
 
 record_prior_incident() {
     local incident_id=task4-old-initramfs-dkms-hook
 
+    validate_recovery_manifest || return 1
     if ! grep -qF $'INCIDENT\t'"$incident_id"$'\t' "$RECOVERY_MANIFEST"; then
-        printf 'INCIDENT\t%s\t%s\n' "$incident_id" \
-            'retained: old /boot/initramfs-6.19.10-300.fc44.aarch64.img rewrite and /var/tmp/dracut.dRkFu6m; no automatic rollback or cleanup' \
-            >> "$RECOVERY_MANIFEST"
+        append_manifest_record $'INCIDENT\t'"$incident_id"$'\tretained /boot/initramfs-6.19.10-300.fc44.aarch64.img rewrite and /var/tmp/dracut.dRkFu6m; no automatic rollback or cleanup'
     fi
 }
 
 record_baseline_status() {
+    validate_recovery_manifest || return 1
     if ! grep -qF $'AUDIT\tpre-reboot\t' "$RECOVERY_MANIFEST"; then
-        printf 'AUDIT\tpre-reboot\t%s\n' "$RECOVERY_BASELINE_STATUS" \
-            >> "$RECOVERY_MANIFEST"
+        append_manifest_record $'AUDIT\tpre-reboot\t'"$RECOVERY_BASELINE_STATUS"
     fi
+}
+
+capture_recovery_state() (
+    local kernel=$1 archive_relative=backups/state-before.tar
+    local archive="${RECOVERY_ROOT}/${archive_relative}"
+    local archive_tmp= list_file= records_file= batch_file= path relative checksum module package
+    local -a packages=(
+        wcn-regulator-fix vivobook-kbd-fix vivobook-bl-fix vivobook-hotkey-fix
+        vivobook-cam-fix vivobook-color-ctrl
+    )
+    local -a modules=(
+        wcn_regulator_fix vivobook_kbd_fix vivobook_bl_fix vivobook_hotkey_fix
+        vivobook_cam_fix vivobook_color_ctrl
+    )
+
+    validate_recovery_manifest || return 1
+    if grep -qF $'ARCHIVE\t'"$archive_relative"$'\t' "$RECOVERY_MANIFEST"; then
+        return 0
+    fi
+    if [[ -e $archive || -L $archive ]]; then
+        recovery_error "archive de estado não manifestado já existe: $archive"
+        return 1
+    fi
+
+    list_file=$(mktemp --tmpdir="$RECOVERY_ROOT" '.state-list.XXXXXX') || return 1
+    records_file=$(mktemp --tmpdir="$RECOVERY_ROOT" '.state-records.XXXXXX') || return 1
+    batch_file=$(mktemp --tmpdir="$RECOVERY_ROOT" '.state-batch.XXXXXX') || return 1
+    archive_tmp=$(mktemp --tmpdir="${RECOVERY_ROOT}/backups" '.state-before.tar.new.XXXXXX') || return 1
+    cleanup_state_capture() {
+        [[ -z $list_file ]] || rm -f -- "$list_file"
+        [[ -z $records_file ]] || rm -f -- "$records_file"
+        [[ -z $batch_file ]] || rm -f -- "$batch_file"
+        [[ -z $archive_tmp ]] || rm -f -- "$archive_tmp"
+    }
+    trap cleanup_state_capture EXIT HUP INT TERM
+
+    add_state_path() {
+        local state_path=$1
+
+        [[ $state_path == /* && $state_path != *$'\n'* && $state_path != *$'\t'* &&
+           $state_path != */../* && $state_path != */./* ]] || return 1
+        if [[ -e $state_path || -L $state_path ]]; then
+            relative=${state_path#/}
+            printf '%s\0' "$relative" >> "$list_file" || return 1
+            printf 'STATE\tARCHIVED\t%s\t%s\n' "$state_path" "$archive_relative" \
+                >> "$records_file"
+        else
+            printf 'STATE\tCREATED\t%s\t-\n' "$state_path" >> "$records_file"
+        fi
+    }
+
+    add_state_path "$RECOVERY_BUILD_STATE_ROOT" || return 1
+    add_state_path "${RECOVERY_MODULES_ROOT}/${kernel}/build" || return 1
+    add_state_path "${RECOVERY_MODULES_ROOT}/${kernel}/extra" || return 1
+    add_state_path "${RECOVERY_MODULES_ROOT}/${kernel}/updates" || return 1
+    for package in "${packages[@]}"; do
+        if [[ $package == vivobook-cam-fix ]]; then
+            add_state_path "${RECOVERY_USR_SRC_ROOT}/${package}-2.0" || return 1
+        else
+            add_state_path "${RECOVERY_USR_SRC_ROOT}/${package}-1.0" || return 1
+        fi
+        add_state_path "${RECOVERY_DKMS_STATE_ROOT}/${package}" || return 1
+    done
+    while IFS= read -r -d '' path; do
+        add_state_path "$path" || return 1
+    done < <(find "${RECOVERY_MODULES_ROOT}/${kernel}" -maxdepth 1 \
+        \( -type f -o -type l \) -name 'modules.*' -print0 2>/dev/null)
+    for module in "${modules[@]}"; do
+        path=$(modinfo -k "$kernel" -n "$module" 2>/dev/null || true)
+        if [[ -n $path ]]; then
+            add_state_path "$path" || return 1
+        fi
+    done
+
+    sort -zu "$list_file" -o "$list_file" || return 1
+    if [[ -s $list_file ]]; then
+        tar --create --file "$archive_tmp" --directory=/ --null \
+            --acls --xattrs --selinux --numeric-owner \
+            --files-from="$list_file" || return 1
+    else
+        tar --create --file "$archive_tmp" --files-from=/dev/null || return 1
+    fi
+    [[ -f $archive_tmp && ! -L $archive_tmp ]] || return 1
+    sync -f "$archive_tmp" || return 1
+    mv -Tf -- "$archive_tmp" "$archive" || return 1
+    archive_tmp=
+    checksum=$(sha256sum "$archive" | cut -d' ' -f1) || return 1
+    printf 'ARCHIVE\t%s\t%s\n' "$archive_relative" "$checksum" > "$batch_file" || return 1
+    cat "$records_file" >> "$batch_file" || return 1
+    append_manifest_records_file "$batch_file" || return 1
+    sync -f "$RECOVERY_ROOT"
+)
+
+preflight_recovery_mutation_paths() {
+    local kernel=$1
+
+    preflight_core_paths "$kernel" || return 1
+    preflight_recovery_config_paths
 }
 
 backup_recovery_paths() {
     local kernel=$1 package_record module source_name artifact path target
     local -a paths=(
-        /etc/modules-load.d/vivobook-core.conf
-        /etc/dracut.conf.d/vivobook-core.conf
-        /etc/dracut.conf.d/qcom-remoteproc.conf
-        /etc/dracut.conf.d/qcom-gpu-firmware.conf
+        "${MODULES_LOAD_CONFIG_DIR:-/etc/modules-load.d}/vivobook-core.conf"
+        "${DRACUT_CONFIG_DIR}/vivobook-core.conf"
+        "${DRACUT_CONFIG_DIR}/qcom-remoteproc.conf"
+        "${DRACUT_CONFIG_DIR}/qcom-gpu-firmware.conf"
         /etc/systemd/system/sleep.target
         /etc/systemd/system/suspend.target
         /etc/systemd/system/hibernate.target
         /etc/systemd/system/hybrid-sleep.target
         /etc/systemd/system/suspend-then-hibernate.target
-        "/lib/modules/${kernel}/build"
-        "/boot/initramfs-${kernel}.img"
+        "${RECOVERY_BOOT_ROOT}/initramfs-${kernel}.img"
     )
-
-    for package_record in "${CORE_DKMS_PACKAGES[@]}"; do
-        IFS=: read -r module source_name artifact <<< "$package_record"
-        for path in "$source_name" Makefile dkms.conf; do
-            paths+=("/usr/src/${module}-1.0/${path}")
-        done
-    done
     for target in "${paths[@]}"; do
         backup_managed_path "$target" || return 1
     done
+}
+
+verify_installed_module() {
+    local kernel=$1 module=$2 required=${3:-1} path module_root canonical_path vermagic release
+
+    if ! path=$(modinfo -k "$kernel" -n "$module" 2>/dev/null); then
+        if [[ $required == 0 ]]; then
+            return 0
+        fi
+        recovery_error "módulo instalado não resolve para ${kernel}: $module"
+        return 1
+    fi
+    module_root=$(readlink -f "${RECOVERY_MODULES_ROOT}/${kernel}") || return 1
+    canonical_path=$(readlink -f "$path") || return 1
+    if [[ $path != "${RECOVERY_MODULES_ROOT}/${kernel}/"* ||
+          $canonical_path != "${module_root}/"* || ! -f $path || -L $path ]]; then
+        recovery_error "path instalado fora da árvore segura de ${kernel}: $module -> $path"
+        return 1
+    fi
+    vermagic=$(modinfo -F vermagic "$path") || return 1
+    release=${vermagic%% *}
+    if [[ $release != "$kernel" ]]; then
+        recovery_error "vermagic instalado incorreto para $module: $vermagic"
+        return 1
+    fi
 }
 
 verify_recovery_checkpoint() {
@@ -209,13 +525,16 @@ verify_recovery_checkpoint() {
         wcn_regulator_fix vivobook_kbd_fix vivobook_bl_fix vivobook_hotkey_fix
     )
 
+    if [[ ! -d ${RECOVERY_MODULES_ROOT}/${kernel} ||
+          -L ${RECOVERY_MODULES_ROOT}/${kernel} ]]; then
+        recovery_error "árvore final de módulos insegura: ${RECOVERY_MODULES_ROOT}/${kernel}"
+        return 1
+    fi
     for module in "${modules[@]}"; do
-        if ! modinfo -k "$kernel" -n "$module" >/dev/null 2>&1; then
-            recovery_error "módulo instalado não resolve para ${kernel}: $module"
-            return 1
-        fi
+        verify_installed_module "$kernel" "$module" 1 || return 1
     done
-    image="/boot/initramfs-${kernel}.img"
+    verify_installed_module "$kernel" vivobook_cam_fix 0 || return 1
+    image="${RECOVERY_BOOT_ROOT}/initramfs-${kernel}.img"
     if [[ ! -f $image || -L $image || $(stat -c %a "$image") != 600 ]]; then
         recovery_error "initramfs final ausente, inseguro ou sem modo 0600: $image"
         return 1
@@ -240,24 +559,32 @@ run_recovery() {
     run_gate 'privilégio root obrigatório' require_root || return 1
     run_gate 'modelo/kernel não correspondem ao alvo estável' \
         verify_recovery_target || return 1
+    run_gate 'Fedora 44 obrigatório para esta recuperação' \
+        verify_operating_system || return 1
     run_gate 'assets de recuperação ausentes' \
         verify_repository_entrypoints || return 1
+    run_gate 'ferramentas básicas de lock/backup ausentes' \
+        verify_recovery_base_commands || return 1
+    run_gate 'não foi possível adquirir o lock exclusivo' \
+        acquire_recovery_lock || return 1
+    run_gate 'manifesto de recovery não pôde ser inicializado' \
+        initialize_recovery_manifest || return 1
     run_gate 'auditoria pré-reboot não executável' \
         run_pre_reboot_audit || return 1
-    run_gate 'preflight de paths/provenance falhou' \
-        preflight_core_paths "$kernel" || return 1
+    record_baseline_status || return 1
+    run_gate 'preflight de todos os paths de mutação falhou' \
+        preflight_recovery_mutation_paths "$kernel" || return 1
+    run_gate 'firmware obrigatório não pôde ser resolvido' \
+        resolve_kernel_requested_firmware || return 1
+    record_prior_incident || return 1
+    run_gate 'backup anterior às mutações falhou' \
+        backup_recovery_paths "$kernel" || return 1
+    run_gate 'captura do estado DKMS/build/depmod falhou' \
+        capture_recovery_state "$kernel" || return 1
     run_gate 'dependências exatas não puderam ser instaladas/verificadas' \
         install_exact_dependencies recovery || return 1
     run_gate 'namespace DKMS privado indisponível' \
         preflight_dkms_namespace || return 1
-    run_gate 'firmware obrigatório não pôde ser resolvido' \
-        resolve_kernel_requested_firmware || return 1
-    run_gate 'manifesto de recovery não pôde ser inicializado' \
-        initialize_recovery_manifest || return 1
-    record_prior_incident || return 1
-    record_baseline_status || return 1
-    run_gate 'backup anterior às mutações falhou' \
-        backup_recovery_paths "$kernel" || return 1
 
     run_gate 'stage das fontes core falhou' stage_core_dkms_sources || return 1
     run_gate 'provenance do stage core falhou' \

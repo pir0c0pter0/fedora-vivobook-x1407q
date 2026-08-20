@@ -61,6 +61,7 @@ touch "$FIRMWARE_ROOT/qcom/compressed.bin.xz" "$FIRMWARE_ROOT/qca/plain.tlv"
     exit 1
 }
 DRACUT_CONFIG_DIR="$test_root/dracut"
+mkdir -p "$DRACUT_CONFIG_DIR"
 RESOLVED_GPU_FIRMWARE=("$FIRMWARE_ROOT/qcom/compressed.bin.xz")
 RESOLVED_BLUETOOTH_FIRMWARE=("$FIRMWARE_ROOT/qca/plain.tlv")
 write_gpu_bluetooth_firmware_dracut_config

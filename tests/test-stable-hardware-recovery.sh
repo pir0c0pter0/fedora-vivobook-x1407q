@@ -73,16 +73,19 @@ verify_recovery_target
 source_file="$test_root/system/example.conf"
 mkdir -p "$(dirname "$source_file")"
 printf 'original\n' > "$source_file"
+acquire_recovery_lock
 initialize_recovery_manifest
 backup_managed_path "$source_file"
 printf 'changed\n' > "$source_file"
 backup_managed_path "$source_file"
-backup_file="$RECOVERY_ROOT/backups${source_file}"
+backup_relative=$(awk -F '\t' -v path="$source_file" \
+    '$1 == "BACKUP" && $2 == path { print $3 }' "$RECOVERY_MANIFEST")
+backup_file="$RECOVERY_ROOT/$backup_relative"
 [[ $(<"$backup_file") == original ]] || {
     echo 'recovery rerun replaced the original backup' >&2
     exit 1
 }
-[[ $(grep -cF $'BACKUP\t'"$source_file"$'\t'"backups${source_file}" "$RECOVERY_MANIFEST") -eq 1 ]] || {
+[[ $(grep -cF $'BACKUP\t'"$source_file"$'\t' "$RECOVERY_MANIFEST") -eq 1 ]] || {
     echo 'manifest does not contain exactly one backup record' >&2
     exit 1
 }
@@ -90,20 +93,28 @@ backup_file="$RECOVERY_ROOT/backups${source_file}"
 absent_file="$test_root/system/absent.conf"
 backup_managed_path "$absent_file"
 backup_managed_path "$absent_file"
-[[ $(grep -cF $'ABSENT\t'"$absent_file"$'\t-' "$RECOVERY_MANIFEST") -eq 1 ]] || {
-    echo 'manifest does not retain exactly one absent-path record' >&2
+[[ $(grep -cF $'CREATED\t'"$absent_file"$'\t-' "$RECOVERY_MANIFEST") -eq 1 ]] || {
+    echo 'manifest does not retain exactly one created-path record' >&2
     exit 1
 }
 
 # Every failed gate must suppress the only success checkpoint.
 require_root() { :; }
 verify_recovery_target() { :; }
+verify_operating_system() { :; }
+verify_recovery_base_commands() { :; }
+acquire_recovery_lock() { :; }
+initialize_recovery_manifest() { :; }
 run_pre_reboot_audit() { :; }
+record_baseline_status() { :; }
+record_prior_incident() { :; }
 install_exact_dependencies() { :; }
 preflight_core_paths() { :; }
+preflight_recovery_mutation_paths() { :; }
 preflight_dkms_namespace() { :; }
 resolve_kernel_requested_firmware() { :; }
 backup_recovery_paths() { :; }
+capture_recovery_state() { :; }
 stage_core_dkms_sources() { :; }
 verify_staged_core_sources() { :; }
 prepare_core_module_build_tree() { :; }

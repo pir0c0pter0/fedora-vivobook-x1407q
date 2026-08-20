@@ -48,22 +48,44 @@ trap 'rm -rf "$tmpdir"' EXIT
 printf '#!/usr/bin/env bash\nexit 1\n' > "$tmpdir/journalctl"
 chmod +x "$tmpdir/journalctl"
 
-post_output=$(PATH="$tmpdir:$PATH" bash "$audit" --post-reboot 2>&1 || true)
-pre_output=$(PATH="$tmpdir:$PATH" bash "$audit" --pre-reboot 2>&1 || true)
-expect 'post-reboot journal failure does not fail GPU' \
-    grep -q '^FAIL gpu: current boot journal is unavailable$' <<<"$post_output"
-expect 'pre-reboot journal failure does not skip GPU' \
-    grep -q '^SKIP gpu: current boot journal is unavailable before reboot$' <<<"$pre_output"
+set +e
+post_output=$(PATH="$tmpdir:$PATH" bash "$audit" --post-reboot 2>&1)
+post_status=$?
+pre_output=$(PATH="$tmpdir:$PATH" bash "$audit" --pre-reboot 2>&1)
+pre_status=$?
+set -e
+expect 'post-reboot journal infrastructure failure does not exit 2' \
+    test "$post_status" -eq 2
+expect 'pre-reboot journal infrastructure failure does not exit 2' \
+    test "$pre_status" -eq 2
+expect 'post-reboot journal failure is not classified as infrastructure' \
+    grep -q '^ERROR infrastructure: current boot journal is unavailable$' <<<"$post_output"
+expect 'pre-reboot journal failure is not classified as infrastructure' \
+    grep -q '^ERROR infrastructure: current boot journal is unavailable$' <<<"$pre_output"
 expect 'GPU passes when the current boot journal is unavailable' \
     bash -c '! grep -q "^PASS gpu:" <<<"$1"' _ "$post_output"
 
 printf '#!/usr/bin/env bash\nif [[ ! -e $JOURNAL_COUNTER ]]; then\n    : > "$JOURNAL_COUNTER"\n    exit 0\nfi\nexit 1\n' > "$tmpdir/journalctl"
 chmod +x "$tmpdir/journalctl"
-late_journal_output=$(JOURNAL_COUNTER="$tmpdir/journal-called" PATH="$tmpdir:$PATH" bash "$audit" --post-reboot 2>&1 || true)
-expect 'a later journal failure lets GPU pass' \
-    grep -q '^FAIL gpu: current boot journal is unavailable$' <<<"$late_journal_output"
+set +e
+late_journal_output=$(JOURNAL_COUNTER="$tmpdir/journal-called" PATH="$tmpdir:$PATH" bash "$audit" --post-reboot 2>&1)
+late_status=$?
+set -e
+expect 'a later journal failure is not infrastructure status 2' test "$late_status" -eq 2
+expect 'a later journal failure is not classified as infrastructure' \
+    grep -q '^ERROR infrastructure: current boot journal is unavailable$' <<<"$late_journal_output"
 expect 'GPU passes after a later journal failure' \
     bash -c '! grep -q "^PASS gpu:" <<<"$1"' _ "$late_journal_output"
+
+set +e
+missing_tool_output=$(AUDIT_TEST_MODE=1 AUDIT_TEST_MISSING_COMMAND=nmcli \
+    bash "$audit" --pre-reboot 2>&1)
+missing_tool_status=$?
+set -e
+expect 'missing required audit tool does not exit 2' test "$missing_tool_status" -eq 2
+expect 'missing required audit tool is not reported as infrastructure' \
+    grep -q '^ERROR infrastructure: required command is unavailable: nmcli$' \
+    <<<"$missing_tool_output"
 
 mkdir -p "$tmpdir/drm/renderD128"
 touch "$tmpdir/drm/renderD128/dev"
