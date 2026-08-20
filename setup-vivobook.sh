@@ -202,12 +202,18 @@ preflight_core_paths() {
         err "Kernel ativo inesperado para os módulos core: $kernel"
         return 1
     fi
-    for path in "/boot/config-${kernel}" "/lib/modules/${kernel}" /usr/src; do
-        if [[ ! -e "$path" || -L "$path" ]]; then
-            err "Path obrigatório ausente ou symlink: $path"
-            return 1
-        fi
-    done
+    if [[ ! -f "/boot/config-${kernel}" || -L "/boot/config-${kernel}" ]]; then
+        err "Config do kernel ausente, não regular ou symlink: /boot/config-${kernel}"
+        return 1
+    fi
+    if [[ ! -d "/lib/modules/${kernel}" || -L "/lib/modules/${kernel}" ]]; then
+        err "Diretório de módulos ausente, não diretório ou symlink: /lib/modules/${kernel}"
+        return 1
+    fi
+    if [[ ! -d /usr/src || -L /usr/src ]]; then
+        err "Diretório de fontes ausente, não diretório ou symlink: /usr/src"
+        return 1
+    fi
     for path in "$work_root" "$build_tree"; do
         if [[ -L "$path" ]] || [[ -e "$path" && ! -d "$path" ]]; then
             err "Diretório de build inseguro: $path"
@@ -652,6 +658,10 @@ inspect_initramfs_candidate() {
     lsinitrd "$candidate"
 }
 
+sync_initramfs_path() {
+    sync -f "$1"
+}
+
 publish_initramfs_candidate() (
     local kernel=$1
     local target_dir=${INITRAMFS_BOOT_DIR:-/boot}
@@ -705,13 +715,13 @@ publish_initramfs_candidate() (
         fi
     done
 
-    sync -f "$candidate" || return 1
+    sync_initramfs_path "$candidate" || return 1
     if [[ -L "$target" ]] || [[ -e "$target" && ! -f "$target" ]] ||
         [[ -L "$backup" ]] || [[ -e "$backup" && ! -f "$backup" ]]; then
         err "Target ou backup initramfs mudou durante a geração"
         return 1
     fi
-    if [[ -e "$target" ]]; then
+    if [[ -e "$target" && ! -e "$backup" ]]; then
         backup_tmp="${backup}.new.$$"
         if [[ -e "$backup_tmp" || -L "$backup_tmp" ]]; then
             err "Backup initramfs temporário preexistente"
@@ -719,16 +729,22 @@ publish_initramfs_candidate() (
         fi
         cp --reflink=auto --sparse=always --preserve=mode,ownership,timestamps \
             -- "$target" "$backup_tmp" || return 1
-        sync -f "$backup_tmp" || return 1
+        sync_initramfs_path "$backup_tmp" || return 1
         mv -Tf -- "$backup_tmp" "$backup" || return 1
         backup_tmp=
     fi
-    mv -Tf -- "$candidate" "$target" || return 1
-    candidate=
-    sync -f "$target_dir" || return 1
+    # Complete every fallible durability operation before the atomic promotion.
+    # The rename below is the last fallible operation, so an error can never be
+    # reported after the active target has already changed.
+    sync_initramfs_path "$target_dir" || return 1
     rm -f -- "$listing"
     listing=
-    log "Initramfs candidato validado e promovido: $target"
+    log "Initramfs candidato validado; promovendo atomicamente: $target"
+    if mv -Tf -- "$candidate" "$target"; then
+        candidate=
+        return 0
+    fi
+    return 1
 )
 
 if [[ ${VIVOBOOK_SETUP_LIBRARY_ONLY:-0} == 1 ]]; then
@@ -751,11 +767,11 @@ if ! preflight_core_paths "$ACTIVE_KERNEL"; then
     err "Preflight de paths/hashes falhou antes de qualquer mutação"
     exit 1
 fi
+check_deps
 if ! preflight_dkms_namespace; then
-    err "Preflight do namespace DKMS falhou antes de qualquer mutação"
+    err "Preflight do namespace DKMS falhou antes de qualquer ação DKMS"
     exit 1
 fi
-check_deps
 stage_bundled
 if ! stage_core_dkms_sources; then
     err "Falha no stage das fontes core; abortando antes do dracut"
@@ -1109,12 +1125,6 @@ fi'
 fi
 
 # ─── Rebuild initramfs ──────────────────────────────────────────────────────
-# Task 7 application phase: publish module dependency metadata only when the
-# controlled initramfs candidate is about to be generated.
-if ! depmod "$ACTIVE_KERNEL"; then
-    err "depmod falhou antes da criação do initramfs candidato"
-    exit 1
-fi
 log "Regenerando initramfs..."
 if ! publish_initramfs_candidate "$ACTIVE_KERNEL"; then
     err "Candidato initramfs falhou; setup abortado sem declarar sucesso"

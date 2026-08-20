@@ -58,6 +58,29 @@ publish_initramfs_candidate "$kernel"
     exit 1
 }
 
+# A later successful publication must not replace the first known-good backup.
+printf 'image-before-second-success\n' > "$target"
+publish_initramfs_candidate "$kernel"
+[[ $(<"$backup") == known-old-image ]] || {
+    echo 'a rerun overwrote the original initramfs backup' >&2
+    exit 1
+}
+
+# A durability failure must occur before promotion, leaving the target intact.
+printf 'must-survive-sync-failure\n' > "$target"
+sync_initramfs_path() {
+    [[ $1 != "$test_root" ]]
+}
+if publish_initramfs_candidate "$kernel"; then
+    echo 'candidate was promoted despite a directory sync failure' >&2
+    exit 1
+fi
+[[ $(<"$target") == must-survive-sync-failure ]] || {
+    echo 'sync failure changed the active target' >&2
+    exit 1
+}
+sync_initramfs_path() { command sync -f "$1"; }
+
 printf 'must-survive-validation-failure\n' > "$target"
 inspect_initramfs_candidate() { printf '%s\n' qcom_q6v5_pas.ko; }
 if publish_initramfs_candidate "$kernel"; then

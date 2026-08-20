@@ -121,10 +121,30 @@ stage_line=$(grep -n '^[[:space:]]*stage_bundled$' "$setup" | tail -1 | cut -d: 
 namespace_line=$(grep -n 'if ! preflight_dkms_namespace; then' "$setup" | tail -1 | cut -d: -f1 || true)
 [[ -n $preflight_line && -n $deps_line && -n $stage_line &&
    -n $namespace_line && $preflight_line -lt $deps_line &&
-   $namespace_line -lt $deps_line && $preflight_line -lt $stage_line ]] || {
-    echo 'path/hash preflight does not precede dependency and staging mutations' >&2
+   $deps_line -lt $namespace_line && $namespace_line -lt $stage_line ]] || {
+    echo 'general preflight, dependencies, DKMS namespace and staging are misordered' >&2
     exit 1
 }
+
+preflight_body=$(sed -n '/^preflight_core_paths()/,/^}/p' "$setup")
+for type_contract in \
+    '[[ ! -f "/boot/config-${kernel}" || -L "/boot/config-${kernel}" ]]' \
+    '[[ ! -d "/lib/modules/${kernel}" || -L "/lib/modules/${kernel}" ]]' \
+    '[[ ! -d /usr/src || -L /usr/src ]]'; do
+    grep -qF "$type_contract" <<< "$preflight_body" || {
+        echo "core preflight lacks exact path type contract: $type_contract" >&2
+        exit 1
+    }
+done
+
+[[ $(grep -c '^[[:space:]]*depmod "\$kernel"' "$setup") -eq 1 ]] || {
+    echo 'core path must run exactly one depmod for the active kernel' >&2
+    exit 1
+}
+if grep -qF 'depmod "$ACTIVE_KERNEL"' "$setup"; then
+    echo 'setup retains a redundant late depmod' >&2
+    exit 1
+fi
 
 build_line=$(grep -n 'build_core_dkms_modules "$ACTIVE_KERNEL"' "$setup" | tail -1 | cut -d: -f1 || true)
 vermagic_line=$(grep -n 'verify_core_dkms_vermagic "$ACTIVE_KERNEL"' "$setup" | tail -1 | cut -d: -f1 || true)
