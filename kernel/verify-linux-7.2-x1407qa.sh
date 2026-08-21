@@ -3,6 +3,9 @@ set -euo pipefail
 
 ARTIFACT_ROOT=${1:?usage: verify-linux-7.2-x1407qa.sh ARTIFACT_ROOT [VERSION]}
 readonly VERSION=${2:-7.2.0-x1407qa}
+readonly REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+readonly USB_CONFIG_GUARD=$REPO_ROOT/kernel/verify-linux-usb-config-preservation.sh
+readonly REFERENCE_CONFIG=${X1407QA_REFERENCE_CONFIG:-/boot/config-7.2.0-x1407qa}
 IMAGE=$ARTIFACT_ROOT/boot/vmlinuz-$VERSION
 MODULE_ROOT=$ARTIFACT_ROOT/lib/modules/$VERSION
 DTB=$ARTIFACT_ROOT/boot/dtb/qcom/x1p42100-asus-zenbook-a14.dtb
@@ -25,6 +28,8 @@ fi
 [[ -s $MODULE_ROOT/modules.dep ]] || { echo 'ERROR: modules.dep missing' >&2; exit 1; }
 [[ -s $DTB ]] || { echo 'ERROR: x1p42100-asus-zenbook-a14 DTB missing' >&2; exit 1; }
 [[ -s $CONFIG ]] || { echo 'ERROR: kernel config missing' >&2; exit 1; }
+[[ -x $USB_CONFIG_GUARD ]] || { echo 'ERROR: USB config preservation guard missing' >&2; exit 1; }
+"$USB_CONFIG_GUARD" "$REFERENCE_CONFIG" "$CONFIG"
 for required_config in \
     CONFIG_ISO9660_FS=y CONFIG_JOLIET=y CONFIG_EROFS_FS=y \
     CONFIG_EROFS_FS_ZIP=y CONFIG_DM_SNAPSHOT=m \
@@ -36,5 +41,44 @@ for required_config in \
     }
 done
 
+rndis_module=
+for module_filename in rndis_host.ko rndis_host.ko.xz rndis_host.ko.zst rndis_host.ko.gz; do
+    rndis_module=$(find "$MODULE_ROOT" -type f -name "$module_filename" -print -quit)
+    [[ -z $rndis_module ]] || break
+done
+[[ -n $rndis_module && -s $rndis_module ]] || {
+    echo 'ERROR: kernel artifacts missing rndis_host.ko required for USB tethering' >&2
+    exit 1
+}
+
+module_relative=./${rndis_module#"$ARTIFACT_ROOT"/}
+awk -v expected="$module_relative" '$2 == expected { found = 1 } END { exit !found }' \
+    "$ARTIFACT_ROOT/SHA256SUMS" || {
+    echo 'ERROR: rndis_host module is not covered by SHA256SUMS' >&2
+    exit 1
+}
+
 (cd "$ARTIFACT_ROOT" && sha256sum --check SHA256SUMS)
+
+command -v modinfo >/dev/null || {
+    echo 'ERROR: modinfo is required to validate rndis_host.ko' >&2
+    exit 1
+}
+module_name=$(modinfo -F name "$rndis_module") || {
+    echo 'ERROR: rndis_host artifact is not a valid kernel module' >&2
+    exit 1
+}
+[[ $module_name == rndis_host ]] || {
+    echo "ERROR: unexpected RNDIS module name: $module_name" >&2
+    exit 1
+}
+module_vermagic=$(modinfo -F vermagic "$rndis_module") || {
+    echo 'ERROR: rndis_host artifact has no valid vermagic' >&2
+    exit 1
+}
+[[ ${module_vermagic%% *} == "$VERSION" ]] || {
+    echo "ERROR: rndis_host vermagic does not match $VERSION: $module_vermagic" >&2
+    exit 1
+}
+
 echo "PASS: Linux $VERSION aarch64 artifacts verified"

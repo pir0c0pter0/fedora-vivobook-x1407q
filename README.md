@@ -8,6 +8,15 @@
 > [relatório completo do Fedora 44 com Linux 7.2](docs/BUILD-REPORT-2026-08-19.md)
 > e o [estado final da construção](BUILD-STATE.md).
 
+> **Regra de recuperação:** USB e USB tethering são infraestrutura crítica.
+> Kernels experimentais devem herdar a configuração do kernel estável e são
+> rejeitados se alterarem qualquer opção USB/Type-C/UCSI ou perderem
+> `CONFIG_USB_NET_RNDIS_HOST=m`. A referência confiável é
+> `/boot/config-7.2.0-x1407qa` com SHA-256
+> `35763b73052b88433a942b93555a1ce931d81abc67f9e465821c10683ac26199`.
+> Experimentos de Wi-Fi nunca devem resetar,
+> descarregar, reconfigurar ou colocar USB em risco.
+
 ## Hardware
 
 | Component | Details |
@@ -34,7 +43,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | # | Achievement | Method | Impact |
 |---|------------|--------|--------|
 | 1 | **Booted Fedora** | Custom ISO + Zenbook A14 DTB (same Qualcomm die) | From brick to bootable |
-| 2 | **WiFi working** | DKMS module `wcn_regulator_fix` + custom board.bin | PCIe race condition + regulator fix |
+| 2 | **WiFi: histórico no 6.19; falha atual no 7.2** | O caminho antigo usava `wcn_regulator_fix`; o 7.2 nativo enumera PCI e expira no MHI | Investigação restrita a Linux 7.2+ |
 | 3 | **Keyboard working** | DKMS module `vivobook_kbd_fix` | Different I2C bus/address than Zenbook |
 | 4 | **Battery reporting** | ADSP firmware injected into initramfs | `qcom-battmgr` was failing at early boot |
 | 5 | **Brightness control** | DKMS module `vivobook_bl_fix` | Direct PMIC PWM register manipulation |

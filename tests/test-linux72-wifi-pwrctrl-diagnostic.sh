@@ -166,7 +166,11 @@ grep -qxF 'artifacts=/output/diag' <<< "$wrapper_output"
 
 verify_fixture=$test_root/verify-fixture
 verify_version=7.2.0-x1407qa-wifi-pwrctrl-diag
-mkdir -p "$verify_fixture/boot/dtb/qcom" "$verify_fixture/lib/modules/$verify_version" "$test_root/bin"
+reference_config=$test_root/stable-reference.config
+mkdir -p \
+    "$verify_fixture/boot/dtb/qcom" \
+    "$verify_fixture/lib/modules/$verify_version/kernel/drivers/net/usb" \
+    "$test_root/bin"
 printf 'ARM64 image\nLinux version %s test\n%s\n' \
     "$verify_version" \
     'X1407QA Wi-Fi diagnostic: PERST# deasserted before WCN power-on' \
@@ -174,7 +178,25 @@ printf 'ARM64 image\nLinux version %s test\n%s\n' \
 : > "$verify_fixture/lib/modules/$verify_version/modules.dep"
 printf 'module dependency\n' > "$verify_fixture/lib/modules/$verify_version/modules.dep"
 printf 'diagnostic dtb\n' > "$verify_fixture/boot/dtb/qcom/x1p42100-asus-zenbook-a14.dtb"
+printf 'RNDIS module\n' > \
+    "$verify_fixture/lib/modules/$verify_version/kernel/drivers/net/usb/rndis_host.ko"
 printf '%s\n' \
+    'CONFIG_USB=y' \
+    'CONFIG_USB_USBNET=m' \
+    'CONFIG_USB_NET_CDCETHER=m' \
+    'CONFIG_USB_NET_RNDIS_HOST=m' \
+    'CONFIG_TYPEC=m' \
+    'CONFIG_TYPEC_UCSI=m' \
+    'CONFIG_UCSI_PMIC_GLINK=m' \
+    > "$reference_config"
+printf '%s\n' \
+    'CONFIG_USB=y' \
+    'CONFIG_USB_USBNET=m' \
+    'CONFIG_USB_NET_CDCETHER=m' \
+    'CONFIG_USB_NET_RNDIS_HOST=m' \
+    'CONFIG_TYPEC=m' \
+    'CONFIG_TYPEC_UCSI=m' \
+    'CONFIG_UCSI_PMIC_GLINK=m' \
     'CONFIG_ISO9660_FS=y' \
     'CONFIG_JOLIET=y' \
     'CONFIG_EROFS_FS=y' \
@@ -191,14 +213,103 @@ cat > "$test_root/bin/file" <<'EOF'
 printf '%s: Linux kernel ARM64 boot executable Image\n' "$1"
 EOF
 chmod +x "$test_root/bin/file"
+cat > "$test_root/bin/modinfo" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ $1 == -F && $# == 3 ]]
+field=$2
+module=$3
+case "$field" in
+    name) sed -n 's/^name=//p' "$module" | grep -m1 . ;;
+    vermagic) sed -n 's/^vermagic=//p' "$module" | grep -m1 . ;;
+    *) exit 2 ;;
+esac
+EOF
+chmod +x "$test_root/bin/modinfo"
+
+printf 'name=rndis_host\nvermagic=%s SMP preempt mod_unload aarch64\n' \
+    "$verify_version" > \
+    "$verify_fixture/lib/modules/$verify_version/kernel/drivers/net/usb/rndis_host.ko"
+(cd "$verify_fixture" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+
+verify_test_repo=$test_root/verify-repo
+mkdir -p "$verify_test_repo/kernel"
+reference_hash=$(sha256sum "$reference_config" | awk '{print $1}')
+sed "s/^readonly EXPECTED_REFERENCE_SHA256=.*/readonly EXPECTED_REFERENCE_SHA256=$reference_hash/" \
+    "$root/kernel/verify-linux-usb-config-preservation.sh" > \
+    "$verify_test_repo/kernel/verify-linux-usb-config-preservation.sh"
+cp "$root/kernel/verify-linux-7.2-x1407qa.sh" \
+    "$verify_test_repo/kernel/verify-linux-7.2-x1407qa.sh"
+chmod +x "$verify_test_repo/kernel/"*.sh
+verify_script=$verify_test_repo/kernel/verify-linux-7.2-x1407qa.sh
 
 PATH="$test_root/bin:$PATH" \
-    "$root/kernel/verify-linux-7.2-x1407qa.sh" "$verify_fixture" "$verify_version" >/dev/null
+    X1407QA_REFERENCE_CONFIG="$reference_config" \
+    "$verify_script" "$verify_fixture" "$verify_version" >/dev/null
+
+sed -i '/CONFIG_USB_NET_RNDIS_HOST=m/d' "$verify_fixture/boot/config-$verify_version"
+(cd "$verify_fixture" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+if PATH="$test_root/bin:$PATH" \
+    X1407QA_REFERENCE_CONFIG="$reference_config" \
+    "$verify_script" "$verify_fixture" "$verify_version" >/dev/null 2>&1; then
+    echo 'diagnostic verifier accepted a kernel without RNDIS tethering' >&2
+    exit 1
+fi
+sed -i '/CONFIG_USB_NET_CDCETHER=m/a CONFIG_USB_NET_RNDIS_HOST=m' \
+    "$verify_fixture/boot/config-$verify_version"
+
+rm "$verify_fixture/lib/modules/$verify_version/kernel/drivers/net/usb/rndis_host.ko"
+(cd "$verify_fixture" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+if PATH="$test_root/bin:$PATH" \
+    X1407QA_REFERENCE_CONFIG="$reference_config" \
+    "$verify_script" "$verify_fixture" "$verify_version" >/dev/null 2>&1; then
+    echo 'diagnostic verifier accepted artifacts without rndis_host.ko' >&2
+    exit 1
+fi
+printf 'name=rndis_host\nvermagic=%s SMP preempt mod_unload aarch64\n' \
+    "$verify_version" > \
+    "$verify_fixture/lib/modules/$verify_version/kernel/drivers/net/usb/rndis_host.ko"
+
+printf 'not a kernel module\n' > \
+    "$verify_fixture/lib/modules/$verify_version/kernel/drivers/net/usb/rndis_host.ko"
+(cd "$verify_fixture" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+if PATH="$test_root/bin:$PATH" \
+    X1407QA_REFERENCE_CONFIG="$reference_config" \
+    "$verify_script" "$verify_fixture" "$verify_version" >/dev/null 2>&1; then
+    echo 'diagnostic verifier accepted a corrupt RNDIS module' >&2
+    exit 1
+fi
+printf 'name=rndis_host\nvermagic=%s SMP preempt mod_unload aarch64\n' \
+    "$verify_version" > \
+    "$verify_fixture/lib/modules/$verify_version/kernel/drivers/net/usb/rndis_host.ko"
+
+(cd "$verify_fixture" && find . -type f ! -name SHA256SUMS \
+    ! -name 'rndis_host.ko' -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+if PATH="$test_root/bin:$PATH" \
+    X1407QA_REFERENCE_CONFIG="$reference_config" \
+    "$verify_script" "$verify_fixture" "$verify_version" >/dev/null 2>&1; then
+    echo 'diagnostic verifier accepted an RNDIS module absent from SHA256SUMS' >&2
+    exit 1
+fi
+
+printf 'name=rndis_host\nvermagic=wrong-release SMP preempt mod_unload aarch64\n' > \
+    "$verify_fixture/lib/modules/$verify_version/kernel/drivers/net/usb/rndis_host.ko"
+(cd "$verify_fixture" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+if PATH="$test_root/bin:$PATH" \
+    X1407QA_REFERENCE_CONFIG="$reference_config" \
+    "$verify_script" "$verify_fixture" "$verify_version" >/dev/null 2>&1; then
+    echo 'diagnostic verifier accepted an RNDIS module with wrong vermagic' >&2
+    exit 1
+fi
+printf 'name=rndis_host\nvermagic=%s SMP preempt mod_unload aarch64\n' \
+    "$verify_version" > \
+    "$verify_fixture/lib/modules/$verify_version/kernel/drivers/net/usb/rndis_host.ko"
 
 sed -i '/X1407QA Wi-Fi diagnostic:/d' "$verify_fixture/boot/vmlinuz-$verify_version"
 (cd "$verify_fixture" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 if PATH="$test_root/bin:$PATH" \
-    "$root/kernel/verify-linux-7.2-x1407qa.sh" "$verify_fixture" "$verify_version" >/dev/null 2>&1; then
+    X1407QA_REFERENCE_CONFIG="$reference_config" \
+    "$verify_script" "$verify_fixture" "$verify_version" >/dev/null 2>&1; then
     echo 'diagnostic verifier accepted an Image without the diagnostic marker' >&2
     exit 1
 fi

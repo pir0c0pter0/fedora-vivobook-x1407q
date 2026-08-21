@@ -5,8 +5,11 @@ readonly VERSION=${X1407QA_KERNEL_VERSION:-7.2.0-x1407qa}
 readonly LOCALVERSION=${X1407QA_LOCALVERSION:--x1407qa}
 readonly EXPECTED_SHA256=f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3
 readonly REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+readonly CONFIG_PREPARER=$REPO_ROOT/kernel/prepare-linux-7.2-x1407qa-config.sh
+readonly MANIFEST_WRITER=$REPO_ROOT/kernel/write-linux-artifact-manifest.sh
 readonly DEFAULT_TARBALL=$REPO_ROOT/linux-7.2.tar.xz
 readonly DEFAULT_WORK=/var/lib/x1407qa-kernel-7.2
+readonly REFERENCE_CONFIG=${X1407QA_REFERENCE_CONFIG:-/boot/config-7.2.0-x1407qa}
 
 TARBALL=${1:-$DEFAULT_TARBALL}
 WORK_ROOT=${2:-$DEFAULT_WORK}
@@ -39,33 +42,8 @@ if [[ -n $SOURCE_PATCH ]]; then
     patch --batch --forward --fuzz=0 -d "$SOURCE_ROOT" -p1 < "$SOURCE_PATCH" >/dev/null
 fi
 
-make -C "$SOURCE_ROOT" O="$BUILD_ROOT" ARCH=arm64 defconfig
-config="$SOURCE_ROOT/scripts/config --file $BUILD_ROOT/.config"
-for option in \
-    CONFIG_ARCH_QCOM CONFIG_ARM64 CONFIG_ACPI CONFIG_EFI CONFIG_DRM_MSM \
-    CONFIG_QCOM_Q6V5_PAS CONFIG_QCOM_RPROC_COMMON CONFIG_QCOM_SYSMON \
-    CONFIG_QCOM_PMIC_GLINK CONFIG_BATTERY_QCOM_BATTMGR CONFIG_QCOM_SPMI_ADC_TM5 \
-    CONFIG_QCOM_CLK_RPMH CONFIG_QCOM_COMMAND_DB CONFIG_QCOM_RPMH \
-    CONFIG_QCOM_SCM CONFIG_QCOM_SMEM CONFIG_QCOM_AOSS_QMP \
-    CONFIG_ISO9660_FS CONFIG_JOLIET CONFIG_EROFS_FS CONFIG_EROFS_FS_ZIP \
-    CONFIG_DM_SNAPSHOT \
-    CONFIG_PHY_QCOM_QMP_COMBO CONFIG_USB_DWC3_QCOM CONFIG_TYPEC_UCSI \
-    CONFIG_UCSI_PMIC_GLINK CONFIG_ATH11K CONFIG_ATH11K_PCI \
-    CONFIG_BT_HCIUART CONFIG_BT_HCIUART_QCA CONFIG_SND_SOC_QCOM \
-    CONFIG_SND_SOC_X1E80100 CONFIG_I2C_QCOM_CCI CONFIG_VIDEO_QCOM_CAMSS \
-    CONFIG_VIDEO_OV02C10 CONFIG_ARM_SCMI_PROTOCOL CONFIG_ARM_SCMI_CPUFREQ \
-    CONFIG_QCOM_FASTRPC CONFIG_QCOM_PD_MAPPER; do
-    $config --enable "${option#CONFIG_}" 2>/dev/null || true
-done
-make -C "$SOURCE_ROOT" O="$BUILD_ROOT" ARCH=arm64 olddefconfig
-for required_config in \
-    CONFIG_ISO9660_FS=y CONFIG_JOLIET=y CONFIG_EROFS_FS=y \
-    CONFIG_EROFS_FS_ZIP=y CONFIG_DM_SNAPSHOT=m; do
-    grep -qxF "$required_config" "$BUILD_ROOT/.config" || {
-        echo "ERROR: kernel config missing $required_config" >&2
-        exit 1
-    }
-done
+[[ -x $CONFIG_PREPARER ]] || { echo 'ERROR: Linux config preparer missing' >&2; exit 1; }
+"$CONFIG_PREPARER" "$SOURCE_ROOT" "$BUILD_ROOT" "$REFERENCE_CONFIG"
 
 make -C "$SOURCE_ROOT" O="$BUILD_ROOT" ARCH=arm64 \
     LOCALVERSION="$LOCALVERSION" -j"$(nproc)" Image dtbs modules
@@ -78,7 +56,8 @@ rsync -a "$STAGING_ROOT/lib/modules/" "$ARTIFACT_ROOT/lib/modules/"
 install -m 0644 "$REPO_ROOT/x1p42100-asus-zenbook-a14-wifi-fix.dtb" \
     "$ARTIFACT_ROOT/boot/dtb/qcom/x1p42100-asus-zenbook-a14.dtb"
 cp "$BUILD_ROOT/.config" "$ARTIFACT_ROOT/boot/config-$VERSION"
-find "$ARTIFACT_ROOT" -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > "$ARTIFACT_ROOT/SHA256SUMS"
+[[ -x $MANIFEST_WRITER ]] || { echo 'ERROR: artifact manifest writer missing' >&2; exit 1; }
+"$MANIFEST_WRITER" "$ARTIFACT_ROOT"
 
 "$REPO_ROOT/kernel/verify-linux-7.2-x1407qa.sh" "$ARTIFACT_ROOT" "$VERSION"
 echo "Linux $VERSION artifacts ready at $ARTIFACT_ROOT"

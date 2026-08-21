@@ -21,6 +21,16 @@ Do not continue this work on `main`. Continue in the worktree above.
 
 ## Safety boundary
 
+- USB ports and USB tethering are survival infrastructure for this recovery.
+  Never change, reset, unload, rebind or experimentally configure USB,
+  Type-C, UCSI or USB networking on the live laptop while investigating Wi-Fi.
+- Every experimental kernel must inherit `/boot/config-7.2.0-x1407qa` and pass
+  `kernel/verify-linux-usb-config-preservation.sh`. In particular,
+  `CONFIG_USB_NET_RNDIS_HOST=m` and the `rndis_host.ko` artifact are mandatory.
+  A candidate with any USB/Type-C config drift must not be installed or booted.
+  The trusted reference SHA-256 is
+  `35763b73052b88433a942b93555a1ce931d81abc67f9e465821c10683ac26199`;
+  a transferred or overridden reference must match it exactly.
 - Do not enable or test the IR camera.
 - Do not enable or test USB4/TB3.
 - Do not enable suspend or hibernate.
@@ -172,7 +182,7 @@ The inherited Zenbook node uses `qcom,calibration-variant = "UX3407Q"`. Like
 board data, this is consumed after the failing MHI stage and is not the current
 root cause.
 
-## Strong current lead: PCI power-control change in Linux 7.2
+## Falsified lead: PERST# before WCN power-on
 
 A source comparison between upstream Linux 6.19 and 7.2 found a relevant
 architectural change in `drivers/pci/pwrctrl/pci-pwrctrl-pwrseq.c`:
@@ -186,17 +196,16 @@ The WCN6855-specific sequence in `pwrseq-qcom-wcn.c` is otherwise materially
 the same. Linux 7.2 adds support for other WCN families, but does not obviously
 change the WCN6855 target data.
 
-This change matches the historical boundary: the repository documented Wi-Fi
+This change matched the historical boundary: the repository documented Wi-Fi
 working on Fedora Linux 6.19 with regulator holding and delayed enumeration,
 while Linux 7.2 consistently reaches PCI enumeration but times out at MHI.
-This is a hypothesis, not yet a confirmed root cause.
 
 The controller-level ordering is the narrower observable difference. Linux 7.2
 calls `pci_pwrctrl_power_on_devices()` in `qcom_pcie_host_init()` while PERST#
 is still asserted, and deasserts PERST# only later. The earlier lifecycle
 released PERST# before the WCN pwrseq consumer powered the endpoint and queued
-a PCI rescan. The next experiment therefore changes only this ordering in a
-separately versioned Linux 7.2 build.
+a PCI rescan. The diagnostic changed only this ordering in a separately
+versioned Linux 7.2 build. It did not fix the MHI timeout and is now falsified.
 
 Kernel config difference worth retaining:
 
@@ -210,46 +219,71 @@ Kernel config difference worth retaining:
 Both kernels enable `CONFIG_PCI_PWRCTRL`, `CONFIG_PCI_PWRCTRL_PWRSEQ`,
 `CONFIG_POWER_SEQUENCING_QCOM_WCN`, `CONFIG_MHI_BUS` and `CONFIG_ATH11K_PCI`.
 
+## Linux 7.2 diagnostic result and USB regression
+
+Boot `1f2aab1e3b084d66b0ad8b0ea0073275` ran
+`7.2.0-x1407qa-wifi-pwrctrl-diag`. The WCN controller emitted the diagnostic
+marker, trained the Gen3 x1 link and enumerated `17cb:1103`, but MHI still
+timed out:
+
+```text
+15.628 qcom-pcie 1c08000.pci: X1407QA Wi-Fi diagnostic: PERST# deasserted before WCN power-on
+15.828 qcom-pcie 1c08000.pci: PCIe Gen.3 x1 link up
+15.834 pci 0004:01:00.0: [17cb:1103]
+16.172 mhi mhi0: Power on setup success
+16.272 mhi mhi0: Wait for device to enter SBL or Mission mode
+37.856 ath11k_pci 0004:01:00.0: failed to power up mhi: -110
+```
+
+The same boot also exposed a build-process regression: the phone enumerated at
+USB `2d95:600a`, but no tethering interface appeared. The diagnostic config had
+lost `CONFIG_USB_NET_RNDIS_HOST=m`; NetworkManager therefore saw only `lo`.
+The next stable boot loaded `rndis_host` and `cdc_ether`, created `enu1` and
+restored connectivity. The stable and diagnostic DTBs were byte-identical, so
+the USB regression came from starting the diagnostic build with `defconfig`
+instead of preserving the stable kernel config.
+
+This incident is now a permanent fail-closed constraint. The builder inherits
+the stable config, and both the build and artifact verifier reject USB/Type-C
+drift, a changed Qualcomm USB3/DP combo PHY, or a missing, corrupt,
+wrong-release or unmanifested RNDIS module. Do not reuse the already-built
+diagnostic artifacts.
+
 ## Exact next step
 
-Do not repeat the inconclusive old-kernel boot. Build and install the separately
-versioned Linux 7.2 diagnostic candidate that moves WCN power-on after PERST#
-deassertion while retaining the Linux 7.2 pwrctrl ownership model.
+Keep the laptop on `7.2.0-x1407qa` with working USB tethering. Do not repeat the
+old-kernel boot and do not boot the rejected PERST-before-power candidate.
 
-Build and verify without replacing the stable kernel:
+Continue the Wi-Fi investigation at the next endpoint reset/power boundary,
+starting from pristine Linux 7.2 or newer and changing one WCN-specific
+variable at a time. Do not stack another change on the falsified diagnostic
+patch. Compile candidates on the user's stronger remote PC over SSH; transfer
+only source, config, patch and verified artifacts. Never use USB storage or
+alter USB configuration as part of that build workflow.
+
+The current single-variable hypothesis is WCN6855 stabilization time. The
+historical helper held the WCN rails and waited 6000 ms before rescanning PCI,
+whereas native pwrseq uses short WCN6855 delays and reaches MHI in under one
+second. First instrument the native 7.2+ timing and MHI state, then test one
+WCN6855-only post-enable delay without changing PCI ordering, USB code or the
+stable default boot entry. Do not apply a generic Qualcomm PCI reset patch:
+the native ath11k probe already performs the endpoint global/MHI reset path.
+
+Before any future candidate can be transferred or installed, require:
 
 ```bash
-sudo -n kernel/build-linux-7.2-wifi-pwrctrl-diagnostic.sh
-sudo -n kernel/verify-linux-7.2-x1407qa.sh \
-  /var/lib/x1407qa-kernel-7.2-wifi-pwrctrl-diag/artifacts \
-  7.2.0-x1407qa-wifi-pwrctrl-diag
+kernel/verify-linux-usb-config-preservation.sh \
+  /boot/config-7.2.0-x1407qa \
+  /path/to/candidate.config
+X1407QA_REFERENCE_CONFIG=/boot/config-7.2.0-x1407qa \
+  kernel/verify-linux-7.2-x1407qa.sh /path/to/artifacts candidate-release
 ```
 
-Install it under its own kernel release and BLS ID, keep
-`saved_entry=x1407qa-7.2.0-x1407qa`, and set only
-`next_entry=x1407qa-7.2-wifi-pwrctrl-diag`. After reboot, wait at least 60
-seconds and inspect:
-
-```bash
-uname -r
-ip -br link
-lspci -nnk -s 0004:01:00.0
-sudo journalctl -b -k --no-pager -o short-monotonic |
-  rg -i 'X1407QA Wi-Fi diagnostic|pcie|17cb:1103|ath11k|mhi|pwrseq|wcn'
-```
-
-Interpretation:
-
-- If the candidate reaches MHI Mission mode and exposes a Wi-Fi interface,
-  PERST#/WCN power ordering is confirmed as the regression mechanism. Convert
-  the diagnostic change into a narrowly reviewed correction; do not revive the
-  legacy rail-hold module as a permanent fix.
-- If the candidate still produces `failed to power up mhi: -110`, this ordering
-  hypothesis is falsified. Restore the stable 7.2 boot and investigate the next
-  endpoint reset/power boundary without stacking another change.
-- A missing custom DKMS helper in the diagnostic release is not a Wi-Fi result.
-  Judge only the diagnostic marker, PCI endpoint, MHI state, ath11k binding and
-  network interface after at least 60 seconds.
+The next research task is to compare the WCN6855 endpoint reset/power timing
+and MHI state transition in current upstream Qualcomm PCIe/pwrseq code, then
+propose one new Linux 7.2+ diagnostic. Obtain the remote SSH host/alias and
+available build environment from the user before creating or transferring a
+remote worktree.
 
 ## Useful evidence commands
 
@@ -270,7 +304,7 @@ modinfo wcn_regulator_fix 2>/dev/null
 # Boot configuration
 sudo grub2-editenv - list
 sudo sed -n '1,120p' /boot/loader/entries/x1407qa-7.2.0-x1407qa.conf
-sudo sed -n '1,120p' /boot/loader/entries/x1407qa-7.2-wifi-pwrctrl-diag.conf
+sudo sed -n '1,120p' /boot/loader/entries-disabled/x1407qa-7.2-wifi-pwrctrl-diag.conf
 
 # DTB identity
 sha256sum x1p42100-asus-zenbook-a14-wifi-fix.dtb \
