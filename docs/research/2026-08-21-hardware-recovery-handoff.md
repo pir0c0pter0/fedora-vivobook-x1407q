@@ -12,7 +12,7 @@ work on the ASUS Vivobook X1407QA. Read it together with:
 - Repository: `/home/mariostjr/repositorios/fedora-vivobook-x1407q`
 - Worktree: `/home/mariostjr/repositorios/fedora-vivobook-x1407q/.worktrees/hardware-recovery`
 - Branch: `hardware-recovery`
-- Last implementation commit before this handoff: `e9bc4e1 fix: validate post-reboot stable hardware`
+- Baseline commit before the WCN6855-delay candidate: `05b12f5 fix: preserve USB tethering in kernel diagnostics`
 - Earlier checkpoint: `5945ee9 docs: checkpoint live hardware recovery`
 - Tasks 1 through 6 of the recovery plan have been implemented and committed.
 - The repository worktree was clean before this handoff was written.
@@ -251,25 +251,68 @@ diagnostic artifacts.
 
 ## Exact next step
 
-Keep the laptop on `7.2.0-x1407qa` with working USB tethering. Do not repeat the
-old-kernel boot and do not boot the rejected PERST-before-power candidate.
+A new single-variable candidate has been built locally, verified, reviewed and
+installed, but has not been booted yet:
 
-Continue the Wi-Fi investigation at the next endpoint reset/power boundary,
-starting from pristine Linux 7.2 or newer and changing one WCN-specific
-variable at a time. Do not stack another change on the falsified diagnostic
-patch. Compile candidates on the user's stronger remote PC over SSH; transfer
-only source, config, patch and verified artifacts. Never use USB storage or
-alter USB configuration as part of that build workflow.
+```text
+release: 7.2.0-x1407qa-wifi-wcn6855-delay-diag
+BLS id: x1407qa-7.2-wifi-wcn6855-delay-diag
+saved_entry: x1407qa-7.2.0-x1407qa
+next_entry: x1407qa-7.2-wifi-wcn6855-delay-diag
+```
 
-The current single-variable hypothesis is WCN6855 stabilization time. The
-historical helper held the WCN rails and waited 6000 ms before rescanning PCI,
-whereas native pwrseq uses short WCN6855 delays and reaches MHI in under one
-second. First instrument the native 7.2+ timing and MHI state, then test one
-WCN6855-only post-enable delay without changing PCI ordering, USB code or the
-stable default boot entry. Do not apply a generic Qualcomm PCI reset patch:
-the native ath11k probe already performs the endpoint global/MHI reset path.
+The patch starts from pristine Linux 7.2 and changes only the WCN6855 native
+power-sequencing stabilization delay from 50 ms to 6000 ms. It does not include
+the rejected PERST patch and does not change PCI, ath11k, DTB or USB code. The
+runtime marker is:
 
-Before any future candidate can be transferred or installed, require:
+```text
+X1407QA Wi-Fi diagnostic: WCN6855 stabilization delay 6000 ms
+```
+
+The candidate inherited the exact stable config. Its config and complete
+artifact manifest passed both fail-closed verifiers. `rndis_host.ko` is present,
+valid and has the candidate release in its vermagic. The candidate DTB is
+byte-identical to the stable DTB. Its initramfs was inspected before publication
+and contains `rndis_host`, `cdc_ether`, `usbnet`, native `pwrseq_qcom_wcn`, the
+required core input/backlight/hotkey modules and required remoteproc firmware.
+The initramfs WCN module is byte-identical to the installed candidate module and
+contains the marker. The legacy `wcn_regulator_fix` is absent.
+
+USB tethering is a permanent survival dependency. Never reset, unload, rebind
+or reconfigure USB, Type-C, UCSI, `rndis_host`, `cdc_ether`, `usbnet` or the live
+`enu1` interface during Wi-Fi work. Do not use USB storage for kernel transfer.
+The candidate was published without touching the running USB stack; `enu1`
+remained up at `10.202.21.163/24`.
+
+The exact next action is one normal reboot. GRUB will select the candidate only
+once and retain Linux `7.2.0-x1407qa` as its saved default. If the candidate has
+no connectivity, do not manipulate USB: reboot once more and GRUB should return
+to the stable kernel automatically. The failed boot's journal will persist for
+collection from the stable boot.
+
+After the candidate boots, first record the release and connectivity without
+resetting any device:
+
+```bash
+uname -r
+ip -brief address
+nmcli device status
+sudo journalctl -b -k --no-pager -o short-monotonic | \
+  rg 'X1407QA Wi-Fi diagnostic|ath11k|mhi0|0004:01:00.0|pwrseq'
+lspci -nnk -s 0004:01:00.0
+```
+
+There is currently no saved Wi-Fi NetworkManager profile. If a Wi-Fi interface
+appears, select the network once in the Fedora desktop; do not put credentials
+in this repository. `sshd` is installed, enabled, active and listening on port
+22, so after association the stronger PC can connect to the laptop's Wi-Fi IP
+as user `mariostjr`. Future builds can then move to that stronger PC over SSH.
+
+Do not declare Wi-Fi fixed merely because the interface appears. Confirm that
+the endpoint binds to `ath11k_pci`, MHI reaches Mission mode, NetworkManager
+shows an activated Wi-Fi connection and the full post-reboot audit reaches 16
+passes. Before any later candidate is installed, continue to require:
 
 ```bash
 kernel/verify-linux-usb-config-preservation.sh \
@@ -279,11 +322,10 @@ X1407QA_REFERENCE_CONFIG=/boot/config-7.2.0-x1407qa \
   kernel/verify-linux-7.2-x1407qa.sh /path/to/artifacts candidate-release
 ```
 
-The next research task is to compare the WCN6855 endpoint reset/power timing
-and MHI state transition in current upstream Qualcomm PCIe/pwrseq code, then
-propose one new Linux 7.2+ diagnostic. Obtain the remote SSH host/alias and
-available build environment from the user before creating or transferring a
-remote worktree.
+If the 6000 ms candidate still times out at MHI, collect its complete kernel
+journal before proposing the next single-variable Linux 7.2-or-newer
+diagnostic. Do not test an older kernel and do not reuse either rejected
+candidate.
 
 ## Useful evidence commands
 

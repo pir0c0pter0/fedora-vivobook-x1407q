@@ -1,0 +1,43 @@
+From: X1407QA hardware recovery <local@x1407qa.invalid>
+Subject: [PATCH] pwrseq: qcom: diagnose WCN6855 stabilization delay
+
+The native WCN6855 sequence waits 50 ms after target enablement. The
+historical X1407QA recovery path held the WCN rails for about 6000 ms
+before PCI enumeration and reached MHI Mission mode.
+
+Change only the WCN6855 power-up delay to 6000 ms and emit a diagnostic
+marker when that delay is used. Leave GPIO timing, PCI ordering, ath11k,
+DT and USB untouched.
+
+This is a machine-specific diagnostic patch, not a proposed upstream fix.
+---
+ drivers/power/sequencing/pwrseq-qcom-wcn.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/power/sequencing/pwrseq-qcom-wcn.c b/drivers/power/sequencing/pwrseq-qcom-wcn.c
+index d41793e1fcd9..f8c2c579988a 100644
+--- a/drivers/power/sequencing/pwrseq-qcom-wcn.c
++++ b/drivers/power/sequencing/pwrseq-qcom-wcn.c
+@@ -235,8 +235,11 @@ static int pwrseq_qcom_wcn_pwup_delay(struct pwrseq_device *pwrseq)
+ {
+ 	struct pwrseq_qcom_wcn_ctx *ctx = pwrseq_device_get_drvdata(pwrseq);
+ 
+-	if (ctx->pdata->pwup_delay_ms)
++	if (ctx->pdata->pwup_delay_ms) {
++		if (ctx->pdata->pwup_delay_ms == 6000)
++			pr_info("X1407QA Wi-Fi diagnostic: WCN6855 stabilization delay 6000 ms\n");
+ 		msleep(ctx->pdata->pwup_delay_ms);
++	}
+ 
+ 	return 0;
+ }
+@@ -379,6 +382,6 @@ static const struct pwrseq_qcom_wcn_pdata pwrseq_wcn6855_of_data = {
+ 	.vregs = pwrseq_wcn6855_vregs,
+ 	.num_vregs = ARRAY_SIZE(pwrseq_wcn6855_vregs),
+-	.pwup_delay_ms = 50,
++	.pwup_delay_ms = 6000,
+ 	.gpio_enable_delay_ms = 5,
+ 	.targets = pwrseq_qcom_wcn6855_targets,
+ };
+-- 
+2.53.0
