@@ -80,8 +80,49 @@ Current normal boot:
 kernel: 7.2.0-x1407qa
 saved GRUB entry: x1407qa-7.2.0-x1407qa
 kernel argument: rd.driver.pre=pwrseq_qcom_wcn
-legacy wcn_regulator_fix: not loaded and omitted from the current initramfs
+legacy wcn_regulator_fix: DKMS version 1.0 installed; not loaded and omitted from the current initramfs
 ```
+
+### Installed legacy DKMS package
+
+The installed package is `wcn-regulator-fix/1.0` for AArch64. Its source is
+`/usr/src/wcn-regulator-fix-1.0`, whose `dkms.conf` declares
+`PACKAGE_VERSION="1.0"`. A fresh `dkms status wcn-regulator-fix/1.0` and
+`modinfo -k <release> wcn_regulator_fix` check found these installed artifacts:
+
+| Kernel release | Installed module SHA-256 | Vermagic matches release |
+|---|---|---|
+| `7.2.0-x1407qa` | `27f7ab8cea440d4d52f88ec4020d7a1109d6596a5e6e9b748d23a5971c7802ee` | yes |
+| `7.2.0-x1407qa-wifi-pwrctrl-diag` | `2fd539f834a8f7556e4ba1f34166d1b1ab210cd6f93b61ea660816fbfc1b5b0f` | yes |
+| `7.2.0-x1407qa-wifi-wcn6855-delay-diag` | `7a6c6df3aac976da2ca2854036d5337bee8bb85a4deebe51209ab1c024a13831` | yes |
+
+For the running kernel, the artifact resolves to
+`/lib/modules/7.2.0-x1407qa/extra/wcn_regulator_fix.ko`. `lsmod` confirms that
+it is not loaded, and the installed initramfs for all three releases does not
+contain it. The normal boot uses `pwrseq_qcom_wcn`. Installed therefore means
+the legacy module is available on disk, not active in the current boot.
+
+The three kernel releases have all been boot-tested, with these distinct
+results:
+
+| Kernel release | What the boot proved | Result |
+|---|---|---|
+| `7.2.0-x1407qa` | Native WCN sequencing, stable USB tethering and the approved hardware baseline | Current audit: 15 of 16 components pass; Wi-Fi alone fails because MHI never reaches SBL or Mission mode and returns `-110` |
+| `7.2.0-x1407qa-wifi-pwrctrl-diag` | The PERST-before-WCN-power ordering change ran, trained Gen3 x1 and enumerated `17cb:1103` | Wi-Fi still failed at MHI with `-110`; this build also lost `CONFIG_USB_NET_RNDIS_HOST=m` and must not be reused |
+| `7.2.0-x1407qa-wifi-wcn6855-delay-diag` | The 6000 ms WCN6855 delay marker ran; PCIe enumeration and USB tethering succeeded | Wi-Fi still failed at the same MHI boundary with `-110`; audit reported 14 passes because the optional RGB camera module was unavailable and intentionally not tested |
+
+Repository validation was repeated on the stable `7.2.0-x1407qa` boot after
+returning from the diagnostic kernel:
+
+- all 17 Linux shell tests passed, including the WCN supply contract, DKMS
+  namespace preflight, core-module build and matching vermagic checks;
+- all 50 tracked shell scripts passed `bash -n` syntax validation;
+- the live post-reboot hardware audit reported 15 passes and one Wi-Fi failure;
+- the nine Windows PowerShell tests were not executed on this Fedora system
+  because `pwsh` is not installed.
+
+These results validate the installed package, build contracts and tested boot
+boundaries. They do not claim that `wcn_regulator_fix` fixed Wi-Fi on Linux 7.2.
 
 The installed custom DTB is:
 
