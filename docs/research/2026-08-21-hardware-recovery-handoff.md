@@ -13,6 +13,7 @@ work on the ASUS Vivobook X1407QA. Read it together with:
 - Worktree: `/home/mariostjr/repositorios/fedora-vivobook-x1407q/.worktrees/hardware-recovery`
 - Branch: `hardware-recovery`
 - Baseline commit before the WCN6855-delay candidate: `05b12f5 fix: preserve USB tethering in kernel diagnostics`
+- WCN6855-delay candidate implementation: `f6f4427 feat: add WCN6855 delay diagnostic`
 - Earlier checkpoint: `5945ee9 docs: checkpoint live hardware recovery`
 - Tasks 1 through 6 of the recovery plan have been implemented and committed.
 - The repository worktree was clean before this handoff was written.
@@ -249,70 +250,152 @@ drift, a changed Qualcomm USB3/DP combo PHY, or a missing, corrupt,
 wrong-release or unmanifested RNDIS module. Do not reuse the already-built
 diagnostic artifacts.
 
-## Exact next step
+## Falsified lead: WCN6855 6000 ms stabilization delay
 
-A new single-variable candidate has been built locally, verified, reviewed and
-installed, but has not been booted yet:
+Commit `f6f4427888f51c387e5eb748fb661c3746456aeb` added and documented a
+second Linux 7.2 diagnostic. It was built locally because Wi-Fi was unavailable
+for SSH to the stronger PC. The source patch starts from the protected pristine
+Linux 7.2 tarball and changes only
+`drivers/power/sequencing/pwrseq-qcom-wcn.c`: WCN6855 `pwup_delay_ms` from
+50 ms to 6000 ms plus a runtime marker. It does not contain the rejected PERST
+change and does not alter PCI, ath11k, DTB or USB source.
 
 ```text
 release: 7.2.0-x1407qa-wifi-wcn6855-delay-diag
 BLS id: x1407qa-7.2-wifi-wcn6855-delay-diag
-saved_entry: x1407qa-7.2.0-x1407qa
-next_entry: x1407qa-7.2-wifi-wcn6855-delay-diag
+patch SHA-256: 3b33bf00c951a340b0c1d85f6839f42d343dc23372c8052541304d8445e5f769
+runtime marker: X1407QA Wi-Fi diagnostic: WCN6855 stabilization delay 6000 ms
 ```
 
-The patch starts from pristine Linux 7.2 and changes only the WCN6855 native
-power-sequencing stabilization delay from 50 ms to 6000 ms. It does not include
-the rejected PERST patch and does not change PCI, ath11k, DTB or USB code. The
-runtime marker is:
+Pre-boot validation completed:
+
+- the patch applied to pristine Linux 7.2 with `--fuzz=0` and its embedded blob
+  hashes were canonicalized against that source;
+- the builder inherited `/boot/config-7.2.0-x1407qa`; both USB fail-closed
+  guards and the complete artifact-manifest verifier passed;
+- `rndis_host.ko` was valid, manifested and had the candidate vermagic;
+- the candidate DTB was byte-identical to the stable DTB;
+- the initramfs contained `pwrseq_qcom_wcn`, `rndis_host`, `cdc_ether`,
+  `usbnet`, keyboard/backlight/hotkey modules and required remoteproc firmware;
+- the initramfs WCN module was byte-identical to the installed candidate module,
+  contained the marker and did not contain `wcn_regulator_fix`;
+- all 17 repository tests and all 50 shell syntax checks passed;
+- an independent review found no critical or important issue.
+
+Important build confounder: the candidate inherited the stable Kconfig input,
+but `olddefconfig` ran with the local Fedora GCC 16.1/binutils 2.46 toolchain.
+The stable kernel had been built with Ubuntu GCC 13.3/binutils 2.42. The final
+configs therefore differ by 22 compiler/tool capability lines, including RELR,
+LSUI and compiler-version metadata. The protected USB/Type-C config did not
+drift, but this was not a perfectly toolchain-identical binary A/B test. Future
+A/B diagnostics must pin one toolchain for both baseline and candidate.
+
+Installed artifact identities:
 
 ```text
-X1407QA Wi-Fi diagnostic: WCN6855 stabilization delay 6000 ms
+vmlinuz:  4b519fc417da4bce8a709ba388c13e4a2192e3f5399f496613c6f8eec072bf77
+config:   d845bf5b0f47b9e073ed91bf3a7f5126e68e2470e4130125c35898242e2aa2c9
+initramfs: 76a68212cd725a469e1b85784cba3345a8561042561fcbab70a95925821ff73a
+DTB:      95f7bb2840c7ce831661056c116f8cd9b692cd94b035f8cdde775cc4a976d90a
+pwrseq:   95b7b4a2e87f38d13e28bbf45d7548e31806a13b7962bf4469d475ab37043eee
+rndis:    cdf55fd9fa94d444eca955b20dcbb764054c058099794359e35ccbebbf597663
 ```
 
-The candidate inherited the exact stable config. Its config and complete
-artifact manifest passed both fail-closed verifiers. `rndis_host.ko` is present,
-valid and has the candidate release in its vermagic. The candidate DTB is
-byte-identical to the stable DTB. Its initramfs was inspected before publication
-and contains `rndis_host`, `cdc_ether`, `usbnet`, native `pwrseq_qcom_wcn`, the
-required core input/backlight/hotkey modules and required remoteproc firmware.
-The initramfs WCN module is byte-identical to the installed candidate module and
-contains the marker. The legacy `wcn_regulator_fix` is absent.
+The one-shot boot succeeded as boot ID
+`79383b4c-e180-4bac-a78f-fca53a5923ba`. The marker proves that the intended
+delay ran before PCI enumeration. Wi-Fi still failed at exactly the established
+MHI boundary:
 
-USB tethering is a permanent survival dependency. Never reset, unload, rebind
-or reconfigure USB, Type-C, UCSI, `rndis_host`, `cdc_ether`, `usbnet` or the live
-`enu1` interface during Wi-Fi work. Do not use USB storage for kernel transfer.
-The candidate was published without touching the running USB stack; `enu1`
-remained up at `10.202.21.163/24`.
+```text
+ 7.680 X1407QA Wi-Fi diagnostic: WCN6855 stabilization delay 6000 ms
+14.100 PCIe Gen.3 x1 link up
+14.102 endpoint 17cb:1103 enumerated
+14.260 ath11k_pci: enabling device; 32 MSI vectors; wcn6855 hw2.1
+14.424 mhi mhi0: Requested to power ON
+14.424 mhi mhi0: Power on setup success
+14.502 mhi mhi0: Wait for device to enter SBL or Mission mode
+35.812 ath11k_pci: failed to power up mhi: -110
+36.004 ath11k_pci probe failed with error -110
+```
 
-The exact next action is one normal reboot. GRUB will select the candidate only
-once and retain Linux `7.2.0-x1407qa` as its saved default. If the candidate has
-no connectivity, do not manipulate USB: reboot once more and GRUB should return
-to the stable kernel automatically. The failed boot's journal will persist for
-collection from the stable boot.
+Compared with the immediately preceding stable boot, the delay shifted PCIe
+link-up and all later events by about 6.3 seconds but did not change the MHI
+transition or failure duration:
 
-After the candidate boots, first record the release and connectivity without
-resetting any device:
+| Boundary | Stable 7.2 | 6000 ms candidate |
+|---|---:|---:|
+| PCIe Gen3 x1 link | 7.770 s | 14.100 s |
+| MHI setup success | 8.012 s | 14.424 s |
+| wait for SBL/Mission | 8.112 s | 14.502 s |
+| MHI `-110` | 29.672 s | 35.812 s |
+
+The endpoint remains present in D0 but is unbound, `enable=0`; NetworkManager
+reports Wi-Fi hardware as missing and `/sys/class/net` contains only `lo` and
+USB tethering `enu1`. This strongly rejects stabilization time as the missing
+condition: the endpoint still never enters SBL or Mission mode. Do not increase
+the delay, stack another patch on this candidate or boot it again.
+
+USB preservation succeeded. In the candidate boot the phone re-enumerated,
+`rndis_host` registered normally at 109.016 seconds, renamed `usb0` to `enu1`,
+and NetworkManager activated it at `10.202.21.72/24`. The loaded `rndis_host`,
+`cdc_ether` and `usbnet` modules all match the candidate release. Never reset,
+unload, rebind or reconfigure any of them during Wi-Fi work.
+
+The candidate audit reports Wi-Fi failed and 14 passes. RGB camera also reports
+failed only because the optional `vivobook_cam_fix.ko` could not be compiled for
+this diagnostic output tree; camera was intentionally not enabled or tested.
+The stable release still owns its camera module. This packaging limitation is
+not evidence about the Wi-Fi failure.
+
+At 52 seconds, after the Wi-Fi probe had already failed, `dkms.service`
+automatically built and installed `wcn_regulator_fix.ko` into the candidate's
+`extra/` directory. It is not loaded and is absent from the published initramfs,
+so it could not cause this boot's timeout. Do not load it. Future diagnostic
+installations should prevent this DKMS autoinstall to keep the installed module
+tree as clean as the initramfs.
+
+## Exact next step
+
+The laptop is currently running the rejected delay candidate only to preserve
+this diagnostic session. GRUB state is already safe:
+
+```text
+saved_entry=x1407qa-7.2.0-x1407qa
+next_entry=
+```
+
+Reboot once normally. It will return to stable Linux `7.2.0-x1407qa`; do not
+select either Wi-Fi diagnostic manually. After the stable boot, verify only
+read-only state:
 
 ```bash
 uname -r
-ip -brief address
-nmcli device status
-sudo journalctl -b -k --no-pager -o short-monotonic | \
-  rg 'X1407QA Wi-Fi diagnostic|ath11k|mhi0|0004:01:00.0|pwrseq'
-lspci -nnk -s 0004:01:00.0
+ip -brief address show enu1
+sudo grub2-editenv - list
+bash tools/audit-stable-hardware.sh --post-reboot
 ```
 
-There is currently no saved Wi-Fi NetworkManager profile. If a Wi-Fi interface
-appears, select the network once in the Fedora desktop; do not put credentials
-in this repository. `sshd` is installed, enabled, active and listening on port
-22, so after association the stronger PC can connect to the laptop's Wi-Fi IP
-as user `mariostjr`. Future builds can then move to that stronger PC over SSH.
+Expected stable result is USB tethering restored/working, RGB camera module
+available and 15 of 16 audit items passing, with Wi-Fi as the only failure.
+Do not test an older kernel: all further work is Linux 7.2 or newer.
 
-Do not declare Wi-Fi fixed merely because the interface appears. Confirm that
-the endpoint binds to `ath11k_pci`, MHI reaches Mission mode, NetworkManager
-shows an activated Wi-Fi connection and the full post-reboot audit reaches 16
-passes. Before any later candidate is installed, continue to require:
+The full repository test suite passed before this diagnostic boot. While the
+candidate is active, 16 tests pass and
+`tests/test-stable-hardware-recovery.sh` intentionally fails because the
+recovery runner accepts only the stable release. This is an environment gate,
+not a newly observed source failure. Rerun all 17 tests after returning to the
+stable kernel.
+
+The next research boundary is inside the WCN6855/MHI device transition after
+host power-on succeeds, not PCI enumeration, PERST ordering, regulator hold
+time, NetworkManager, board data or calibration selection. Start the next clean
+session by instrumenting the MHI execution-environment/state transition and
+endpoint reset state at the existing timeout, without issuing a live reset.
+Compare a baseline and one diagnostic built with the same pinned toolchain.
+Change only one WCN6855/MHI variable at a time and preserve the stable config,
+DTB, default entry and USB fail-closed checks.
+
+Before any later candidate is installed, require:
 
 ```bash
 kernel/verify-linux-usb-config-preservation.sh \
@@ -322,10 +405,8 @@ X1407QA_REFERENCE_CONFIG=/boot/config-7.2.0-x1407qa \
   kernel/verify-linux-7.2-x1407qa.sh /path/to/artifacts candidate-release
 ```
 
-If the 6000 ms candidate still times out at MHI, collect its complete kernel
-journal before proposing the next single-variable Linux 7.2-or-newer
-diagnostic. Do not test an older kernel and do not reuse either rejected
-candidate.
+Wi-Fi is still unavailable, so SSH to the stronger PC cannot yet be the build
+path. Do not use USB storage or modify USB networking to transfer a build.
 
 ## Useful evidence commands
 
