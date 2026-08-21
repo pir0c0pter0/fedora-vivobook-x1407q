@@ -95,8 +95,26 @@ marker_line=$(rg -n 'X1407QA Wi-Fi diagnostic: PERST# deasserted before WCN powe
 power_line=$(rg -n '^\s*ret = pci_pwrctrl_power_on_devices\(pci->dev\);' "$target" | cut -d: -f1)
 post_init_line=$(rg -n '^\s*if \(pcie->cfg->ops->post_init\)' "$target" | cut -d: -f1)
 
-[[ $post_init_line -lt $perst_line && $perst_line -lt $marker_line && $marker_line -lt $power_line ]] || {
+[[ $post_init_line -lt $perst_line && $perst_line -lt $power_line && $power_line -lt $marker_line ]] || {
     echo 'diagnostic patch did not isolate PERST-before-WCN-power ordering' >&2
+    exit 1
+}
+
+power_failure_block=$(awk '
+    /ret = pci_pwrctrl_power_on_devices\(pci->dev\);/ { capture = 1 }
+    capture { print }
+    capture && /goto err_pwrctrl_destroy;/ { exit }
+' "$target")
+grep -qF 'qcom_pcie_perst_assert(pcie);' <<< "$power_failure_block" || {
+    echo 'diagnostic power-on failure does not reassert PERST#' >&2
+    exit 1
+}
+grep -qF 'goto err_pwrctrl_destroy;' <<< "$power_failure_block" || {
+    echo 'diagnostic power-on failure does not bypass duplicate power-off' >&2
+    exit 1
+}
+! grep -qF 'goto err_assert_reset;' <<< "$power_failure_block" || {
+    echo 'diagnostic power-on failure still enters duplicate power-off cleanup' >&2
     exit 1
 }
 
@@ -106,12 +124,18 @@ if "$apply_script" "$source_root" >/dev/null 2>&1; then
 fi
 
 wrong_root=$test_root/linux-7.1
-mkdir -p "$wrong_root"
+mkdir -p "$(dirname "$wrong_root/drivers/pci/controller/dwc/pcie-qcom.c")"
 printf '%s\n' 'VERSION = 7' 'PATCHLEVEL = 1' 'SUBLEVEL = 0' > "$wrong_root/Makefile"
-if "$apply_script" "$wrong_root" >/dev/null 2>&1; then
+cp "$target" "$wrong_root/drivers/pci/controller/dwc/pcie-qcom.c"
+wrong_version_output=$test_root/wrong-version-output
+if "$apply_script" "$wrong_root" >"$wrong_version_output" 2>&1; then
     echo 'diagnostic patch applicator accepted a non-7.2 source tree' >&2
     exit 1
 fi
+grep -qF 'requires pristine Linux 7.2.0 sources' "$wrong_version_output" || {
+    echo 'non-7.2 source tree was rejected for the wrong reason' >&2
+    exit 1
+}
 
 fake_repo=$test_root/fake-repo
 mkdir -p "$fake_repo/kernel"
@@ -139,5 +163,44 @@ grep -qxF 'localversion=-x1407qa-wifi-pwrctrl-diag' <<< "$wrapper_output"
 grep -qxF "patch=$fake_repo/kernel/linux-7.2-wifi-pwrctrl-order.patch" <<< "$wrapper_output"
 grep -qxF 'work=/build/diag' <<< "$wrapper_output"
 grep -qxF 'artifacts=/output/diag' <<< "$wrapper_output"
+
+verify_fixture=$test_root/verify-fixture
+verify_version=7.2.0-x1407qa-wifi-pwrctrl-diag
+mkdir -p "$verify_fixture/boot/dtb/qcom" "$verify_fixture/lib/modules/$verify_version" "$test_root/bin"
+printf 'ARM64 image\nLinux version %s test\n%s\n' \
+    "$verify_version" \
+    'X1407QA Wi-Fi diagnostic: PERST# deasserted before WCN power-on' \
+    > "$verify_fixture/boot/vmlinuz-$verify_version"
+: > "$verify_fixture/lib/modules/$verify_version/modules.dep"
+printf 'module dependency\n' > "$verify_fixture/lib/modules/$verify_version/modules.dep"
+printf 'diagnostic dtb\n' > "$verify_fixture/boot/dtb/qcom/x1p42100-asus-zenbook-a14.dtb"
+printf '%s\n' \
+    'CONFIG_ISO9660_FS=y' \
+    'CONFIG_JOLIET=y' \
+    'CONFIG_EROFS_FS=y' \
+    'CONFIG_EROFS_FS_ZIP=y' \
+    'CONFIG_DM_SNAPSHOT=m' \
+    'CONFIG_QCOM_Q6V5_PAS=m' \
+    'CONFIG_QCOM_Q6V5_ADSP=m' \
+    'CONFIG_QCOM_PMIC_GLINK=m' \
+    'CONFIG_BATTERY_QCOM_BATTMGR=m' \
+    > "$verify_fixture/boot/config-$verify_version"
+(cd "$verify_fixture" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+cat > "$test_root/bin/file" <<'EOF'
+#!/usr/bin/env bash
+printf '%s: Linux kernel ARM64 boot executable Image\n' "$1"
+EOF
+chmod +x "$test_root/bin/file"
+
+PATH="$test_root/bin:$PATH" \
+    "$root/kernel/verify-linux-7.2-x1407qa.sh" "$verify_fixture" "$verify_version" >/dev/null
+
+sed -i '/X1407QA Wi-Fi diagnostic:/d' "$verify_fixture/boot/vmlinuz-$verify_version"
+(cd "$verify_fixture" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+if PATH="$test_root/bin:$PATH" \
+    "$root/kernel/verify-linux-7.2-x1407qa.sh" "$verify_fixture" "$verify_version" >/dev/null 2>&1; then
+    echo 'diagnostic verifier accepted an Image without the diagnostic marker' >&2
+    exit 1
+fi
 
 echo 'PASS: Linux 7.2 Wi-Fi diagnostic build isolates PERST-before-power ordering'

@@ -8,7 +8,7 @@ foreach ($path in $build, $verify) {
 }
 
 $buildText = Get-Content -Raw -LiteralPath $build
-foreach ($token in 'aarch64','linux-7.2.tar.xz','f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3','LOCALVERSION=-x1407qa','olddefconfig','Image','dtbs','modules_install','INSTALL_MOD_PATH','! -name SHA256SUMS','CONFIG_BATTERY_QCOM_BATTMGR','CONFIG_ARM_SCMI_CPUFREQ','CONFIG_ISO9660_FS=y','CONFIG_JOLIET=y','CONFIG_EROFS_FS=y','CONFIG_EROFS_FS_ZIP=y','CONFIG_DM_SNAPSHOT=m','grep -qxF') {
+foreach ($token in 'aarch64','linux-7.2.tar.xz','f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3','X1407QA_LOCALVERSION','LOCALVERSION="$LOCALVERSION"','olddefconfig','Image','dtbs','modules_install','INSTALL_MOD_PATH','! -name SHA256SUMS','CONFIG_BATTERY_QCOM_BATTMGR','CONFIG_ARM_SCMI_CPUFREQ','CONFIG_ISO9660_FS=y','CONFIG_JOLIET=y','CONFIG_EROFS_FS=y','CONFIG_EROFS_FS_ZIP=y','CONFIG_DM_SNAPSHOT=m','grep -qxF') {
     if ($buildText -notmatch [regex]::Escape($token)) { throw "Kernel builder missing required behavior: $token" }
 }
 

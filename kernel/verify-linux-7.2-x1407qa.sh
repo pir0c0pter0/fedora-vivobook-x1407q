@@ -10,6 +10,18 @@ CONFIG=$ARTIFACT_ROOT/boot/config-$VERSION
 
 [[ -s $IMAGE ]] || { echo 'ERROR: kernel Image missing' >&2; exit 1; }
 file "$IMAGE" | grep -Eq 'ARM64|ARM aarch64' || { file "$IMAGE" >&2; exit 1; }
+LC_ALL=C grep -aFq "Linux version $VERSION " "$IMAGE" || {
+    echo "ERROR: kernel Image release does not match $VERSION" >&2
+    exit 1
+}
+if [[ $VERSION == 7.2.0-x1407qa-wifi-pwrctrl-diag ]]; then
+    LC_ALL=C grep -aFq \
+        'X1407QA Wi-Fi diagnostic: PERST# deasserted before WCN power-on' \
+        "$IMAGE" || {
+        echo 'ERROR: diagnostic kernel Image does not contain the pwrctrl marker' >&2
+        exit 1
+    }
+fi
 [[ -s $MODULE_ROOT/modules.dep ]] || { echo 'ERROR: modules.dep missing' >&2; exit 1; }
 [[ -s $DTB ]] || { echo 'ERROR: x1p42100-asus-zenbook-a14 DTB missing' >&2; exit 1; }
 [[ -s $CONFIG ]] || { echo 'ERROR: kernel config missing' >&2; exit 1; }

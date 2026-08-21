@@ -44,7 +44,7 @@ power_line=$(grep -nF $'\t\tret = pci_pwrctrl_power_on_devices(pci->dev);' "$TAR
     echo 'ERROR: patched ordering markers are incomplete' >&2
     exit 1
 }
-[[ $perst_line -lt $marker_line && $marker_line -lt $power_line ]] || {
+[[ $perst_line -lt $power_line && $power_line -lt $marker_line ]] || {
     echo 'ERROR: diagnostic patch did not establish PERST-before-WCN-power ordering' >&2
     exit 1
 }
