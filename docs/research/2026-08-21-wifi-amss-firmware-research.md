@@ -1,8 +1,44 @@
-# Wi-Fi MHI -110 research — amss.bin provenance hypothesis (2026-08-21)
+# Wi-Fi MHI -110 root cause and validated firmware fix (2026-08-21)
 
 Continuation of `docs/research/2026-08-21-hardware-recovery-handoff.md`. Research
 performed on the desktop (repo + Windows DriverStore dump + online sources +
-independent Codex review). No changes were made to the laptop.
+independent Codex review), followed by controlled cold-boot tests on the
+laptop.
+
+## Validated result on the laptop
+
+The root cause is confirmed: the Windows driver package contains two AMSS
+images with the same visible WOS build string, but only `wlanfw20.mbn` is the
+working hw2.1 runtime variant on this machine.
+
+| Candidate installed as `amss.bin` | SHA-256 | Cold-boot result |
+|---|---|---|
+| Windows `wlanfw.mbn` | `27f3d81bc3715192cfc303d527112be0ae73152f367987470e887e166acb4679` | Silent full MHI timeout before SBL/Mission, then `-110` |
+| Stock linux-firmware `SILICONZ_LITE` | `e12b23ddc4b8d2d2a10a651a5d6fdcd00f60fcae884d2cf5dad17627211fcdfd` | Reached Mission mode and reported `chip_id`, then entered `MHI_CB_EE_RDDM` during the board-data phase |
+| Windows `wlanfw20.mbn` | `00756e19aee2b5e6725f5029b7e6abea748caca0f53af5a7662cd32086dde4bd` | Reached Mission mode, completed QMI initialization and created `wlP4p1s0` |
+
+The successful boot (`4e9f7cb9-5017-4c68-ac3d-7268a3d1b223`) used Linux
+`7.2.0-x1407qa`. MHI printed its wait marker at 8.600 s, the firmware reported
+`WLAN.HSP.1.1.c5-00424-...SILICONZ_WOS-1` at 9.253 s, and the interface was
+renamed to `wlP4p1s0` at 9.576 s. NetworkManager scanned visible 2.4/5 GHz
+networks and connected to Wi-Fi. Two regulatory-setting warnings returned
+`-22`, but they did not prevent interface creation, scanning or association.
+
+The other files remained fixed across the AMSS tests and match the same
+DriverStore package:
+
+- `board.bin`: exact `bdwlan_wcn685x_2p1_nfa765a_AS_SA_X14QA.elf`, SHA-256
+  `aea74372b997b7b55c76c786b02f4670922489353923ef7d4a48dc83780f2c86`;
+- `m3.bin`: SHA-256
+  `9be43a8d9dc9454a629d65368df7ccd532d8768a0ac1fd935f57bcd37cbefecd`
+  (`m320.bin` in the package is byte-identical);
+- `regdb.bin`: SHA-256
+  `f3930af4bb8d2e23737a1ba4c68fa297652fd9e256851245f72d0bc660074936`.
+
+Final validation: `tools/audit-stable-hardware.sh --post-reboot` passed all
+16 hardware checks, and all 18 Linux shell tests passed. The validated
+proprietary set is bundled under `firmware/ath11k/WCN6855/hw2.1/` so future
+installs cannot silently restore the wrong AMSS variant.
 
 ## Correction to the handoff's stage model
 
@@ -158,11 +194,9 @@ Outcome interpretation:
   is the A14-proven end-to-end recipe shape. Candidate A (stock) needs zero
   file transfer (the `.xz` is already on the laptop); candidate B must be
   extracted **on the laptop** from its own Windows partition or local
-  DriverStore dump (`qcwlanhsp8380.inf_arm64_*/wlanfw20.mbn`) — do NOT push
-  the proprietary Windows blob to the public git repo. Either candidate
+  DriverStore dump (`qcwlanhsp8380.inf_arm64_*/wlanfw20.mbn`). Either candidate
   discriminates the pre-SBL boundary; run one, and only move to the other if
-  the first fails informatively. Stock linux-firmware files are
-  redistributable and may be moved via this repo if ever missing.
+  the first fails informatively.
 
 ### Refutation checklist — ALL required before discarding the amss hypothesis
 
@@ -194,11 +228,9 @@ interrupt-delivery problem), scan dmesg for SMMU faults, read BHI_EXECENV at
 timeout, and run the deferred-bind test (blacklist `ath11k_pci`, boot,
 `modprobe ath11k_pci` after 60 s) to replicate 6.19's late-rescan condition.
 
-If confirmed, also fix the source: `tools/build-personal-maximal-iso.sh`
-(`install_x1407qa_firmware`) must stop installing `wlanfw.mbn` as `amss.bin`
-(use stock linux-firmware, or `wlanfw20.mbn` if the stock build ever proves
-insufficient on this subsystem), and the same for `m3.bin`/`regdb.bin` once
-tested independently. Keep the Windows `board.bin`.
+The source fix is now the repository firmware bundle: `setup-vivobook.sh`
+stages `firmware/ath11k/WCN6855/hw2.1/`, where `amss.bin` is the validated
+`wlanfw20.mbn` and the other three files are the matching X1407QA set.
 
 Per the handoff's completion condition: after Wi-Fi passes, rerun
 `tools/audit-stable-hardware.sh --post-reboot` (expect 16/16) and the full

@@ -7,7 +7,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 ## Conquistas (19/19)
 
 1. **Boot** — Custom ISO + Zenbook A14 DTB (mesmo die Qualcomm "Purwa")
-2. **WiFi** — DKMS `wcn_regulator_fix` + board.bin (PCIe race condition + regulador)
+2. **WiFi** — `pwrseq_qcom_wcn` nativo + `wlanfw20.mbn` como `amss.bin` + board data `NFA765a_AS_SA_X14QA` (corrige MHI `-110` no Linux 7.2)
 3. **Teclado** — DKMS `vivobook_kbd_fix` (bus i2c diferente do Zenbook: b94000:0x3a)
 4. **Bateria** — Firmware ADSP no initramfs (qcom-battmgr falhava no early boot)
 5. **Brilho** — DKMS `vivobook_bl_fix` (PWM via PMIC PMK8550 LPG → DTEST3 → GPIO5)

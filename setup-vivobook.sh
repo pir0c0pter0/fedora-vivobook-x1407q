@@ -673,6 +673,20 @@ check_core_dkms_sources() {
 # ─── Stage do payload bundled (vindo do ISO, em /opt/vivobook-fixes/) ─────────
 # Copia módulos DKMS -> /usr/src e firmware bundled -> /usr/lib/firmware, para o
 # setup ser self-contained quando rodado de /opt/vivobook-fixes/ (Parte 2).
+stage_bundled_firmware() {
+    if [[ -d "${SCRIPT_DIR}/firmware" ]]; then
+        mkdir -p "$FIRMWARE_ROOT" || {
+            err "Falha ao preparar destino do firmware bundled: $FIRMWARE_ROOT"
+            return 1
+        }
+        cp -a "${SCRIPT_DIR}/firmware/." "$FIRMWARE_ROOT/" || {
+            err "Falha ao instalar firmware bundled em: $FIRMWARE_ROOT"
+            return 1
+        }
+        log "  Firmware bundled instalado em ${FIRMWARE_ROOT}/"
+    fi
+}
+
 stage_bundled() {
     if [[ -d "${SCRIPT_DIR}/modules" ]]; then
         local moddir name
@@ -684,10 +698,7 @@ stage_bundled() {
             fi
         done
     fi
-    if [[ -d "${SCRIPT_DIR}/firmware" ]]; then
-        cp -a "${SCRIPT_DIR}/firmware/." /usr/lib/firmware/ 2>/dev/null && \
-            log "  Firmware bundled instalado em /usr/lib/firmware/"
-    fi
+    stage_bundled_firmware
 }
 
 # ─── Firmware runtime / initramfs contract ──────────────────────────────────

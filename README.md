@@ -43,7 +43,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | # | Achievement | Method | Impact |
 |---|------------|--------|--------|
 | 1 | **Booted Fedora** | Custom ISO + Zenbook A14 DTB (same Qualcomm die) | From brick to bootable |
-| 2 | **WiFi: histórico no 6.19; falha atual no 7.2** | O caminho antigo usava `wcn_regulator_fix`; o 7.2 nativo enumera PCI e expira no MHI | Investigação restrita a Linux 7.2+ |
+| 2 | **WiFi working on Linux 7.2** | Native `pwrseq_qcom_wcn` + the hw2.1 `wlanfw20.mbn` variant + X1407QA board data | Fixes the MHI `-110` caused by the wrong signed AMSS variant |
 | 3 | **Keyboard working** | DKMS module `vivobook_kbd_fix` | Different I2C bus/address than Zenbook |
 | 4 | **Battery reporting** | ADSP firmware injected into initramfs | `qcom-battmgr` was failing at early boot |
 | 5 | **Brightness control** | DKMS module `vivobook_bl_fix` | Direct PMIC PWM register manipulation |
@@ -71,7 +71,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **Boot** | :white_check_mark: Working | Fedora 44 via Zenbook A14 DTB |
 | **Boot time** | :white_check_mark: 8s | Was ~2min (see [Boot Time Fix](#8-boot-time-fix)) |
 | **Display** | :white_check_mark: Working | GPU firmware in initramfs (see [GPU Firmware Fix](#7-gpu-firmware-fix)) |
-| **WiFi** | :white_check_mark: Working | DKMS module + board.bin (see [WiFi Fix](#2-wifi-fix)) |
+| **WiFi** | :white_check_mark: Working | Native WCN sequencing + `wlanfw20.mbn` as `amss.bin` + X1407QA board data (see [WiFi Fix](#2-wifi-fix)) |
 | **Bluetooth** | :white_check_mark: Working | FastConnect 6900 UART — out-of-the-box |
 | **Keyboard** | :white_check_mark: Working | DKMS module (see [Keyboard Fix](#3-keyboard-fix)) |
 | **Touchpad** | :white_check_mark: Working | Clickpad — `click-method: areas` for right-click (see [Touchpad Fix](#11-touchpad-right-click-fix)) |
@@ -462,36 +462,46 @@ BOOT_IMAGE=/vmlinuz-6.19.6-300.fc44.aarch64 root=UUID=<your-uuid> ro rootflags=s
 
 ### 2. WiFi Fix
 
-DKMS module `wcn_regulator_fix` + custom `board.bin`.
+Native `pwrseq_qcom_wcn` + the correct WCN6855 hw2.1 firmware set.
 
 **Problem:**
-1. **PCIe race condition** (upstream bug, fix ~6.21): `qcom-pcie` scans before WiFi chip is powered on
-2. **Regulator cleanup**: kernel disables WCN regulators ~30s after boot
-3. **Missing board data**: no `board-2.bin` entry for subsystem `105b:e130`
+Linux 7.2 powered the device, trained PCIe Gen3 x1 and allocated 32 MSI
+vectors, but MHI waited 20 seconds for SBL/Mission mode and failed with `-110`.
 
-**Module** (`/usr/src/wcn-regulator-fix-1.0/`):
-- Holds WCN regulators via consumer API
-- Patches DT with `regulator-always-on`
-- Schedules delayed PCIe bus rescans (device found ~6s after boot)
+**Root cause:**
+The personal ISO had installed Windows `wlanfw.mbn` as `amss.bin`. It is a
+validly signed WOS image, but it is the wrong runtime-selected variant for this
+WCN6855 hw2.1 device. The first 512 KiB were accepted through BHI, but the
+device never executed the image far enough to report an execution-environment
+transition.
 
-**Board data**: fallback `board.bin` from similar WCN6855 variant at `/usr/lib/firmware/ath11k/WCN6855/hw2.1/board.bin`
+**Solution:**
+Install `wlanfw20.mbn` as `amss.bin` together with the exact Windows
+`NFA765a_AS_SA_X14QA` board data. The repository bundles the validated set at
+`firmware/ath11k/WCN6855/hw2.1/`; `setup-vivobook.sh` stages it into
+`/usr/lib/firmware`.
 
 ```bash
-sudo dkms add /usr/src/wcn-regulator-fix-1.0
-sudo dkms build wcn-regulator-fix/1.0
-sudo dkms install wcn-regulator-fix/1.0
-echo "force_drivers+=\" wcn_regulator_fix \"" | sudo tee /etc/dracut.conf.d/wcn-regulator-fix.conf
-echo "wcn_regulator_fix" | sudo tee /etc/modules-load.d/wcn-regulator-fix.conf
-sudo grubby --update-kernel=ALL --args="rd.driver.pre=wcn_regulator_fix"
-sudo dracut --force
+sudo ./setup-vivobook.sh
+sudo poweroff  # wait at least 30 seconds before powering on
 ```
+
+The stock linux-firmware `SILICONZ_LITE` image reached Mission mode but entered
+RDDM while processing the Windows board-data exchange. `wlanfw20.mbn` completed
+initialization, created `wlP4p1s0`, scanned and connected to Wi-Fi. The
+post-reboot hardware audit passed 16/16 checks.
+
+The legacy `wcn_regulator_fix` DKMS package remains available for older kernels
+but is not loaded by the validated Linux 7.2 configuration.
 
 | Property | Value |
 |----------|-------|
 | **Chip** | WCN6855 hw2.1, PCI `17cb:1103` (subsystem `105b:e130`) |
 | **Driver** | `ath11k_pci` |
 | **Interface** | `wlP4p1s0` |
-| **Firmware** | WLAN.HSP.1.1-03125 |
+| **AMSS source** | Windows `wlanfw20.mbn`, SHA-256 `00756e19aee2b5e6725f5029b7e6abea748caca0f53af5a7662cd32086dde4bd` |
+| **Firmware build** | `WLAN.HSP.1.1.c5-00424-QCAHSPSWPL_V1_V2_SILICONZ_WOS-1` |
+| **Board data** | `NFA765a_AS_SA_X14QA`, SHA-256 `aea74372b997b7b55c76c786b02f4670922489353923ef7d4a48dc83780f2c86` |
 
 ### 3. Keyboard Fix
 
@@ -1379,10 +1389,11 @@ All components loaded via DKMS two-phase DT overlay (`vivobook_cam_fix` v2.0):
 
 ### WiFi Calibration
 
-Current WiFi works with a fallback `board.bin` from a similar WCN6855 variant. For optimal performance:
+WiFi now uses the device-specific Windows `NFA765a_AS_SA_X14QA` board data.
+For upstream-friendly packaging:
 
-1. **Extract device-specific board data** from the Windows ath11k driver (subsystem `105b:e130`)
-2. **Create a proper `board-2.bin`** entry for this specific hardware
+1. **Create a proper `board-2.bin`** entry for subsystem `105b:e130`
+2. **Determine redistribution/upstream licensing** for the vendor-derived board data
 
 ### Upstream Audio UCM2
 
@@ -1487,4 +1498,5 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 
 ## License
 
-Scripts are MIT. Qualcomm firmware is proprietary — extract from your own Windows installation.
+Scripts are MIT. Files under `firmware/` are proprietary Qualcomm/ASUS
+firmware and are not covered by the MIT license; see `firmware/README.md`.
