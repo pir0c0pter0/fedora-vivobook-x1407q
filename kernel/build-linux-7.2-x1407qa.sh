@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly VERSION=7.2.0-x1407qa
+readonly VERSION=${X1407QA_KERNEL_VERSION:-7.2.0-x1407qa}
+readonly LOCALVERSION=${X1407QA_LOCALVERSION:--x1407qa}
 readonly EXPECTED_SHA256=f9fef3d14c0df53819026f4be74459835c2a0b0dcbf5b5bbd9ea19f0829402b3
 readonly REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 readonly DEFAULT_TARBALL=$REPO_ROOT/linux-7.2.tar.xz
@@ -13,6 +14,7 @@ ARTIFACT_ROOT=${3:-$WORK_ROOT/artifacts}
 SOURCE_ROOT=$WORK_ROOT/linux-7.2
 BUILD_ROOT=$WORK_ROOT/build
 STAGING_ROOT=$WORK_ROOT/staging
+SOURCE_PATCH=${X1407QA_SOURCE_PATCH:-}
 
 [[ $(uname -m) == aarch64 ]] || { echo 'ERROR: native aarch64 builder required' >&2; exit 1; }
 [[ -r $TARBALL ]] || { echo "ERROR: missing $TARBALL" >&2; exit 1; }
@@ -24,6 +26,18 @@ mkdir -p "$WORK_ROOT"
 rm -rf -- "$SOURCE_ROOT" "$BUILD_ROOT" "$STAGING_ROOT" "$ARTIFACT_ROOT"
 tar -xJf "$TARBALL" -C "$WORK_ROOT"
 mkdir -p "$BUILD_ROOT" "$STAGING_ROOT" "$ARTIFACT_ROOT"
+
+if [[ -n $SOURCE_PATCH ]]; then
+    [[ -f $SOURCE_PATCH && ! -L $SOURCE_PATCH ]] || {
+        echo "ERROR: source patch missing or unsafe: $SOURCE_PATCH" >&2
+        exit 1
+    }
+    patch --batch --forward --fuzz=0 --dry-run -d "$SOURCE_ROOT" -p1 < "$SOURCE_PATCH" >/dev/null || {
+        echo "ERROR: source patch does not apply cleanly: $SOURCE_PATCH" >&2
+        exit 1
+    }
+    patch --batch --forward --fuzz=0 -d "$SOURCE_ROOT" -p1 < "$SOURCE_PATCH" >/dev/null
+fi
 
 make -C "$SOURCE_ROOT" O="$BUILD_ROOT" ARCH=arm64 defconfig
 config="$SOURCE_ROOT/scripts/config --file $BUILD_ROOT/.config"
@@ -54,9 +68,9 @@ for required_config in \
 done
 
 make -C "$SOURCE_ROOT" O="$BUILD_ROOT" ARCH=arm64 \
-    LOCALVERSION=-x1407qa -j"$(nproc)" Image dtbs modules
+    LOCALVERSION="$LOCALVERSION" -j"$(nproc)" Image dtbs modules
 make -C "$SOURCE_ROOT" O="$BUILD_ROOT" ARCH=arm64 \
-    LOCALVERSION=-x1407qa INSTALL_MOD_PATH="$STAGING_ROOT" modules_install
+    LOCALVERSION="$LOCALVERSION" INSTALL_MOD_PATH="$STAGING_ROOT" modules_install
 
 mkdir -p "$ARTIFACT_ROOT/boot/dtb/qcom" "$ARTIFACT_ROOT/lib"
 install -m 0644 "$BUILD_ROOT/arch/arm64/boot/Image" "$ARTIFACT_ROOT/boot/vmlinuz-$VERSION"
@@ -66,5 +80,5 @@ install -m 0644 "$REPO_ROOT/x1p42100-asus-zenbook-a14-wifi-fix.dtb" \
 cp "$BUILD_ROOT/.config" "$ARTIFACT_ROOT/boot/config-$VERSION"
 find "$ARTIFACT_ROOT" -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > "$ARTIFACT_ROOT/SHA256SUMS"
 
-"$REPO_ROOT/kernel/verify-linux-7.2-x1407qa.sh" "$ARTIFACT_ROOT"
+"$REPO_ROOT/kernel/verify-linux-7.2-x1407qa.sh" "$ARTIFACT_ROOT" "$VERSION"
 echo "Linux $VERSION artifacts ready at $ARTIFACT_ROOT"

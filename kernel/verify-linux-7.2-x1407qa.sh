@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly VERSION=7.2.0-x1407qa
-ARTIFACT_ROOT=${1:?usage: verify-linux-7.2-x1407qa.sh ARTIFACT_ROOT}
+ARTIFACT_ROOT=${1:?usage: verify-linux-7.2-x1407qa.sh ARTIFACT_ROOT [VERSION]}
+readonly VERSION=${2:-7.2.0-x1407qa}
 IMAGE=$ARTIFACT_ROOT/boot/vmlinuz-$VERSION
 MODULE_ROOT=$ARTIFACT_ROOT/lib/modules/$VERSION
 DTB=$ARTIFACT_ROOT/boot/dtb/qcom/x1p42100-asus-zenbook-a14.dtb

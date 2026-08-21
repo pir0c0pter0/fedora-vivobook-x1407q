@@ -191,6 +191,13 @@ working on Fedora Linux 6.19 with regulator holding and delayed enumeration,
 while Linux 7.2 consistently reaches PCI enumeration but times out at MHI.
 This is a hypothesis, not yet a confirmed root cause.
 
+The controller-level ordering is the narrower observable difference. Linux 7.2
+calls `pci_pwrctrl_power_on_devices()` in `qcom_pcie_host_init()` while PERST#
+is still asserted, and deasserts PERST# only later. The earlier lifecycle
+released PERST# before the WCN pwrseq consumer powered the endpoint and queued
+a PCI rescan. The next experiment therefore changes only this ordering in a
+separately versioned Linux 7.2 build.
+
 Kernel config difference worth retaining:
 
 ```text
@@ -203,85 +210,46 @@ Kernel config difference worth retaining:
 Both kernels enable `CONFIG_PCI_PWRCTRL`, `CONFIG_PCI_PWRCTRL_PWRSEQ`,
 `CONFIG_POWER_SEQUENCING_QCOM_WCN`, `CONFIG_MHI_BUS` and `CONFIG_ATH11K_PCI`.
 
-## Linux 6.19 diagnostic boot on 2026-08-21
-
-A separate one-shot entry was created without replacing the Linux 7.2 default:
-
-```text
-/boot/loader/entries/x1407qa-6.19-wifi-diagnostic.conf
-```
-
-It uses:
-
-- `/boot/vmlinuz-6.19.10-300.fc44.aarch64`
-- `/boot/initramfs-6.19.10-300.fc44.aarch64.img`
-- the same custom DTB used by Linux 7.2
-- `rd.driver.pre=pwrseq_qcom_wcn`
-- no legacy `wcn_regulator_fix` module (none is installed for the 6.19 ABI)
-
-The one-shot entry was consumed successfully. Journal boot `-1`, boot ID
-`37a55c80b59249fa9a76845b90564546`, proves Linux 6.19 booted and reached:
-
-```text
-1.913  qcom-pcie 1c08000.pci: PCIe Gen.3 x1 link up
-5.005  pci 0004:01:00.0: [17cb:1103]
-5.386  ath11k_pci: enabling device
-5.387  ath11k_pci: wcn6855 hw2.1
-5.550  mhi mhi0: Requested to power ON
-5.550  mhi mhi0: Power on setup success
-5.638  mhi mhi0: Wait for device to enter SBL or Mission mode
-```
-
-That boot was manually restarted after about 26 seconds of total uptime. Based
-on the Linux 7.2 timing, the MHI timeout would have appeared at about 26.9
-seconds after kernel timestamps began. Therefore this test is **inconclusive**:
-it neither proves Wi-Fi works on 6.19 nor proves that 6.19 has the same timeout.
-
-Current GRUB state after returning to Linux 7.2:
-
-```text
-saved_entry=x1407qa-7.2.0-x1407qa
-next_entry=
-```
-
-The diagnostic BLS file remains installed, but Linux 7.2 is the saved default.
-
 ## Exact next step
 
-Repeat the one-shot Linux 6.19 test and leave it running for at least 60 seconds
-after the kernel starts. Do not make any other system change before this test.
+Do not repeat the inconclusive old-kernel boot. Build and install the separately
+versioned Linux 7.2 diagnostic candidate that moves WCN power-on after PERST#
+deassertion while retaining the Linux 7.2 pwrctrl ownership model.
 
-Prepare the one-shot boot:
+Build and verify without replacing the stable kernel:
 
 ```bash
-sudo grub2-reboot x1407qa-6.19-wifi-diagnostic
-sudo grub2-editenv - list
+sudo -n kernel/build-linux-7.2-wifi-pwrctrl-diagnostic.sh
+sudo -n kernel/verify-linux-7.2-x1407qa.sh \
+  /var/lib/x1407qa-kernel-7.2-wifi-pwrctrl-diag/artifacts \
+  7.2.0-x1407qa-wifi-pwrctrl-diag
 ```
 
-Verify `next_entry=x1407qa-6.19-wifi-diagnostic`, reboot, wait at least 60
-seconds, then inspect before rebooting again if possible:
+Install it under its own kernel release and BLS ID, keep
+`saved_entry=x1407qa-7.2.0-x1407qa`, and set only
+`next_entry=x1407qa-7.2-wifi-pwrctrl-diag`. After reboot, wait at least 60
+seconds and inspect:
 
 ```bash
 uname -r
 ip -br link
 lspci -nnk -s 0004:01:00.0
 sudo journalctl -b -k --no-pager -o short-monotonic |
-  rg -i 'pcie|17cb:1103|ath11k|mhi|pwrseq|wcn'
+  rg -i 'X1407QA Wi-Fi diagnostic|pcie|17cb:1103|ath11k|mhi|pwrseq|wcn'
 ```
 
 Interpretation:
 
-- If 6.19 reaches a Wi-Fi interface and MHI Mission mode, the 6.19→7.2
-  pwrctrl change becomes the leading confirmed regression boundary. Next,
-  bisect or build a 7.2 diagnostic kernel reverting only the pwrctrl lifecycle
-  change; do not revive the legacy rail-hold module as a permanent fix.
-- If 6.19 also produces `failed to power up mhi: -110`, the kernel-version
-  hypothesis is falsified. Return to root-cause investigation of the endpoint
-  reset/power sequence and compare the historical working environment against
-  the current firmware/UEFI state.
-- If the 6.19 system lacks keyboard/backlight helpers, use the touchpad or an
-  external USB keyboard. Do not interpret missing custom 7.2 DKMS modules as a
-  Wi-Fi result.
+- If the candidate reaches MHI Mission mode and exposes a Wi-Fi interface,
+  PERST#/WCN power ordering is confirmed as the regression mechanism. Convert
+  the diagnostic change into a narrowly reviewed correction; do not revive the
+  legacy rail-hold module as a permanent fix.
+- If the candidate still produces `failed to power up mhi: -110`, this ordering
+  hypothesis is falsified. Restore the stable 7.2 boot and investigate the next
+  endpoint reset/power boundary without stacking another change.
+- A missing custom DKMS helper in the diagnostic release is not a Wi-Fi result.
+  Judge only the diagnostic marker, PCI endpoint, MHI state, ath11k binding and
+  network interface after at least 60 seconds.
 
 ## Useful evidence commands
 
@@ -302,7 +270,7 @@ modinfo wcn_regulator_fix 2>/dev/null
 # Boot configuration
 sudo grub2-editenv - list
 sudo sed -n '1,120p' /boot/loader/entries/x1407qa-7.2.0-x1407qa.conf
-sudo sed -n '1,120p' /boot/loader/entries/x1407qa-6.19-wifi-diagnostic.conf
+sudo sed -n '1,120p' /boot/loader/entries/x1407qa-7.2-wifi-pwrctrl-diag.conf
 
 # DTB identity
 sha256sum x1p42100-asus-zenbook-a14-wifi-fix.dtb \
