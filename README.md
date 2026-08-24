@@ -100,7 +100,7 @@ instalado com validação física da reconstrução atual.
 | **CDSP / NPU** | :white_check_mark: Working | CDSP, FastRPC and QNN HTP inference all work with CPU fallback disabled; the SoC ID override is applied per process by `tools/npu-run`, never system-wide (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
 | **Charge control** | :white_check_mark: Working | Charge limit 80% via udev rule (see [Charge Control Fix](#16-battery-charge-control-fix)) |
 | **USB-C DP alt-mode** | :white_check_mark: Working | Both ports, tested DP-2 up to 2560×1600. Device link errors at boot are cosmetic ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
-| **USB4 / TB3 tunneling** | :x: Not working | DP alt-mode and plain USB-C docks work (Dell SD25 validated: 10 Gbps hub + 2.5GbE + charging), but Thunderbolt tunneling is blocked: the Qualcomm USB4 host/router driver does not exist in any public tree (Aug 2026). See [USB4/TB3 Status](#usb4tb3-status-aug-2026) |
+| **USB4 / TB3 tunneling** | :x: Not working | DP alt-mode and plain USB-C docks work (Dell SD25 validated: 10 Gbps hub + 2.5GbE + charging + external display), but Thunderbolt tunneling is blocked: the Qualcomm USB4 host/router driver does not exist in any public tree (Aug 2026). See [USB4/TB3 Status](#usb4tb3-status-aug-2026) |
 | **Camera RGB** | :white_check_mark: Working | Late graphical autostart validated after reboot; upright image, still/video and PipeWire work. CAMCC clock and libcamera metadata warnings are gone with the patched 7.2 kernel and libcamera (see [Camera Fix](#17-rgb-camera-fix)) |
 | **Camera IR** | :x: Not working | pm8010 PMIC physically absent — sensor has no power (see [Camera Research](#camera-research)) |
 | **Display color control** | :white_check_mark: Working | CTM saturation + contrast via DKMS module (see [Display Color Control Fix](#18-display-color-control-fix)) |
@@ -170,16 +170,30 @@ Two states that look like failures but are not: `enu1u4u1` showed `NO-CARRIER`
 because no network cable was attached to the dock, and the battery read
 `Not charging` because the 80% charge limit was holding it.
 
-**Video was not tested** — no monitor was attached to the dock. `DP-1`/`DP-2`
-stayed `disconnected` and the plug event produced no DP/alt-mode/HPD activity at
-all, which is expected with no display attached, since the dock's VMM8431 MST hub
-only requests DP alt-mode entry on HPD. Retest with a monitor before drawing any
-conclusion about that path.
+**Video works too**, retested with a portable Type-C monitor on the same port 0:
+`card0-DP-1` came up `connected`/`enabled` and drove a real mode on `crtc-1`, so
+DP alt-mode engages through the dock. Two things worth knowing:
+
+- `port0-partner/number_of_alternate_modes` stays `0` even while DP is running,
+  because `pmic_glink_altmode` drives DP out of band rather than through UCSI. An
+  empty partner alt-mode list is **not** evidence that DP failed — check the DRM
+  connector instead.
+- the connector has no `mst_path`, so the dock passes DP through on a direct lane
+  rather than through its VMM8431 MST hub.
+
+The monitor lands at 960x640 even though `2560x1600@60` is offered, and that is
+the monitor's EDID rather than a driver bug: base-block DTD 1 *is* 960x640, and
+EDID 1.4 marks the first detailed timing as the native/preferred mode, so the
+kernel and GNOME both honour it. That EDID is self-inconsistent — the base block
+claims a 293x165 mm panel while every extension DTD claims 160x90 mm — which is
+ordinary for cheap Type-C portable panels (vendor `DRS`, model `9557`, product
+name literally `TYPE-C`). `2560x1600@60` needs 268.63 MHz, under the EDID's own
+280 MHz max dotclock, so selecting it by hand in Settings → Displays is fine.
 
 Practical conclusion:
 
 - **USB-C DP alt-mode:** working
-- **Plain USB-C dock (no tunnel):** working — 10 Gbps hub + 2.5GbE + charging
+- **Plain USB-C dock (no tunnel):** working — 10 Gbps hub + 2.5GbE + charging + DP output
 - **USB4/TB3 dock tunneling:** blocked — driver does not exist anywhere public.
   The Elgato TB3 Dock stays unusable because it routes *everything* through the
   Thunderbolt tunnel

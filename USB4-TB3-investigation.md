@@ -330,15 +330,50 @@ Dois estados que **parecem** falha e não são:
 - bateria em `Not charging` — é o limite de 80% (`charge_control_end_threshold`)
   segurando; comportamento normal da conquista #16
 
-**Vídeo: não testado.** Não havia monitor ligado ao dock durante o teste.
-`card0-DP-1` e `card0-DP-2` ficaram `disconnected`, e o plug do dock (t=1357s)
-não gerou nenhum evento de DP, altmode ou HPD — só enumeração USB. Sem display
-atado ao dock isso é o esperado, porque o VMM8431 (o MST hub de vídeo do dock)
-só pede entrada em DP alt mode quando tem HPD. **Não conta como bug**; refazer o
-teste com monitor plugado antes de concluir qualquer coisa sobre esse caminho.
+**Vídeo: funciona.** Retestado com um monitor portátil Type-C na mesma porta 0.
+`card0-DP-1` subiu `connected`/`enabled` e passou a dirigir modo real no `crtc-1`
+— o DP alt mode engata através do dock. (No primeiro teste, sem monitor, os dois
+conectores ficaram `disconnected` e o plug não gerou evento de DP/altmode/HPD
+nenhum; isso era ausência de display, não falha.)
+
+Duas armadilhas de diagnóstico que valem registro:
+
+- `port0-partner/number_of_alternate_modes` continua **`0` mesmo com o DP
+  rodando**, porque quem dirige o DP é o `pmic_glink_altmode`, fora da banda do
+  UCSI. Lista de altmode do partner vazia **não** é prova de que o DP falhou —
+  olhar o conector DRM, não o UCSI.
+- o conector não tem `mst_path`: o dock entrega o DP numa lane direta, não pelo
+  MST hub VMM8431 dele.
+
+### O monitor sobe em 960x640 — é o EDID dele, não o driver
+
+O painel oferece `2560x1600@60` na lista, mas o modo escolhido é `960x640`:
+
+```
+crtc-1  mode: "960x640": 60 49160 ...
+```
+
+Causa: o **DTD 1 do bloco base é 960x640**, e o EDID 1.4 define o primeiro
+detailed timing como o modo nativo/preferido. Kernel e GNOME estão honrando o que
+o monitor declara — os dois marcam `960x640` como `is-preferred`.
+
+O EDID é auto-contraditório, como é comum em painel Type-C barato:
+
+| Campo | Valor |
+|-------|-------|
+| Fabricante / modelo | `DRS` / `9557`, nome do produto literalmente `TYPE-C` |
+| Tamanho no bloco base | 29 cm x 17 cm; DTD 1 diz 293 x 165 mm |
+| Tamanho nas DTD da extensão | 160 x 90 mm em **todas** |
+| DTD 1 (nativo declarado) | 960x640 @ 60 |
+| DTD 2 (bloco CTA) | 2560x1600 @ 60, 268.63 MHz |
+| Max dotclock declarado | 280 MHz |
+
+`2560x1600@60` pede 268.63 MHz, abaixo do teto de 280 MHz que o próprio EDID
+declara — então dá para selecionar na mão em Ajustes → Telas sem problema.
+Não há fix de kernel a fazer aqui: o driver está correto, o EDID é que mente.
 
 Conclusão: um dock USB-C que não dependa de túnel entrega hub 10 Gbps + 2.5GbE +
-carga hoje, sem kernel custom e sem driver faltando. O Elgato TB3 continua sem
+carga + saída de vídeo hoje, sem kernel custom e sem driver faltando. O Elgato TB3 continua sem
 solução porque roteia *tudo* por dentro do túnel Thunderbolt.
 
 **Próximo passo aprovado (Mar/2026) — SUPERSEDIDO pela reverificação acima.**
