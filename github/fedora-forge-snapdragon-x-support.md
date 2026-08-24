@@ -7,8 +7,8 @@ is usable as a Linux daily driver on **Fedora 44 aarch64** with the custom
 `7.2.0-x1407qa` kernel, DKMS/runtime overlays, initramfs firmware injection and
 userspace fixes. Boot is validated at 7.301s total with the graphical target
 reached in 3.278s userspace. GPU/Vulkan and the core desktop hardware work; RGB camera
-captures still/video with known non-fatal warnings. IR camera, USB4/TB3
-tunneling and QNN/HTP NPU inference remain blocked and are documented below.
+captures still/video with known non-fatal warnings. QNN/HTP inference runs on the
+NPU. IR camera and USB4/TB3 tunneling remain blocked and are documented below.
 
 This issue documents what works, what needed fixing, and what Fedora could integrate to make Snapdragon X laptops work out-of-the-box.
 
@@ -370,10 +370,38 @@ contexts available (cb@1 through cb@13). The non-secure
 `/dev/fastrpc-cdsp` node is available to group `render`; secure and ADSP nodes
 remain root-only.
 
-This does **not** yet mean NPU inference works. `onnxruntime-qnn 2.4.0`
-registers a QNN NPU device, but HTP-only inference fails during backend
-initialization for the real X1P42100 SoC ID `635`, including as root. CPU
-fallback was disabled during the test.
+CDSP `running` is not by itself NPU inference. Getting `onnxruntime-qnn 2.4.0` to
+execute an operator on the HTP needed three more pieces, none of them a vendor
+block:
+
+1. **`libcdsprpc.so` is absent on Fedora.** `libQnnHtpV73Stub.so` lists it in
+   `DT_NEEDED`, so the backend dies in `logCreate`. Building
+   [`qualcomm/fastrpc`](https://github.com/qualcomm/fastrpc) supplies it — it is
+   built with `-DENABLE_UPSTREAM_DRIVER_INTERFACE` and speaks the mainline
+   `drivers/misc/fastrpc.c` ioctl ABI. Fedora aarch64 does not scan
+   `/usr/local/lib`, so it also needs an `ld.so.conf.d` entry. **A packaged
+   `libcdsprpc.so` would be the single highest-value thing Fedora could ship for
+   Snapdragon X.**
+2. **The Hexagon-side shell must be present and hash-paired.** The signed CDSP
+   firmware embeds the SHA-256 of every ELF segment of each Hexagon binary it
+   will load, so `fastrpc_shell_unsigned_3` has to come from the same build as
+   the `.mbn` in use. The published
+   [`linux-msm/hexagon-dsp-binaries`](https://github.com/linux-msm/hexagon-dsp-binaries)
+   Hamoa sets (`CDSP.HT.2.9.c1-00069`, `-00082`) authorize only 1 of 4 segments
+   against this machine's `CDSP.HT.2.9.c1-00046-HAMOA-1`, and substituting the
+   generic `x1e80100/cdsp.mbn` fails earlier still — PAS rejects it with `-22`
+   because it is not signed for the Purwa fuses.
+3. **SoC ID `635` is not in the QNN table.** `libQnnHtp.so` reads
+   `/sys/devices/soc0/soc_id` and aborts before touching the DSP. `555`
+   (X1E80100, which QNN knows as `SC8380XP`) works; we apply it per process via
+   `LD_PRELOAD`, never system-wide. A QNN release that recognises X1P42100 would
+   remove the need for that shim entirely.
+
+**Result:** `NPU devices: 1` and HTP inference with
+`session.disable_cpu_ep_fallback=1`, returning `abs([[-1, 2, -3.5, 4.25]])` as
+`[[1.0000001192092896, 2.000000238418579, 3.500000238418579, 4.250000476837158]]`
+— the ~4.7e-07 delta is normal HTP precision. With fallback disabled, a CPU run
+cannot be mistaken for acceleration.
 
 ---
 
@@ -482,8 +510,12 @@ Mesa: 26.0.3
   deep/S3 still crashes and remains disabled.
 - **USB4 / Thunderbolt 3:** USB-C DP alt-mode works, but TB3 tunneling is still blocked. UCSI exposes no `ALT_MODE_OVERRIDE`, the firmware never sends `USBC_NOTIFY` for the dock path, and current kernels still lack Qualcomm `x1e80100` USB4 host/router support. This is the first feature on this machine that looks likely to require a real custom-kernel path.
 - **PCIe race condition:** Upstream fix expected ~6.21, would eliminate WiFi DKMS module.
-- **CDSP/NPU:** CDSP/FastRPC transport works. QNN registers an NPU but its HTP
-  backend does not initialize for X1P42100 SoC ID `635`; acceleration remains
-  blocked pending compatible Qualcomm userspace. The proposed QDA driver uses a
+- **CDSP/NPU:** Working end to end — CDSP/FastRPC transport plus QNN/HTP
+  inference with CPU fallback disabled. Two things would let this work without
+  per-machine surgery: a packaged `libcdsprpc.so` (Fedora ships no FastRPC
+  userspace, which is what actually blocked inference), and a QNN release that
+  knows SoC ID `635`/X1P42100 so the `LD_PRELOAD` SoC ID shim can be dropped.
+  The Hexagon shell stays a per-device concern — it is hash-pinned to the signed
+  CDSP firmware and cannot be shipped generically. The proposed QDA driver uses a
   different interface from the current FastRPC stack.
 - **DTB:** Vivobook X1407QA DTB not yet submitted — depends on camera/sensor patches.

@@ -31,5 +31,10 @@ modules/**/*.mod
 modules/**/*.mod.c
 *.pre-pull.local
 
+# Shim de userspace compilado (fonte em modules/qnn-soc-id-fix/)
+modules/**/*.so
+__pycache__/
+*.pyc
+
 # Estado de ferramentas
 .claude-flow/

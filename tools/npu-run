@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# npu-run - roda um comando com o shim de SoC ID do QNN aplicado.
+#
+# O override fica ESCOPADO neste processo e nos filhos dele; nada de spoof
+# global de SoC na maquina (regra do CLAUDE.md).
+#
+# Uso: npu-run python meu_script.py
+#      QNN_SOC_ID_OVERRIDE=555 npu-run /usr/local/bin/fastrpc_test -d 3 -U 1
+set -euo pipefail
+
+LIB=${QNN_SOC_ID_FIX_LIB:-/usr/local/lib64/qnn_soc_id_fix.so}
+
+if [ $# -eq 0 ]; then
+    echo "uso: npu-run <comando> [args...]" >&2
+    exit 2
+fi
+
+if [ ! -f "$LIB" ]; then
+    echo "npu-run: $LIB nao encontrado." >&2
+    echo "  compile e instale: make -C modules/qnn-soc-id-fix && sudo make -C modules/qnn-soc-id-fix install" >&2
+    exit 1
+fi
+
+export LD_PRELOAD="$LIB${LD_PRELOAD:+:$LD_PRELOAD}"
+exec "$@"

@@ -1406,13 +1406,47 @@ echo "scmi_cpufreq" > /etc/modules-load.d/scmi-cpufreq.conf
 modprobe scmi_cpufreq 2>/dev/null || true
 log "  cpufreq autoload"
 
-# ─── 15. CDSP/NPU — contrato early boot já configurado ──────────────────────
-step 15 $TOTAL "CDSP/NPU (firmware early boot)..."
+# ─── 15. CDSP/NPU — contrato early boot + runtime QNN/HTP ───────────────────
+step 15 $TOTAL "CDSP/NPU (firmware early boot + runtime QNN/HTP)..."
 write_fastrpc_access_rule || warn "  Não foi possível configurar acesso ao FastRPC CDSP"
 usermod -aG render "$REAL_USER" 2>/dev/null || true
 udevadm control --reload-rules 2>/dev/null || true
 udevadm trigger --action=change /sys/class/misc/fastrpc-cdsp 2>/dev/null || true
 log "  firmware CDSP + acesso ao FastRPC não seguro configurados"
+
+# Shim de SoC ID do QNN: libQnnHtp.so lê /sys/devices/soc0/soc_id, não conhece
+# 635 (X1P42100) e aborta em logCreate. Só é aplicado por processo via npu-run —
+# nunca globalmente. Não fatal: sem ele a NPU some, o resto do setup fica de pé.
+qnn_shim_src="${SCRIPT_DIR}/modules/qnn-soc-id-fix"
+if [[ -f "${qnn_shim_src}/Makefile" ]] && command -v gcc &>/dev/null && command -v make &>/dev/null; then
+    if make -C "$qnn_shim_src" install >/dev/null 2>&1; then
+        log "  qnn_soc_id_fix.so instalado em /usr/local/lib64/"
+    else
+        warn "  qnn_soc_id_fix.so não compilou — inferência QNN/HTP indisponível"
+    fi
+    make -C "$qnn_shim_src" clean >/dev/null 2>&1 || true
+else
+    warn "  modules/qnn-soc-id-fix ou toolchain ausente — shim de SoC ID não instalado"
+fi
+if [[ -f "${SCRIPT_DIR}/tools/npu-run" ]]; then
+    install -m 0755 "${SCRIPT_DIR}/tools/npu-run" /usr/local/bin/npu-run &&
+        log "  npu-run instalado em /usr/local/bin/" ||
+        warn "  npu-run não instalado"
+fi
+
+# Runtime da NPU: libcdsprpc.so + binários Hexagon do CDSP + DSP_LIBRARY_PATH.
+# Idempotente e verboso por conta própria. Não fatal: sem rede para clonar o
+# fastrpc, ou com binários Hexagon não autorizados pelo firmware desta máquina,
+# só a NPU fica de fora — as outras conquistas continuam sendo instaladas.
+if [[ -f "${SCRIPT_DIR}/tools/setup-npu-runtime.sh" ]]; then
+    if bash "${SCRIPT_DIR}/tools/setup-npu-runtime.sh"; then
+        log "  runtime da NPU pronto"
+    else
+        warn "  runtime da NPU não ficou pronto — NPU indisponível, setup segue"
+    fi
+else
+    warn "  tools/setup-npu-runtime.sh ausente — runtime da NPU não configurado"
+fi
 
 # ─── 16. Charge control — udev rule 80% + freq cap na bateria ───────────────
 step 16 $TOTAL "Charge control (limite 80%)..."
@@ -1556,6 +1590,8 @@ echo "    Boot:     systemd-analyze"
 echo "    Áudio:    pactl list sinks short"
 echo "    cpufreq:  cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor"
 echo "    CDSP:     cat /sys/class/remoteproc/remoteproc1/state"
+echo "    NPU:      npu-run /usr/local/bin/fastrpc_test -d 3 -U 1"
+echo "              npu-run ~/.local/share/vivobook-qnn/bin/python ${SCRIPT_DIR}/tools/verify-qnn-npu.py"
 echo "    Carga:    cat /sys/class/power_supply/qcom-battmgr-bat/charge_control_end_threshold"
 echo "    Suspend:  systemctl suspend  (s2idle; hibernate.target deve seguir masked)"
 echo "    Câmera:   systemctl status vivobook-camera.service"

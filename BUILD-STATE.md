@@ -146,15 +146,31 @@
   `firewalld` foi validado `active/running` em 2026-08-24.
 - **Build ARM:** o builder principal e o fallback do setup usam `nproc`,
   aproveitando todos os vCPUs que o WSL2 expõe sem um limite fixo em `-j8`.
-- **CDSP pronto, NPU parcial:** ADSP e CDSP estão `running`; somente
+- **CDSP e NPU prontos:** ADSP e CDSP estão `running`; somente
   `/dev/fastrpc-cdsp` não seguro é exposto em `root:render 0660`. Os nós secure
-  e ADSP permanecem `root:root 0600`. `onnxruntime-qnn 2.4.0` registra o
-  `QNNExecutionProvider` como NPU, mas uma inferência HTP com fallback CPU
-  desabilitado falha em `QNN_BACKEND_ERROR_CANNOT_INITIALIZE` no SoC real ID
-  `635`/X1P42100, inclusive como root. Portanto não é bloqueio de permissão e
-  CDSP online não deve ser documentado como inferência NPU funcional.
+  e ADSP permanecem `root:root 0600`. A inferência QNN/HTP roda de verdade na
+  NPU com fallback de CPU desabilitado: `PASS: inferencia HTP/NPU com fallback
+  de CPU desabilitado (ORT 1.26.0, NPU devices: 1, soc_id: 555)`. O
+  `QNN_BACKEND_ERROR_CANNOT_INITIALIZE` anterior não era bloqueio do fornecedor
+  nem de permissão — faltavam três peças de userspace:
+  1. `libcdsprpc.so` (FastRPC userspace) ausente na Fedora; compilada de
+     qualcomm/fastrpc para `/usr/local/lib` + `/etc/ld.so.conf.d/fastrpc.conf`.
+  2. Binários Hexagon do CDSP em
+     `/usr/share/qcom/x1p42100/Qualcomm/Purwa-IoT-EVK/dsp/cdsp/` mais o YAML de
+     mapa em `/usr/share/qcom/conf.d/` casando o modelo do device tree. O
+     firmware assinado carrega whitelist de SHA-256 por segmento ELF, então só
+     o par da build `CDSP.HT.2.9.c1-00046-HAMOA-1` (17/17 segmentos) carrega.
+  3. SoC ID: `libQnnHtp.so` lê `/sys/devices/soc0/soc_id`, não conhece `635`
+     (X1P42100) e aborta em `logCreate` antes de tocar o DSP. `555`
+     (X1E80100/SC8380XP) destrava, aplicado por `LD_PRELOAD` **escopado por
+     processo** via `tools/npu-run`; o sysfs da máquina continua `635` e
+     nenhum spoof global de SoC é instalado.
+  `sudo bash tools/setup-npu-runtime.sh` executa os passos 1 e 2 de forma
+  idempotente e recusa instalar binário Hexagon que o firmware da máquina não
+  autoriza.
 - Contratos reproduzíveis: `tests/test-accelerator-runtime.sh` valida os
-  arquivos instalados e `tools/verify-qnn-npu.py` impede falso positivo por CPU.
+  arquivos instalados e `tools/verify-qnn-npu.py` impede falso positivo por CPU
+  (sem o wrapper imprime SKIP e sai `2`; com ele, PASS e sai `0`).
 
 ## ISO final
 
@@ -205,8 +221,10 @@ zstd --long=31 -t windows-drivers/X1407QA_DRV-full-2026-08-19.tar.zst
   antes de considerar uma instalação futura automaticamente bootável.
 - O percentual da bateria no live continua uma pendência separada e não deve
   ser considerado corrigido até o teste físico.
-- Revalidar QNN/HTP quando houver runtime Qualcomm que reconheça oficialmente
-  X1P42100/SoC ID 635; não persistir `soc_model`/`htp_arch` falsos.
+- Aposentar o shim de SoC ID quando a Qualcomm publicar runtime que reconheça
+  oficialmente X1P42100/SoC ID `635`. Até lá o override fica escopado por
+  processo em `tools/npu-run`; não persistir `soc_model`/`htp_arch` falsos nem
+  spoof global de SoC.
 
 Consulte [`docs/BUILD-REPORT-2026-08-24.md`](docs/BUILD-REPORT-2026-08-24.md)
 para a memória completa desta execução. Os relatórios anteriores foram

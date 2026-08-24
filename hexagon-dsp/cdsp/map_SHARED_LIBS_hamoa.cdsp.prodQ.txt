@@ -1,0 +1,16 @@
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/libQ6MSFR_manager_skel.so
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/libQ6MSFR_manager_skel_intermediate.so
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/libsysmon_skel.so
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/libsysmondomain_skel.so
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/libstabilitydomain_skel.so
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/libsysmonquery_skel.so
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/libbenchmark_skel.so
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/libsysmonhvxthrottle_skel.so
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/libcrm_test_skel.so
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/version.so
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/example_image.so
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/libloadalgo_skel.so
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/fastrpc_shell_3
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/fastrpc_shell_unsigned_3
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/libc++.so.1
+../../build/ms/dynamic_modules/hamoa.cdsp.prod/libc++abi.so.1

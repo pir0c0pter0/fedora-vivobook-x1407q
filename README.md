@@ -64,12 +64,12 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 12 | **Audio working** | ALSA UCM2 regex fix for Vivobook 14 | Speaker, headphones, internal mic, headset mic, HDMI audio |
 | 13 | **Lid close = s2idle suspend** | `mem_sleep_default=s2idle` + logind `HandleLidSwitch=suspend` | deep (S3) still crashes and stays disabled; s2idle validated 2026-08-24 — ~0.80W suspended vs 2.85W idle on |
 | 14 | **CPU frequency scaling** | Autoload in-tree `scmi_cpufreq` module | CPU scales 710MHz–2.96GHz, battery savings + thermal protection |
-| 15 | **CDSP online** | CDSP firmware in initramfs + restricted FastRPC access | Hexagon Compute DSP boots at early boot; QNN/HTP inference remains vendor-blocked on X1P42100 |
+| 15 | **CDSP online + NPU inference** | CDSP firmware in initramfs + FastRPC userspace + hash-paired Hexagon binaries + scoped SoC ID override | Hexagon Compute DSP boots at early boot and QNN/HTP runs real NPU inference with CPU fallback disabled |
 | 16 | **Battery charge limit** | udev rule sets 80% threshold | Charge stops at 80%, starts at 50% — extends battery lifespan |
 | 17 | **RGB camera functional** | `vivobook_cam_fix` + patched kernel/libcamera + late graphical autostart | OV02C10 on CCI1 — upright image, still 1080p, 720p30 video and Snapshot/PipeWire after every boot; CAMCC and libcamera warnings gone on the 7.2 build |
 | 18 | **Display color control** | DKMS module `vivobook_color_ctrl` — CTM via DRM atomic commit from kernel space | msm_dpu exposes CTM/PCC but not GAMMA_LUT — wl-gammarelay-rs and zwlr_gamma_control both fail; kernel module bypasses DRM master restriction |
 
-**7 custom kernel modules**, **1 kernel camera patch applied by the 7.2 build**, **1 libcamera patch**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix** — most model-specific fixes run at runtime via DKMS/module overlays/LD_PRELOAD. The installed stable path uses the Zenbook A14 DTB from BLS plus the custom 7.2 kernel for early-boot fixes.
+**7 custom kernel modules**, **1 kernel camera patch applied by the 7.2 build**, **1 libcamera patch**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP/NPU runtime fix**, **1 charge control fix** — most model-specific fixes run at runtime via DKMS/module overlays/LD_PRELOAD. The installed stable path uses the Zenbook A14 DTB from BLS plus the custom 7.2 kernel for early-boot fixes.
 
 ## Current Status
 
@@ -97,7 +97,7 @@ instalado com validação física da reconstrução atual.
 | **Lid close** | :white_check_mark: Working | Lid close = s2idle suspend, ~0.80W (see [Lid Close Fix](#13-lid-close-fix)) |
 | **Suspend (s2idle)** | :white_check_mark: Working | s2idle validated 2026-08-24 on installed `7.2.0-x1407qa` — 2 clean cycles, ~0.80W suspended. deep (S3) still crashes and stays disabled (see [Lid Close Fix](#13-lid-close-fix)) |
 | **cpufreq** | :white_check_mark: Working | SCMI cpufreq via autoload — 710MHz–2.96GHz, schedutil governor (see [CPU Frequency Fix](#14-cpu-frequency-fix)) |
-| **CDSP / NPU** | :warning: Partial | CDSP, FastRPC and QNN EP registration work; QNN HTP inference fails to initialize on SoC ID `635`/X1P42100 with CPU fallback disabled (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
+| **CDSP / NPU** | :white_check_mark: Working | CDSP, FastRPC and QNN HTP inference all work with CPU fallback disabled; the SoC ID override is applied per process by `tools/npu-run`, never system-wide (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
 | **Charge control** | :white_check_mark: Working | Charge limit 80% via udev rule (see [Charge Control Fix](#16-battery-charge-control-fix)) |
 | **USB-C DP alt-mode** | :white_check_mark: Working | Both ports, tested DP-2 up to 2560×1600. Device link errors at boot are cosmetic ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
 | **USB4 / TB3 tunneling** | :x: Not working | DP alt-mode works, but Thunderbolt tunneling is blocked by missing Qualcomm x1e80100 host/router support in current kernels. See [USB4/TB3 Status](#usb4tb3-status-mar-2026) |
@@ -112,16 +112,15 @@ instalado com validação física da reconstrução atual.
 | Vulkan GPU | **Working** | Vulkan 1.4.341, Mesa 26.0.3, `turnip Mesa driver`, Adreno X1-45 |
 | RGB camera | **Working** | Service enabled/active after clean reboot; upright image (sensor HFLIP/VFLIP driven by `rotation = <180>`); 1920×1080 XRGB8888 still; 60/60 frames at 1280×720, ~30 fps; PipeWire source published; no CAMCC/libcamera warnings, no Oops/soft lockup |
 | CDSP transport | **Working** | CDSP and ADSP `remoteproc` running; non-secure `/dev/fastrpc-cdsp` exposed only to group `render` |
-| NPU inference | **Blocked in vendor runtime** | QNN EP sees an NPU, but HTP backend initialization fails for real SoC ID `635`; the same failure occurs as root, so it is not a Unix permission problem |
+| NPU inference | **Working** | `NPU devices: 1` and HTP inference with `session.disable_cpu_ep_fallback=1` returning `abs([[-1, 2, -3.5, 4.25]])` as `[[1.0000001192092896, 2.000000238418579, 3.500000238418579, 4.250000476837158]]`; `fastrpc_test -d 3 -U 1` passes `libmultithreading.so` on the Hexagon |
 
 The setup does not expose `fastrpc-cdsp-secure` or ADSP nodes to regular users.
 The diagnostic verifier deliberately disables CPU fallback so a CPU execution
 cannot be mistaken for NPU acceleration.
 
 The hardware audit passed 16/16 after the autostart reboot. The status table
-still marks the independently observed boot-time regression, NPU backend,
-USB4/TB3 and the IR camera rather
-than presenting them as solved.
+still marks USB4/TB3 and the IR camera as unsolved rather than presenting them
+as done.
 
 ---
 
@@ -418,6 +417,11 @@ env -u DISPLAY -u WAYLAND_DISPLAY \
 # CDSP transport (online does not by itself prove NPU inference)
 cat /sys/class/remoteproc/remoteproc1/{name,state}
 stat -c '%A %U:%G %n' /dev/fastrpc-cdsp
+
+# NPU (HTP inference, CPU fallback disabled)
+dsp_check
+fastrpc_test -d 3 -U 1
+tools/npu-run ~/.local/share/vivobook-qnn/bin/python tools/verify-qnn-npu.py
 
 # RGB camera (automatic after graphical input initialization)
 systemctl status vivobook-camera.service
@@ -1037,6 +1041,12 @@ cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_frequencies
 
 ### 15. CDSP/NPU Fix
 
+Two independent failures live here: the CDSP not booting at all, and — once it
+booted — the QNN/HTP execution provider refusing to run a single operator on
+the NPU. Both are fixed.
+
+#### 15a. CDSP offline at boot
+
 **Problem:** The Compute DSP (CDSP / Hexagon NPU) stays offline at boot — `remoteproc1` fails to load firmware with error `-2` (ENOENT).
 
 **Root cause:** Same as achievement #4 (ADSP/battery). The `remoteproc` for CDSP probes during early boot when only the initramfs is available. The firmware `qccdsp8380.mbn` existed on the rootfs but wasn't included in the initramfs, so the kernel couldn't find it.
@@ -1080,32 +1090,141 @@ Secure CDSP and ADSP nodes remain `root:root` mode `0600`.
 | **IOMMU groups** | Groups 15–26 |
 | **Config file** | `/etc/dracut.conf.d/qcom-cdsp-firmware.conf` |
 
-#### NPU inference status
+#### 15b. QNN/HTP inference on the NPU
 
-CDSP transport is online, but that is not the same as a working NPU execution
-provider. A clean Python environment with `onnxruntime-qnn 2.4.0` and
-`onnxruntime 1.26.0` registers `QNNExecutionProvider` as an NPU device, then
-fails a minimal HTP-only inference with
-`QNN_BACKEND_ERROR_CANNOT_INITIALIZE: Backend failed to initialize`.
+**Problem:** With CDSP `running` and `/dev/fastrpc-cdsp` accessible, `onnxruntime-qnn 2.4.0`
+registered `QNNExecutionProvider` as an NPU device but failed every HTP-only inference with
+`QNN_BACKEND_ERROR_CANNOT_INITIALIZE: Backend failed to initialize`, as root too. Earlier
+revisions of this README called that "blocked by vendor runtime support". **That diagnosis was
+wrong** — three pieces were simply missing from the userspace side.
 
-The same test fails as root. Diagnostic SoC overrides can move the failure to
-QNN device creation, but none produced inference and none were persisted. The
-real `/sys/devices/soc0/soc_id` is `635` (X1P42100), which the tested Qualcomm
-runtime does not initialize safely. Current status: kernel/CDSP **working**;
-QNN/HTP inference **blocked by vendor runtime support**.
+**Root cause (three missing pieces):**
 
-To re-test after a future QNN release:
+1. **No `libcdsprpc.so`.** `libQnnHtpV73Stub.so` carries `NEEDED: libcdsprpc.so`, and Fedora
+   ships no FastRPC userspace. Without it the HTP backend can never reach the DSP.
+2. **No Hexagon binaries (DSP shell).** The QNN HTP backend needs `fastrpc_shell_3` and the
+   skel libraries on disk, plus a mapping from the device-tree model to their directory.
+3. **SoC ID `635` unknown to QNN.** `libQnnHtp.so` reads `/sys/devices/soc0/soc_id`, gets `635`
+   (X1P42100), does not find it in its SoC table, and aborts inside `logCreate` — proved by
+   `strace`, *before* it ever touches the DSP. `555` (X1E80100, which QNN knows as SC8380XP)
+   is accepted and works. The alternative path `/sys/devices/system/soc/soc0/id` does not exist
+   on this machine, and `libQnnHtp.so` exposes no environment override.
+
+**Solution:** steps 1 and 2 below are automated and idempotent —
+`sudo bash tools/setup-npu-runtime.sh` performs them and refuses to install Hexagon binaries
+the machine's signed firmware does not authorize. The manual steps are documented here so the
+script is auditable rather than magic. Step 3 stays out of the setup script on purpose: it is a
+per-process runtime wrapper, not machine state.
+
+**Solution — 1. FastRPC userspace:**
 
 ```bash
+sudo dnf install -y autoconf automake libtool libyaml-devel libmd-devel libbsd-devel gcc gcc-c++ make
+git clone https://github.com/qualcomm/fastrpc && cd fastrpc
+./gitcompile && sudo make install
+# Fedora aarch64 does not scan /usr/local/lib by default:
+echo /usr/local/lib | sudo tee /etc/ld.so.conf.d/fastrpc.conf && sudo ldconfig
+```
+
+The project builds with `-DENABLE_UPSTREAM_DRIVER_INTERFACE`, which matches the mainline
+`drivers/misc/fastrpc.c` in the 7.2 kernel. It also installs the diagnostics
+`/usr/local/bin/dsp_check` and `/usr/local/bin/fastrpc_test`.
+
+**Solution — 2. Hexagon binaries + path map:** the ASUS Hexagon package goes to
+`/usr/share/qcom/x1p42100/Qualcomm/Purwa-IoT-EVK/dsp/cdsp/`, and a YAML in
+`/usr/share/qcom/conf.d/` maps the device-tree model (the Zenbook A14 name, because that is
+the DTB this laptop boots) to that tree:
+
+```yaml
+machines:
+  ASUS Zenbook A14 (UX3407QA):
+    DSP_LIBRARY_PATH: x1p42100/Qualcomm/Purwa-IoT-EVK/dsp
+```
+
+> **:warning: HASH WHITELIST RULE — the Hexagon shell must match the signed firmware**
+>
+> The signed CDSP firmware embeds a whitelist of **SHA-256 digests of every ELF segment** of
+> each Hexagon binary it is willing to load. A shell from the wrong build is refused, no matter
+> how "compatible" it looks.
+>
+> Our firmware is **`CDSP.HT.2.9.c1-00046-HAMOA-1`**. The public shells from
+> `linux-msm/hexagon-dsp-binaries` (`c1-00069`, `c1-00082`) **do not match** — only 1 of 4
+> segments. The exact pair came from the factory Windows driver dump,
+> `windows-drivers/X1407QA_DRV-full-2026-08-19.tar.zst` (kept out of git — see `.gitignore`),
+> package `qcnspmcdm_ext_cdsp8380`,
+> which matches **17/17** segments. Extract it with a large window (plain `zstd` defaults fail):
+>
+> ```bash
+> tar -I 'zstd -d --long=31' -xf windows-drivers/X1407QA_DRV-full-2026-08-19.tar.zst \
+>     --wildcards '*qcnspmcdm_ext_cdsp8380*/CDSP/*'
+> ```
+>
+> The dump contains **two** versions of that package. Never hardcode the INF directory hash:
+> select the package by segment hash and fail loudly if none matches 100%.
+>
+> Segment hash algorithm (Hexagon ELF, little-endian 32-bit): `e_phoff`@28 (u32),
+> `e_phentsize`@42 (u16), `e_phnum`@44 (u16); per program header `p_offset`@+4 (u32) and
+> `p_filesz`@+16 (u32); take `sha256(data[p_offset : p_offset + p_filesz])`. A binary is
+> authorized when **every** segment digest appears as raw bytes inside the `.mbn`.
+
+> **Do not repeat this test:** replacing the ASUS firmware with the generic
+> `x1e80100/cdsp.mbn` was tried and **fails** — PAS rejects it with `-22`, because it is not
+> signed for the Purwa fuses. Keep the original ASUS `qccdsp8380.mbn`.
+
+**Solution — 3. SoC ID override, scoped:** since `libQnnHtp.so` has no override knob, the
+value it reads is patched **per process** with an `LD_PRELOAD` shim, the same pattern already
+used by `vk_pool_fix.so`. `tools/npu-run` wraps a single command with it. The machine's real
+`/sys/devices/soc0/soc_id` stays `635` — **no global, persistent SoC spoof is installed**, and
+nothing outside the wrapped process sees the fake value.
+
+**Verify:**
+
+```bash
+dsp_check                             # CDSP Online, signed + unsigned PD
+fastrpc_test -d 3 -U 1                # real code executed on the Hexagon
+
+# ONNX Runtime venv (once):
 python3 -m venv ~/.local/share/vivobook-qnn
 ~/.local/share/vivobook-qnn/bin/pip install \
   onnx numpy 'onnxruntime==1.26.0' 'onnxruntime-qnn==2.4.0'
-~/.local/share/vivobook-qnn/bin/python tools/verify-qnn-npu.py
+
+# HTP inference, CPU fallback disabled:
+tools/npu-run ~/.local/share/vivobook-qnn/bin/python tools/verify-qnn-npu.py
 ```
 
-The verifier disables CPU fallback. A PASS therefore means real HTP/NPU
-execution; the current expected result on this model is the backend error
-described above.
+Expected results:
+
+- `dsp_check` → `DSP build ID: CDSP.HT.2.9.c1-00046-HAMOA-1_20250122_010216`, `CDSP Online`
+  with `SignedPD Yes` / `UnsignedPD Yes`. Its `FastRPC Support` column still says
+  `No (Missing FastRPC user-space libs)`: `dsp_check` only looks in `/usr/lib`, while the
+  libraries live in `/usr/local/lib`. That column is a false negative — `fastrpc_test` is
+  the authoritative check.
+- `fastrpc_test -d 3 -U 1` → 2 of 3 subtests pass, including `[PASS] libmultithreading.so`,
+  which is real execution on the Hexagon. The remaining `libhap_example.so` failure is a
+  DMA-handle subtest of the example, not a transport failure.
+- `tools/npu-run … tools/verify-qnn-npu.py` →
+  `PASS: inferencia HTP/NPU com fallback de CPU desabilitado (ORT 1.26.0, NPU devices: 1,
+  soc_id: 555, shim LD_PRELOAD ativo)` followed by
+  `resultado: [[1.0000001192092896, 2.000000238418579, 3.500000238418579, 4.250000476837158]]`
+  for `abs([[-1, 2, -3.5, 4.25]])`. Run without the wrapper, the verifier exits `2` with a
+  SKIP that explains the SoC ID instead of pretending to test anything.
+
+The largest deviation, ~4.7e-07, is normal HTP precision, not an error. The old verifier used
+`assert_array_equal` (exact equality) and therefore failed a *correct* NPU result; the
+comparison is tolerance-based (`assert_allclose`). CPU fallback stays disabled, so a PASS
+cannot be a CPU execution in disguise.
+
+| Property | Value |
+|----------|-------|
+| **QNN runtime** | `onnxruntime 1.26.0` + `onnxruntime-qnn 2.4.0` (venv `~/.local/share/vivobook-qnn`) |
+| **FastRPC userspace** | [qualcomm/fastrpc](https://github.com/qualcomm/fastrpc), `-DENABLE_UPSTREAM_DRIVER_INTERFACE` → `/usr/local/lib/libcdsprpc.so` |
+| **Loader config** | `/etc/ld.so.conf.d/fastrpc.conf` → `/usr/local/lib` |
+| **Hexagon binaries** | `/usr/share/qcom/x1p42100/Qualcomm/Purwa-IoT-EVK/dsp/cdsp/` (ASUS `qcnspmcdm_ext_cdsp8380`, 17/17 segments) |
+| **DSP path map** | `/usr/share/qcom/conf.d/hexagon-dsp-binaries-asus-vivobook-x1407qa.yaml` (key = DT model `ASUS Zenbook A14 (UX3407QA)`) |
+| **CDSP firmware** | `qccdsp8380.mbn`, build `CDSP.HT.2.9.c1-00046-HAMOA-1` — original ASUS, do not replace |
+| **Real SoC ID** | `635` (X1P42100); QNN's table only knows `555` (X1E80100 / SC8380XP) |
+| **SoC ID override** | `/usr/local/lib64/qnn_soc_id_fix.so`, `LD_PRELOAD`ed for one process by `tools/npu-run` — never persisted system-wide |
+| **Diagnostics** | `/usr/local/bin/dsp_check`, `/usr/local/bin/fastrpc_test` |
 
 ---
 
@@ -1564,7 +1683,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **Suspend**: `deep` (S3) still crashes and stays disabled. `s2idle` validated 2026-08-24 on the installed `7.2.0-x1407qa` — 2 clean cycles, ~0.80W suspended (see [Lid Close Fix](#13-lid-close-fix)). No RTC alarm on pm8xxx — wake by lid/power button only ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
 - **USB4 / Thunderbolt 3**: Plain DP alt-mode works, but TB3 dock tunneling is blocked. `data_role` may initialize wrong, UCSI exposes no `ALT_MODE_OVERRIDE`, the normal firmware path never delivers `USBC_NOTIFY`, and current kernels still lack Qualcomm `x1e80100` host/router support. See [USB4/TB3 Status](#usb4tb3-status-mar-2026)
 - **~~cpufreq~~**: Fixed — `scmi_cpufreq` autoload via `/etc/modules-load.d/` ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
-- **CDSP online; NPU inference blocked**: firmware/initramfs and restricted FastRPC access work, and QNN registers the NPU. HTP inference still fails at vendor backend initialization for X1P42100 SoC ID `635`, including as root; do not count CDSP `running` as proof of acceleration (see [CDSP/NPU Fix](#15-cdspnpu-fix)).
+- **~~NPU inference blocked~~**: Fixed — it was never a vendor block. FastRPC userspace (`libcdsprpc.so`), the hash-paired ASUS Hexagon binaries and a per-process SoC ID override make QNN/HTP run real inference with CPU fallback disabled. Two caveats survive: the Hexagon shell must match the signed CDSP firmware segment hashes, and the SoC ID override must stay scoped to the process (see [CDSP/NPU Fix](#15-cdspnpu-fix)).
 - **~~Battery charge control~~**: Fixed — udev rule sets 80% charge limit (see [Charge Control Fix](#16-battery-charge-control-fix))
 - **~~USB-C device links~~**: Cosmetic — `pmic_glink` logs `Failed to create device link (0x180)` for PS8833 retimers at boot. All functionality works ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6))
 - **1 unknown I2C device** on bus 4: address `0x5b` (may be camera sensor on CCI, not regular I2C)

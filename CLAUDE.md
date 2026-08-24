@@ -2,9 +2,9 @@
 
 ## O que é este projeto
 
-Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com Snapdragon X. A maior parte roda em runtime — 7 módulos DKMS, 1 patch `qcom-camss` histórico não instalado pelo setup, 1 fix Vulkan (LD_PRELOAD + ICD Turnip), 1 extensão GNOME, 1 fix UCM2 áudio, 1 fix suspend/lid, 1 fix cpufreq, 1 fix CDSP/FastRPC e 1 fix charge control; o sistema estável atual usa kernel custom 7.2.
+Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com Snapdragon X. A maior parte roda em runtime — 7 módulos DKMS, 1 patch `qcom-camss` histórico não instalado pelo setup, 1 fix Vulkan (LD_PRELOAD + ICD Turnip), 1 extensão GNOME, 1 fix UCM2 áudio, 1 fix suspend/lid, 1 fix cpufreq, 1 fix CDSP/NPU (FastRPC + runtime QNN) e 1 fix charge control; o sistema estável atual usa kernel custom 7.2.
 
-## Conquistas (18 itens; NPU parcial)
+## Conquistas (18 itens)
 
 1. **Boot** — Custom ISO + Zenbook A14 DTB (mesmo die Qualcomm "Purwa")
 2. **WiFi** — `pwrseq_qcom_wcn` nativo + `wlanfw20.mbn` como `amss.bin` + board data `NFA765a_AS_SA_X14QA` (corrige MHI `-110` no Linux 7.2)
@@ -20,7 +20,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 12. **Áudio** — UCM2 regex fix (Vivobook 14 não estava no match do alsa-ucm-conf)
 13. **Lid close** — tampa suspende via s2idle (~0.80W validado); deep/S3 crasha e continua desabilitado; família hibernate mascarada
 14. **cpufreq** — Módulo `scmi_cpufreq` in-tree autoload via `/etc/modules-load.d/` — CPU escala 710MHz–2.96GHz, governor schedutil
-15. **CDSP/FastRPC** — Firmware `qccdsp8380.mbn` no initramfs; CDSP online e nó não seguro em `root:render 0660`. QNN registra a NPU, mas HTP inference está bloqueada no backend Qualcomm para SoC ID 635/X1P42100
+15. **CDSP/NPU** — Firmware `qccdsp8380.mbn` no initramfs; CDSP online e nó não seguro em `root:render 0660`. Inferência QNN/HTP roda de verdade na NPU: FastRPC userspace (`libcdsprpc.so`), binários Hexagon da ASUS pareados por hash com o firmware e override do SoC ID escopado por processo (`tools/npu-run`)
 16. **Charge control** — udev rule seta limite 80% via `charge_control_end_threshold` — firmware aceita escrita, start auto 50%
 17. **Câmera RGB** — DKMS `vivobook_cam_fix` (DT overlay two-phase), `system_heap` e tuning OV02C10 — autostart gráfico tardio, libcamera/Snapshot, still 1080p e vídeo 720p30
 18. **Display color control** — DKMS `vivobook_color_ctrl` (CTM via DRM atomic commit do kernel) — msm_dpu expõe CTM/PCC mas não GAMMA_LUT, wl-gammarelay-rs e zwlr_gamma_control falham, módulo kernel bypassa restrição de DRM master
@@ -43,6 +43,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 - **NÃO usar `gpio_to_irq()`** — não funciona no Qualcomm TLMM, usar `irq_create_fwspec_mapping()`
 - **NÃO usar `GSK_RENDERER=ngl` como fix definitivo** — é workaround. O fix real é `vk_pool_fix.so` que mantém Vulkan
 - **NÃO usar `post-install-protect.sh`** — legado desativado; criava BLS duplicado e restaurava `pd_ignore_unused`
+- **NÃO trocar o firmware CDSP nem usar shell Hexagon de outro build** — o `qccdsp8380.mbn` assinado (`CDSP.HT.2.9.c1-00046-HAMOA-1`) carrega um whitelist de SHA-256 por segmento ELF; os shells públicos do `linux-msm/hexagon-dsp-binaries` (c1-00069/c1-00082) casam 1/4 e o par correto (17/17) vem do dump Windows em `windows-drivers/`. Trocar pelo `x1e80100/cdsp.mbn` genérico já foi testado: PAS rejeita com `-22`
 - **NÃO atualizar kernel/mesa sem testar** — auto-updates desabilitados por motivo, cada update pode quebrar os módulos DKMS
 
 ## Padrões técnicos
@@ -53,6 +54,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 | Firmware | initramfs via `/etc/dracut.conf.d/`, depois `sudo dracut --force` |
 | Vulkan fix | LD_PRELOAD em `/usr/local/lib64/` + `VK_DRIVER_FILES` via `~/.config/environment.d/` — MR 37622 corrige device select mas LVP ainda carrega sem o override, degradando rendering |
 | FastRPC | Expor somente `/dev/fastrpc-cdsp` não seguro ao grupo `render`; nunca relaxar permissões dos nós secure/ADSP |
+| Runtime NPU | `libcdsprpc.so` do [qualcomm/fastrpc](https://github.com/qualcomm/fastrpc) em `/usr/local/lib` + `/etc/ld.so.conf.d/fastrpc.conf`; binários Hexagon em `/usr/share/qcom/x1p42100/Qualcomm/Purwa-IoT-EVK/dsp/cdsp/` + YAML de mapa em `/usr/share/qcom/conf.d/`; SoC ID 635→555 via LD_PRELOAD escopado em `tools/npu-run` |
 | Câmera | `vivobook-camera.service` habilitado em `graphical.target`, após módulos core e display manager; carrega `system_heap`; instala `/usr/share/libcamera/ipa/simple/ov02c10.yaml`; nunca adicionar em `modules-load.d` nem usar `rmmod` |
 | Extensão GNOME | `~/.local/share/gnome-shell/extensions/<uuid>/`, ESM modules, GNOME 50 |
 | GRUB instalado | BLS + `custom.cfg` com `clk_ignore_unused mem_sleep_default=s2idle`; sem `pd_ignore_unused` |
@@ -79,7 +81,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 ## TODO
 
 - **Câmera IR (HM1092)** — sensor e binding Asus Purwa confirmados via pacote Qualcomm; AVDD/DOVDD dependem do pm8010, ausente no SPMI e sem resposta física aos testes RPMH. Continua bloqueada; não habilitar ou testar durante o trabalho da RGB. Findings em `docs/research/2026-04-11-ir-camera-discovery.md` e `docs/research/CAMERA_STATUS.md`.
-- **NPU QNN/HTP** — `onnxruntime-qnn 2.4.0` registra a NPU, mas o backend falha em inicializar no SoC real ID 635/X1P42100 mesmo como root e sem fallback CPU. Revalidar `tools/verify-qnn-npu.py` quando a Qualcomm publicar runtime compatível; não persistir spoof de SoC.
+- **NPU QNN/HTP** — RESOLVIDO em 2026-08-24; o README antigo errava ao chamar de bloqueio do runtime Qualcomm. Faltavam três peças: `libcdsprpc.so` (`NEEDED` do `libQnnHtpV73Stub.so`, ausente no Fedora), os binários Hexagon do CDSP e o SoC ID 635 fora da tabela do `libQnnHtp.so` (aborta em `logCreate` antes de tocar o DSP; 555 = X1E80100 funciona). Verificar com `dsp_check`, `fastrpc_test -d 3 -U 1` e `tools/npu-run tools/verify-qnn-npu.py` (`NPU devices: 1` + `[[1.0000001 2.0000002 3.5000002 4.2500005]]` para `abs([[-1,2,-3.5,4.25]])`; a diferença de ~4.7e-07 é precisão normal do HTP, comparar com tolerância e não com igualdade exata). Override de SoC ID escopado por processo via LD_PRELOAD é OK; spoof global e persistente na máquina, não.
 - **Warnings da câmera no kernel 7.2** — RESOLVIDO em 2026-08-24. `kernel/linux-7.2-camera-warning-fix.patch` (aplicado sempre por `kernel/build-linux-7.2-x1407qa.sh`) adiciona `.get_selection` ao `ov02c10` e pula o voto de `cpas_ahb` no camss x1e80100; `libcamera/libcamera-0.7.1-ov02c10.patch` registra o sensor no libcamera (RPM `0.7.1-1.fc44.x1407qa`). Boot limpo, sem `cam_cc_*` nem aviso de static properties.
 - **Orientação da câmera RGB** — o sensor é montado 180°. `rotation = <180>` no overlay é obrigatório: o libcamera só dirige `HFLIP`/`VFLIP` do OV02C10 quando o DT declara isso. Trocar para `<0>` cala um aviso e devolve a imagem de ponta cabeça.
 - **Validação do autostart da câmera (2026-08-24)** — reboot físico com serviço `enabled/active`; teclado e touchpad registraram antes do overlay, auditoria 16/16, still 1080p, vídeo 60/60 em 720p30 e fonte PipeWire `Built-in Front Camera`; sem Oops/soft lockup.

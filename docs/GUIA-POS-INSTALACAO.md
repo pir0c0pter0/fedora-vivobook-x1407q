@@ -25,16 +25,18 @@ systemctl status vivobook-camera.service
 cam -l
 cam -c 1 --capture=1 --stream role=still,width=1920,height=1080,pixelformat=XRGB8888
 
-# CDSP online não prova inferência NPU
+# CDSP online não prova inferência NPU — o verificador prova
 cat /sys/class/remoteproc/remoteproc1/{name,state}
 stat -c '%A %U:%G %n' /dev/fastrpc-cdsp
-~/.local/share/vivobook-qnn/bin/python tools/verify-qnn-npu.py
+tools/npu-run ~/.local/share/vivobook-qnn/bin/python tools/verify-qnn-npu.py
 ```
 
-Em 2026-08-24, GPU Vulkan e câmera RGB passaram após reboot. O último comando
-registra a NPU, mas falha na inicialização do backend HTP para o SoC ID
-`635`/X1P42100, inclusive como root. Esse é o resultado esperado até existir um
-runtime Qualcomm compatível; o verificador desabilita fallback CPU.
+Em 2026-08-24, GPU Vulkan, câmera RGB e inferência QNN/HTP passaram após
+reboot. O último comando deve imprimir `PASS: inferencia HTP/NPU com fallback
+de CPU desabilitado` e sair `0`; o verificador desabilita fallback CPU, então
+um PASS por CPU é impossível. Sem o wrapper `tools/npu-run` ele imprime
+`SKIP` e sai `2` — o `libQnnHtp.so` não conhece o SoC ID `635`/X1P42100 e o
+override de `soc_id` é escopado por processo, nunca global.
 
 Atualizações automáticas de kernel continuam desabilitadas. Um kernel novo só
 deve ser mantido depois de validar fisicamente boot, Wi-Fi, áudio, teclado,
