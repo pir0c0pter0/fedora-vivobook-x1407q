@@ -178,6 +178,15 @@ zstd --long=31 -t windows-drivers/X1407QA_DRV-full-2026-08-19.tar.zst
 
 ## Pendente
 
+- **Handoff da câmera para a próxima sessão:** nenhuma mudança de auto-start foi
+  aplicada. `vivobook-camera.service` continua `static`/on-demand e
+  `ExecStop=/bin/true`. Isso é deliberado: `systemctl stop` só muda o estado da
+  unit para `inactive`; `vivobook_cam_fix`, `qcom_camss`, `ov02c10`, CAMCC e os
+  device nodes continuam carregados. **Não testar `rmmod`**: tentativas
+  anteriores corromperam o estado GDSC do CAMCC, causaram crash/soft-lockup e
+  travaram shutdown. O único unload conhecido como seguro é reboot. Antes de
+  decidir auto-start no boot, investigar e provar uma sequência segura de
+  teardown; não substituir o no-op de `ExecStop` por `modprobe -r`.
 - Remover `x1407qa-fallback-fase2.conf` do notebook somente depois de soak
   suficiente da entry principal sem `pd_ignore_unused`.
 - Substituir o post-script morto do Anaconda pelo hook de `kernel-install`

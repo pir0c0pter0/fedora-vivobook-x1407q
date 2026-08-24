@@ -222,8 +222,23 @@ snapshot
 
 - `sudo rmmod vivobook_cam_fix` — CAMCC corrompe GDSCs ao recarregar, kernel crasha, shutdown trava
 - `sudo rmmod camcc_x1e80100` — mesmo problema
+- Trocar `ExecStop=/bin/true` por `modprobe -r`/`rmmod` sem antes provar um
+  teardown completo de sensor → CAMSS/CCI → CAMCC em um kernel descartável.
+  O estado `inactive` da unit **não significa módulos descarregados**.
 - Adicionar em `/etc/modules-load.d/` — CCI cria I2C buses que podem deslocar numeração (vivobook_kbd_fix já usa DT path, mas outros módulos podem quebrar)
 - Mudar GPIO5 DIG_OUT_SOURCE_CTL para 0x00 — mata a tela
+
+## Handoff — próxima sessão
+
+- Nenhum auto-start foi aplicado; o serviço permanece `static` e on-demand.
+- O app GNOME Snapshot deixou de encontrar a câmera porque uma captura `cam`
+  direta disputou `/dev/media0` enquanto o WirePlumber reconstruía o grafo
+  (`Failed to setup link ... Device or resource busy`). Reiniciar apenas
+  `wireplumber.service` publicou novamente `ov02c10 [libcamera]` e
+  `Built-in Front Camera`; não foi necessário recarregar módulos.
+- Próximo objetivo: estudar teardown seguro antes de alterar o ciclo de vida no
+  boot. Até lá, iniciar com `vivobook-camera start` e descarregar somente por
+  reboot.
 
 ## Referências
 
