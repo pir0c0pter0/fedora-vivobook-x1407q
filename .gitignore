@@ -17,3 +17,19 @@ mesa-25.3.6/
 
 # Pre-built binaries (compile from vk_pool_fix.c instead)
 vk_pool_fix.so
+
+# Backup dos drivers Windows — grande demais para git (hash no BUILD-STATE.md)
+windows-drivers/
+
+# Artefatos de build de módulos kernel e backups de pull
+modules/**/*.ko
+modules/**/*.o
+modules/**/.*.cmd
+modules/**/Module.symvers
+modules/**/modules.order
+modules/**/*.mod
+modules/**/*.mod.c
+*.pre-pull.local
+
+# Estado de ferramentas
+.claude-flow/
