@@ -74,15 +74,25 @@ de D3, e os root ports ficam presos pelos filhos ativos
 drivers). Controls revertidos para `on`; **nada persistido** — udev rule
 seria clutter sem efeito. Não re-testar sem mudança de kernel/driver.
 
-## Fase 2 — Remover `pd_ignore_unused` / `clk_ignore_unused` (maior ganho potencial, maior risco)
+## Fase 2 — Remover `pd_ignore_unused` / `clk_ignore_unused` ✅ TESTADA (2026-08-24)
 
-Esses flags são dreno constante desde o boot. Teste controlado:
+**Resultado: `pd_ignore_unused` REMOVIDO (permanente), `clk_ignore_unused` OBRIGATÓRIO.**
+Teste via entry BLS one-shot (`grub2-reboot`) + full poweroff entre boots:
 
-1. Entry GRUB de TESTE (manter a atual `08_vivobook` intacta como fallback).
-2. Remover só `pd_ignore_unused` primeiro. **Full poweroff** entre testes (regra do projeto: rails always-on sobrevivem warm reboot).
-3. Validar: `tools/audit-stable-hardware.sh --post-reboot` 16/16 + WiFi + áudio + brilho + teclado.
-4. Passou → repetir removendo também `clk_ignore_unused`.
-5. Qualquer quebra → voltar pro fallback e registrar QUAL subsistema quebrou (isso vira dado pra proteger o domínio específico no futuro).
+- **Sem `pd_ignore_unused`** (clk mantido): 16/16 PASS, WiFi/áudio/brilho/teclado
+  ok, som validado pelo usuário. `pm_genpd_summary` confirma domínios não usados
+  desligando de verdade (video_cc, usb4, gpu_cc idle). Aplicado na entry
+  principal `x1407qa-7.2.0-x1407qa.conf`.
+- **Sem `clk_ignore_unused`**: **WiFi morre.** Causa raiz: root port PCIe
+  `1c08000.pci` (bus 0004, WCN6855) falha `-ETIMEDOUT: cannot initialize host`
+  — "clk: Disabling unused clocks" (late_initcall) gata o clock de
+  referência/PHY antes do probe do controlador (initramfs, ~5s). Efeito
+  colateral: `msm_dp_display_probe: init sub module failed` no mesmo boot.
+  NVMe (`1bf8000.pci`) treina normal. Não re-testar sem mudança de kernel/DT.
+- **Consumo**: idle bateria 2.77W (média 90s, tela GDM) vs baseline
+  2.85–2.95W → ganho marginal ~0.1–0.2W.
+- Fica no alvo uma entry `x1407qa-fallback-fase2.conf` (cmdline antiga com
+  pd+clk) selecionável no GRUB — remover na Fase 4 após soak.
 
 ## Fase 3 — cpufreq na bateria ✅ APLICADA (2026-08-24)
 
