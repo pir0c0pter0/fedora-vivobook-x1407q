@@ -9,40 +9,19 @@ you can use it later on Fedora.
 
 ---
 
-## ⬇️ The ready-made ISO (download)
+## Build the current ISO
 
-Bootable Fedora 44 aarch64 ISO already patched for the Vivobook X1407QA
-(Snapdragon boot params + fix scripts bundled in):
-
-- **Link:** https://temp.sh/lzVpY/Fedora-Workstation-Live-44-1.7.aarch64-VivoBook-patched.iso
-- **Expires:** ~2026-07-02 (temp.sh keeps files for ~3 days — download soon)
-- **SHA256:**
-  ```
-  0396b34c930bf0149c1d04ee8ff76957019dd6503b34037fe8541f4a82f5c263
-  ```
-
-**Download in a browser:** open the link and click *"Click here to download"*.
-
-**Download from a terminal** (temp.sh serves it via POST):
+The temporary ready-made ISO expired on 2026-07-02 and predates the complete
+Snapdragon Live USB boot workarounds. Build the current image from this repo:
 
 ```bash
-curl -L -X POST \
-  "https://temp.sh/lzVpY/Fedora-Workstation-Live-44-1.7.aarch64-VivoBook-patched.iso" \
-  -o Fedora-Workstation-Live-44-1.7.aarch64-VivoBook-patched.iso
+git clone https://github.com/pir0c0pter0/fedora-vivobook-x1407q.git
+cd fedora-vivobook-x1407q
+bash build-vivobook-iso.sh
 ```
 
-**Verify integrity** (must match the SHA256 above):
-
-```bash
-sha256sum Fedora-Workstation-Live-44-1.7.aarch64-VivoBook-patched.iso
-```
-
-**Write to a USB drive** (⚠️ erases the whole USB — double-check `/dev/sdX`):
-
-```bash
-sudo dd if=Fedora-Workstation-Live-44-1.7.aarch64-VivoBook-patched.iso \
-  of=/dev/sdX bs=4M status=progress oflag=sync && sync
-```
+The builder downloads and verifies Fedora 44 aarch64, adds the required Live
+USB parameters and bundled fix scripts, and can write the result to a USB drive.
 
 > The ISO does **not** include the Qualcomm firmware (proprietary). You extract
 > it from your own Windows using the `.bat` below, **before** installing Fedora.
@@ -137,7 +116,7 @@ sudo reboot
 ## Full flow (summary)
 
 1. **(Windows, before formatting)** run `extract-firmware-windows.bat` → dump onto the USB.
-2. Write the Vivobook ISO to a USB drive and boot it (F12) → install Fedora to the NVMe.
+2. Build the current Vivobook ISO, write it to a USB drive and boot it (F12) → install Fedora to the NVMe.
 3. **(Fedora installed)** `extract-qcom-firmware.sh <usb>/vivobook-qcom-firmware`.
 4. `setup-vivobook.sh` → all hardware fixes.
 5. `sudo reboot`.

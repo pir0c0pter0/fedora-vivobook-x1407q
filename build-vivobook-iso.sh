@@ -565,12 +565,12 @@ README
 # ─── Modify GRUB ─────────────────────────────────────────────────────────────
 modify_grub() {
     log "Modificando GRUB..."
-    local snap_params="clk_ignore_unused pd_ignore_unused"
+    local snap_params="clk_ignore_unused pd_ignore_unused systemd.tpm2_wait=0 modprobe.blacklist=qcom_q6v5_pas"
 
     # grub.cfg files
     while IFS= read -r grub_cfg; do
         [[ -f "$grub_cfg" ]] || continue
-        if ! grep -q "clk_ignore_unused" "$grub_cfg"; then
+        if ! grep -q "modprobe.blacklist=qcom_q6v5_pas" "$grub_cfg"; then
             sed -i '/^[[:space:]]*linux\(efi\)\?[[:space:]]/s/$/ '"$snap_params"'/' "$grub_cfg"
             log "  GRUB: ${grub_cfg#"$ISO_DIR"/}"
         fi
@@ -579,7 +579,7 @@ modify_grub() {
     # BLS entries
     while IFS= read -r entry; do
         [[ -f "$entry" ]] || continue
-        if ! grep -q "clk_ignore_unused" "$entry"; then
+        if ! grep -q "modprobe.blacklist=qcom_q6v5_pas" "$entry"; then
             sed -i "/^options /s/$/ $snap_params/" "$entry"
             log "  BLS: $(basename "$entry")"
         fi
@@ -735,7 +735,7 @@ show_instructions() {
     info "1. Grave o ISO no pendrive (opção 4)"
     info "2. BIOS (F2): Desabilite Secure Boot, habilite USB boot"
     info "3. Boot menu (F12): Selecione USB"
-    info "4. Fedora boota (GRUB já tem clk_ignore_unused — Parte 1)"
+    info "4. Fedora boota (GRUB já tem os workarounds Snapdragon — Parte 1)"
     info "5. Instale no NVMe normalmente e reboote no sistema instalado"
     info "6. PARTE 2 — aplicar os fixes de hardware (no Vivobook):"
     info "     sudo /opt/vivobook-fixes/extract-qcom-firmware.sh  (se preciso)"
