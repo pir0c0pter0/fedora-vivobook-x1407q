@@ -1448,10 +1448,18 @@ else
     warn "  tools/setup-npu-runtime.sh ausente — runtime da NPU não configurado"
 fi
 
-# ─── 16. Charge control — udev rule 80% + freq cap na bateria ───────────────
+# ─── 16. Charge control — limite 80% via upower + freq cap na bateria ───────
 step 16 $TOTAL "Charge control (limite 80%)..."
-echo 'SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-bat", ATTR{charge_control_end_threshold}="80"' > /etc/udev/rules.d/99-battery-charge-limit.rules
-echo 80 > /sys/class/power_supply/qcom-battmgr-bat/charge_control_end_threshold 2>/dev/null || true
+# ponytail: quem manda no limite é o upower (1.91 aplica 75/80 e persiste em
+# /var/lib/upower/charging-threshold-status). A udev rule antiga reescrevia 80 a
+# cada uevent — e escrever o threshold gera uevent — então trocar o modo de carga
+# em Ajustes → Energia voltava para 80 em milissegundos.
+rm -f /etc/udev/rules.d/99-battery-charge-limit.rules
+if ! busctl call org.freedesktop.UPower \
+        /org/freedesktop/UPower/devices/battery_qcom_battmgr_bat \
+        org.freedesktop.UPower.Device EnableChargeThreshold b true >/dev/null 2>&1; then
+    warn "  upower não aceitou EnableChargeThreshold — limite de carga fica em Ajustes → Energia"
+fi
 
 # Freq cap na bateria (plano de bateria Fase 3): 2.38GHz na bateria, 2.96GHz no AC/USB
 cat > /usr/local/bin/vivobook-battery-freq-cap << 'EOF'

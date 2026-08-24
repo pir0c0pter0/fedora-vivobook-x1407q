@@ -449,9 +449,10 @@ verify_system_configs() {
         ((issues++))
     fi
 
-    # udev charge control
-    if [[ ! -f /etc/udev/rules.d/99-battery-charge-limit.rules ]]; then
-        echo "⚠️  udev rule de charge control ausente!"
+    # charge control (2026-08-24: invertido — a rule é que não pode existir,
+    # ela reescrevia o threshold a cada uevent e travava os modos em 80%)
+    if [[ -f /etc/udev/rules.d/99-battery-charge-limit.rules ]]; then
+        echo "⚠️  99-battery-charge-limit.rules presente — remova"
         ((issues++))
     fi
 

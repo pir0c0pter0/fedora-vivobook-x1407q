@@ -40,13 +40,13 @@
 | **Keyboard** | ASUS I2C-HID, VID `0x0b05`, PID `0x4543`, bus 4 (`b94000`), addr `0x3a` |
 | **Touchpad** | ELAN I2C-HID clickpad, VID `0x04f3`, PID `0x3313`, bus 1 (`b80000`), addr `0x15` |
 | **Camera RGB** | OV02C10 (2MP, 1080p) on CCI1 bus 1 (AON), addr `0x36`, CSIPHY4, MCLK4 19.2MHz |
-| **Camera IR** | 1× IR sensor (Windows Hello), pm8010 PMIC absent — not functional |
+| **Camera IR** | Himax HM1092 (Windows Hello) on CCI0 bus 0, addr `0x24`, CSIPHY0, MCLK0 24MHz, reset GPIO 109 |
 | **Privacy shutter** | Mechanical slide cover — no electronic switch, no GPIO event |
 | **Battery** | 50Wh Li-ion X321-42, driver `qcom_battmgr` via `pmic_glink` |
 
 ## Achievements
 
-Starting from a laptop that **refused to boot** Linux, every fix was reverse-engineered from scratch — no upstream support, no documentation, no community guides for this model. **18 achievements** and counting.
+Starting from a laptop that **refused to boot** Linux, every fix was reverse-engineered from scratch — no upstream support, no documentation, no community guides for this model. **19 achievements** and counting.
 
 | # | Achievement | Method | Impact |
 |---|------------|--------|--------|
@@ -65,11 +65,12 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 13 | **Lid close = s2idle suspend** | `mem_sleep_default=s2idle` + logind `HandleLidSwitch=suspend` | deep (S3) still crashes and stays disabled; s2idle validated 2026-08-24 — ~0.80W suspended vs 2.85W idle on |
 | 14 | **CPU frequency scaling** | Autoload in-tree `scmi_cpufreq` module | CPU scales 710MHz–2.96GHz, battery savings + thermal protection |
 | 15 | **CDSP online + NPU inference** | CDSP firmware in initramfs + FastRPC userspace + hash-paired Hexagon binaries + scoped SoC ID override | Hexagon Compute DSP boots at early boot and QNN/HTP runs real NPU inference with CPU fallback disabled |
-| 16 | **Battery charge limit** | udev rule sets 80% threshold | Charge stops at 80%, starts at 50% — extends battery lifespan |
+| 16 | **Battery charge limit** | `upower` owns the threshold (no udev rule) | Settings → Power switches between 80% and 100%; both modes actually apply |
 | 17 | **RGB camera functional** | `vivobook_cam_fix` + patched kernel/libcamera + late graphical autostart | OV02C10 on CCI1 — upright image, still 1080p, 720p30 video and Snapshot/PipeWire after every boot; CAMCC and libcamera warnings gone on the 7.2 build |
 | 18 | **Display color control** | DKMS module `vivobook_color_ctrl` — CTM via DRM atomic commit from kernel space | msm_dpu exposes CTM/PCC but not GAMMA_LUT — wl-gammarelay-rs and zwlr_gamma_control both fail; kernel module bypasses DRM master restriction |
+| 19 | **IR camera streaming** | Own `hm1092` driver + node in the camera overlay | Windows Hello sensor streams 560×360 Y10 at ~29.7 fps. The 2026-04 "pm8010 is absent" verdict was wrong — LDO7 only registers at 2.912 V, the one value on the RPMh 8 mV grid that ASUS' own `CAMI_RES_QRD.bin` asks for |
 
-**7 custom kernel modules**, **1 kernel camera patch applied by the 7.2 build**, **1 libcamera patch**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP/NPU runtime fix**, **1 charge control fix** — most model-specific fixes run at runtime via DKMS/module overlays/LD_PRELOAD. The installed stable path uses the Zenbook A14 DTB from BLS plus the custom 7.2 kernel for early-boot fixes.
+**8 custom kernel modules**, **1 kernel camera patch applied by the 7.2 build**, **1 libcamera patch**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP/NPU runtime fix**, **1 charge control fix** — most model-specific fixes run at runtime via DKMS/module overlays/LD_PRELOAD. The installed stable path uses the Zenbook A14 DTB from BLS plus the custom 7.2 kernel for early-boot fixes.
 
 ## Current Status
 
@@ -98,7 +99,7 @@ instalado com validação física da reconstrução atual.
 | **Suspend (s2idle)** | :white_check_mark: Working | s2idle validated 2026-08-24 on installed `7.2.0-x1407qa` — 2 clean cycles, ~0.80W suspended. deep (S3) still crashes and stays disabled (see [Lid Close Fix](#13-lid-close-fix)) |
 | **cpufreq** | :white_check_mark: Working | SCMI cpufreq via autoload — 710MHz–2.96GHz, schedutil governor (see [CPU Frequency Fix](#14-cpu-frequency-fix)) |
 | **CDSP / NPU** | :white_check_mark: Working | CDSP, FastRPC and QNN HTP inference all work with CPU fallback disabled; the SoC ID override is applied per process by `tools/npu-run`, never system-wide (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
-| **Charge control** | :white_check_mark: Working | Charge limit 80% via udev rule (see [Charge Control Fix](#16-battery-charge-control-fix)) |
+| **Charge control** | :white_check_mark: Working | Charge modes via `upower`/Settings (see [Charge Control Fix](#16-battery-charge-control-fix)) |
 | **USB-C DP alt-mode** | :white_check_mark: Working | Both ports, tested DP-2 up to 2560×1600. Device link errors at boot are cosmetic ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
 | **USB4 / TB3 tunneling** | :x: Not working | DP alt-mode and plain USB-C docks work (Dell SD25: 10 Gbps hub + 2.5GbE + charging + display). Firmware and hardware map were recovered from Windows/BIOS, but the Qualcomm host-router driver and final DT stack are not public (Aug 2026). See [USB4/TB3 Status](#usb4tb3-status-aug-2026) |
 | **Camera RGB** | :white_check_mark: Working | Late graphical autostart validated after reboot; upright image, still/video and PipeWire work. CAMCC clock and libcamera metadata warnings are gone with the patched 7.2 kernel and libcamera (see [Camera Fix](#17-rgb-camera-fix)) |
@@ -1328,27 +1329,45 @@ cannot be a CPU execution in disguise.
 Unknown battery technology 'OOD'
 ```
 
-**Solution:** udev rule to set charge limit when the battery device appears:
+**Solution:** let `upower` own the thresholds — Settings → Power exposes the charge modes:
 
 ```bash
-echo 'SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-bat", ATTR{charge_control_end_threshold}="80"' | sudo tee /etc/udev/rules.d/99-battery-charge-limit.rules
+sudo rm -f /etc/udev/rules.d/99-battery-charge-limit.rules   # see the udev-rule regression below
 sudo udevadm control --reload-rules
+sudo busctl call org.freedesktop.UPower \
+    /org/freedesktop/UPower/devices/battery_qcom_battmgr_bat \
+    org.freedesktop.UPower.Device EnableChargeThreshold b true
 ```
 
-**Verify:**
+**The udev-rule regression (fixed 2026-08-24):** the original fix installed
+`99-battery-charge-limit.rules` with `ATTR{charge_control_end_threshold}="80"`.
+Writing that attribute makes the kernel call `power_supply_changed()`, which emits a
+`change` uevent, which re-runs the rule — so picking *Maximize Charge* in Settings
+went back to 80% within milliseconds. Both charge modes looked identical at 80%.
+The rule was also redundant: `upower` 1.91 applies the same 75/80 pair and persists
+the choice in `/var/lib/upower/charging-threshold-status`.
+
+**Verify — both modes, measured on the machine:**
 ```bash
-cat /sys/class/power_supply/qcom-battmgr-bat/charge_control_end_threshold    # → 80
-cat /sys/class/power_supply/qcom-battmgr-bat/charge_control_start_threshold  # → 50 (auto-set by firmware)
+B=/sys/class/power_supply/qcom-battmgr-bat
+D=/org/freedesktop/UPower/devices/battery_qcom_battmgr_bat
+
+sudo busctl call org.freedesktop.UPower $D org.freedesktop.UPower.Device EnableChargeThreshold b false
+cat $B/charge_control_start_threshold $B/charge_control_end_threshold   # → 50 / 100  (Maximize Charge)
+
+sudo busctl call org.freedesktop.UPower $D org.freedesktop.UPower.Device EnableChargeThreshold b true
+cat $B/charge_control_start_threshold $B/charge_control_end_threshold   # → 75 / 80   (Preserve Battery Health)
 ```
 
 | Property | Value |
 |----------|-------|
 | **Driver** | `qcom_battmgr` via `pmic_glink` |
 | **Battery** | X321-42 50Wh, serial 10956 |
-| **Charge stop** | 80% (`charge_control_end_threshold`) |
-| **Charge start** | 50% (auto-set by firmware when end=80) |
+| **Owner of the threshold** | `upower` 1.91 — never a udev rule |
+| **Preserve Battery Health** | start 75% / stop 80% (upower defaults) |
+| **Maximize Charge** | start 50% / stop 100% (firmware defaults) |
 | **Technology** | Reported as "OOD" by firmware — cosmetic, non-functional |
-| **Config file** | `/etc/udev/rules.d/99-battery-charge-limit.rules` |
+| **Persisted in** | `/var/lib/upower/charging-threshold-status` |
 
 ---
 
@@ -1364,7 +1383,7 @@ overlay, the OV02C10 sensor has no I2C bus, clocks, ISP pipeline, or power.
 2. **Overlay -22 (EINVAL)** on CCI child nodes — solved with two-phase overlay (CCI disabled in phase 1, enabled in phase 2)
 3. **CCI crash `list_add corruption`** — CCI1 only had `i2c-bus@1`, master[0] never initialized — added empty `i2c-bus@0`
 4. **Regulator not registering** — RPMH parent already probed, overlay child ignored — created separate `regulators-9` block
-5. **pm8010 absent** — camera PMIC doesn't exist physically. Power topology from AeoB firmware: AVDD/DVDD via `vreg_l7b_2p8` (PM8550B), DOVDD via `vreg_l3m_1p8` (RPMH fire-and-forget)
+5. **Sensor had no power** — power topology taken from AeoB firmware: AVDD/DVDD via `vreg_l7b_2p8` (PM8550B), DOVDD via `vreg_l3m_1p8` (pm8010 LDO3 over RPMH). This step was long documented as "pm8010 is physically absent"; [fix 19](#19-ir-camera-hm1092-fix) proved the PMIC is there and the RGB rails simply never needed it
 6. **`cam_cc_pll8 failed to enable!`** — runtime PM suspends CAMCC after probe, MMCX powers off, all PLL registers lost (L=0). Fix: `pm_runtime_get_sync(camcc_dev)` holds CAMCC awake
 7. **Image upside down** — sensor is mounted 180°. `rotation = <180>` in the DT node makes libcamera drive the sensor `HFLIP`/`VFLIP` controls, so frames leave the sensor upright. Declaring `rotation = <0>` silences a warning but leaves the image inverted
 8. **`cam_cc_slow_ahb_clk_src` WARN on `streamon`** — `qcom_camss` votes a `cpas_ahb` rate on `x1e80100` and trips `clk-rcg2.c:update_config()`. `kernel/linux-7.2-camera-warning-fix.patch` skips that vote on `x1e80100-camss` and is applied by `kernel/build-linux-7.2-x1407qa.sh`, so the warning is gone on the 7.2 build.
@@ -1405,7 +1424,7 @@ before loading the camera overlay. The privacy shutter is purely mechanical
 
 **What doesn't work:**
 - `rmmod vivobook_cam_fix` — CAMCC GDSC corruption on re-probe, kernel crash. Unload only via reboot
-- IR camera — pm8010 PMIC physically absent, sensor has no power (see [Camera Research](#camera-research))
+- Simultaneous RGB + IR capture — Purwa has no IFE1/CSID1, so both sensors contend for `csid0 → vfe0_rdi0` (see [IR Camera Fix](#19-ir-camera-hm1092-fix))
 
 **Validated again after clean reboot with autostart (2026-08-24, patched kernel 7.2 + libcamera 0.7.1-1.fc44.x1407qa):**
 
@@ -1487,6 +1506,76 @@ echo "1.15" | sudo tee /sys/kernel/vivobook_color/contrast
 
 ---
 
+### 19. IR Camera (HM1092) Fix
+
+**Problem:** the Windows Hello IR sensor answered on no I2C bus at any address.
+Provisioning its AVDD rail (pm8010 LDO7) made `devm_regulator_register()` return
+`-ENOTRECOVERABLE` and take the whole regulator block down with it. In April 2026
+this was written up as "the pm8010 camera PMIC is not physically on the board".
+
+**Root cause:** five independent bugs, none of them missing hardware.
+
+1. **AVDD voltage off the regulator's step grid.** The April attempt asked for
+   2,900,000 µV, a value read from the generic `CAMI_RES_MTP.bin`. The binary the
+   factory Windows actually loads on this machine is `CAMI_RES_QRD.bin` — the INF
+   `qccamauxsensor_extension8380.inf` maps `SUBSYS_13041043&REV_0001` to `QRD_Pw` —
+   and it asks for **2,912,000 µV**. `pmic5_pldo` steps in 8 mV: 2.912 V lands on an
+   exact selector, 2.900 V does not. With `min == max` off-grid the core refuses the
+   constraint, registration fails, and the failure reads like an absent PMIC.
+   `vreg_l3m_1p8` and `vreg_l4m_1p8` had been registering on that same pm8010 all along.
+2. **The sensor does not auto-increment the register pointer.** Reading 2 bytes from
+   0x0000 returns `0x10,0xff` instead of `0x10,0x91`. No `CCI_REG16` anywhere — every
+   16-bit register is two 8-bit writes, low byte first, exactly like the factory sequence.
+3. **CSIPHY0 region mapped at half size.** The overlay gave `0x1000` to csiphy0/1/2, but
+   the stride between bases is `0x2000` and `csiphy_reset()` writes at `base+0x1000` — a
+   paging Oops on the first stream. The RGB path never hit it because csiphy4 already had `0x4000`.
+4. **Purwa has no IFE1 and no CSID1** (`cam_cc_ife_1_gdsc status stuck at 'off'`). The
+   Purwa `IRP3.bin` lists only `IFE0`, `IFELITE0`, `IFE_CSID0`, `IFELITE_CSID0`; the
+   generic `IRS3.bin` has IFE1, CSID1 and SFE. So the path must be `csid0 → vfe0_rdi0` —
+   the same one the RGB camera uses.
+5. **One lane, not two.** The init PLL gives `24 MHz ÷ 12 × 90 = 180 MHz`; 180 MHz DDR is
+   360 Mbps, which at 10 bpp is exactly the mode's 36 Mpix/s. With 2 lanes configured the
+   link had twice the bandwidth it needed and no frame ever arrived.
+
+**Solution:** a dedicated `hm1092` V4L2 driver (`modules/vivobook-ir-cam-1.0/`,
+compatible `himax,hm1092`) plus a sensor node on CCI0 bus 0 in the camera overlay.
+
+```bash
+# capture (releases the RGB link first — both sensors share CSID0)
+tools/ir-camera-capture.sh
+```
+
+| Property | Value |
+|----------|-------|
+| **I2C** | i2c-9 (CCI0 bus 0, GPIO 101/102), addr `0x24`, 16-bit register / 8-bit data |
+| **Model ID** | `0x1091` at 0x0000/0x0001, read as two separate bytes |
+| **AVDD** | `vreg_l7m_2p9` — pm8010 LDO7 at **2,912,000 µV**, own `regulators-10` block |
+| **DOVDD** | `vreg_l4m_1p8` — pm8010 LDO4, 1.8V |
+| **MCLK / Reset** | MCLK0 @ 24 MHz on GPIO 96 / GPIO 109 active-low |
+| **CSI-2** | 1 lane, link frequency 180 MHz, DT 0x2B (RAW10) |
+| **Mode** | 560×360 `MEDIA_BUS_FMT_Y10_1X10`, HTS 1616, VTS 750, ~29.7 fps |
+| **Pipeline** | `hm1092 → csiphy0 → csid0 → vfe0_rdi0 → /dev/video0` (`Y10P`) |
+| **Init sequence** | 185 writes from `com.qti.sensormodule.hm1092.bin`, in `hm1092_regs.h` |
+| **Exposure** | 0x0202/0x0203, in lines — monotonic and verified against a fixed scene |
+| **Gain** | 0x020E/0x020F, 8.8 format, 10-bit field. Usable `0x100`–`0x3ff`; above `0x400` the sensor outputs a flat black-level frame. Exposed as `V4L2_CID_ANALOGUE_GAIN` because libcamera drops any sensor without that control, and SMIA analogue gain (0x0204/0x0205) is not implemented on this part |
+
+**Still missing:**
+
+- **IR illuminator** — this is why the image is dark: without it only IR light sources
+  (lamps) appear. Not a GPIO — `qccamflash_ext8380` declares
+  `IrLedCurrentMilliampere = 700`, i.e. a PMIC flash LED. The kernel ships
+  `leds-qcom-flash.ko`, but there is no flash node in the DTB and the PMIC and
+  register base are still unknown.
+- **libcamera capture** — the sensor *enumerates* (`cam -l` shows
+  `/base/soc@0/cci@ac15000/i2c-bus@0/camera@24`), but the soft-ISP answers
+  `Unsupported input format R10_CSI2P`: the debayer does not handle monochrome RAW10.
+  That message also shows up when using the RGB camera; it comes from enumerating the
+  IR sensor and is harmless.
+- **Coexistence with the RGB camera** — both contend for CSID0/VFE0_RDI0. Simultaneous
+  streaming is untested and probably needs different RDIs on the same VFE.
+
+---
+
 ## System Configuration Summary
 
 ### Files modified on the system
@@ -1559,8 +1648,8 @@ systemd masked targets:
     hibernate.target, hybrid-sleep.target, suspend-then-hibernate.target
     (sleep.target and suspend.target unmasked since 2026-08-24 — s2idle validated)
 
-/etc/udev/rules.d/
-    99-battery-charge-limit.rules → charge_control_end_threshold=80
+/var/lib/upower/
+    charging-threshold-status → 1 = 75/80 limit, 0 = 50/100 full charge
 
 /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/
     qcadsp8380.mbn, adsp_dtbs.elf, adspr.jsn, adsps.jsn, adspua.jsn, battmgr.jsn
@@ -1602,7 +1691,7 @@ The Vivobook 14 X1407QA has an FHD IR camera module. DSDT analysis (Zenbok A14 A
 | Sensor | Type | Status | Details |
 |--------|------|--------|---------|
 | **OV02C10** | RGB | :white_check_mark: **Working** | CCI1 bus 1 (AON), addr `0x36`, MCLK4, libcamera + Snapshot OK |
-| **IR sensor** | IR | :x: **Blocked** | pm8010 PMIC physically absent — AVDD (LDO7_M 2.9V) has no power source |
+| **HM1092** | IR | :white_check_mark: **Working** | CCI0 bus 0, addr `0x24`, MCLK0, own `hm1092` driver — 560×360 Y10 @ ~29.7 fps (see [IR Camera Fix](#19-ir-camera-hm1092-fix)) |
 
 **Privacy shutter:** Mechanical slide cover only — no GPIO, no HID event, no software detection possible. Confirmed by monitoring dmesg/journalctl during open/close cycles.
 
@@ -1629,21 +1718,24 @@ All components loaded via DKMS two-phase DT overlay (`vivobook_cam_fix` v2.0):
 | 2 | Overlay -22 (EINVAL) | CCI probe during overlay apply conflicts with changeset | Two-phase overlay: CCI disabled in phase 1, enabled in phase 2 |
 | 3 | CCI crash `list_add corruption` | CCI1 only had `i2c-bus@1`, master[0] uninitialized | Added empty `i2c-bus@0` |
 | 4 | Regulator not registering | RPMH parent already probed, ignores overlay children | Separate `regulators-9` block |
-| 5 | Sensor no power | pm8010 absent | Power from PM8550B: AVDD/DVDD `vreg_l7b_2p8`, DOVDD `vreg_l3m_1p8` (RPMH fire-and-forget) |
+| 5 | Sensor no power | Camera rails never provisioned (long misread as "pm8010 absent" — see [fix 19](#19-ir-camera-hm1092-fix)) | Power from PM8550B: AVDD/DVDD `vreg_l7b_2p8`, DOVDD `vreg_l3m_1p8` (pm8010 LDO3 over RPMH) |
 | 6 | PLL8 enable timeout (-110) | Runtime PM suspends CAMCC → MMCX off → PLL registers lost | `pm_runtime_get_sync(camcc_dev)` holds CAMCC awake |
 | 7 | Image upside down | Sensor mounted 180° | `rotation = <180>` in DT node |
 
-### IR Camera — Blocked
+### IR Camera — the 2026-04 dead end (superseded)
 
-| Test | Result |
-|------|--------|
-| Replace AVDD with `vreg_l7b_2p8` (PM8550B) | Regulator OK but wrong physical wire — sensor NACK (-ENXIO) |
-| RPMH direct write via `cmd_db_read_addr("ldom7")` | Write accepted (addr 0x41600) but no real voltage — pm8010 doesn't exist |
-| `regulator-fixed` dummy + scan all CCI buses | All buses empty at all addresses |
+These tests were run in April 2026 and led to the wrong conclusion. They are kept
+because they explain why the sensor looked dead for four months:
 
-**Conclusion:** pm8010 is in CMD-DB (from reference design) but not physically on the board. No one upstream has IR camera working on Snapdragon X Linux.
+| Test | Result at the time | What it actually meant |
+|------|--------------------|------------------------|
+| Replace AVDD with `vreg_l7b_2p8` (PM8550B) | Regulator OK but sensor NACK (-ENXIO) | Right rail voltage, wrong physical wire — and the sensor was being probed at 0x36 on the wrong bus |
+| RPMH direct write via `cmd_db_read_addr("ldom7")` | Write accepted (addr 0x41600), no response | The write was fine; nothing else in the chain was configured yet |
+| `regulator-fixed` dummy + scan all CCI buses | All buses empty at all addresses | The sensor answers at `0x24` with 16-bit register addressing — an 8-bit probe scan never sees it |
 
-**Future paths:** (a) wait for upstream ISP support (Spectra 695), (b) find alternative LDO on the board, (c) extract DSDT from Windows laptop with same SoC.
+The blocking symptom was `devm_regulator_register()` returning `-ENOTRECOVERABLE`
+for pm8010 LDO7, which was read as "the PMIC is not on the board". It was a
+voltage off the regulator's step grid — see [fix 19](#19-ir-camera-hm1092-fix).
 
 ### AeoB Firmware Data
 
@@ -1662,7 +1754,7 @@ All components loaded via DKMS two-phase DT overlay (`vivobook_cam_fix` v2.0):
 
 | Property | Value |
 |----------|-------|
-| AVDD | `vreg_l7m` (pm8010 LDO7, 2.9V) — **BLOCKED: pm8010 absent** |
+| AVDD | `vreg_l7m` (pm8010 LDO7) — the generic MTP file says 2.9V, which is **off the 8mV grid**; the Purwa `CAMI_RES_QRD.bin` says 2.912V and registers |
 | DOVDD | `vreg_l4m` (pm8010 LDO4, 1.8V) |
 | Clock | `cam_cc_mclk0_clk` (MCLK0, GPIO 96) |
 | Reset | GPIO 109 (active low) |
@@ -1752,8 +1844,13 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 │   │   ├── vivobook-camera
 │   │   ├── Makefile
 │   │   └── dkms.conf
-│   └── vivobook-color-ctrl-1.0/  # Display color control — CTM saturation + contrast
-│       ├── vivobook_color_ctrl.c
+│   ├── vivobook-color-ctrl-1.0/  # Display color control — CTM saturation + contrast
+│   │   ├── vivobook_color_ctrl.c
+│   │   ├── Makefile
+│   │   └── dkms.conf
+│   └── vivobook-ir-cam-1.0/      # HM1092 IR sensor driver (Windows Hello)
+│       ├── hm1092.c
+│       ├── hm1092_regs.h         # 185-register init sequence from the Windows dump
 │       ├── Makefile
 │       └── dkms.conf
 └── CLAUDE.md                      # AI assistant project rules
@@ -1768,12 +1865,12 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **~~Camera RGB warnings~~**: Fixed — the 7.2 build applies `kernel/linux-7.2-camera-warning-fix.patch` and the patched `libcamera` 0.7.1 registers `ov02c10`, so the CAMCC clock and static-property warnings are gone. Late graphical autostart still drives 1080p still, 720p30 video and PipeWire, and `rmmod` remains unsafe — reboot to unload (see [Camera Fix](#17-rgb-camera-fix))
 - **~~Boot-time regression~~**: Fixed — installed zram/Plymouth waits removed; current boot is 7.301s total with `graphical.target` at 3.278s userspace, while `rd.live.ram` remains exclusive to the main live entry.
 - **~~Firewall~~**: Fixed — the custom 7.2 config now builds nftables, FIB/reject/NAT expressions, and the NetBIOS conntrack helper required by the FedoraWorkstation zone. `firewalld` is `active/running` and the generated ruleset is loaded.
-- **Camera IR**: pm8010 PMIC physically absent — sensor has no power. No one upstream has IR camera working on Snapdragon X Linux (see [Camera Research](#camera-research))
+- **~~Camera IR~~**: Fixed — the HM1092 streams 560×360 Y10 at ~29.7 fps through its own `hm1092` driver; pm8010 was never absent (see [IR Camera Fix](#19-ir-camera-hm1092-fix)). Two gaps remain: there is no IR illuminator node yet (PMIC flash LED at 700mA), so only IR light sources show up, and libcamera enumerates the sensor but its soft-ISP rejects `R10_CSI2P` — capture goes through `tools/ir-camera-capture.sh`
 - **Suspend**: `deep` (S3) still crashes and stays disabled. `s2idle` validated 2026-08-24 on the installed `7.2.0-x1407qa` — 2 clean cycles, ~0.80W suspended (see [Lid Close Fix](#13-lid-close-fix)). No RTC alarm on pm8xxx — wake by lid/power button only ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
 - **USB4 / Thunderbolt 3**: Plain DP alt-mode works, but TB3 tunneling is blocked. Reverse engineering recovered the embedded MCU firmware and exact HR/QMP identity; public upstream has non-PCI NHI prep and a pending PHY v4, but still lacks the Qualcomm host-router driver and final DT graph as of Aug 2026. See [USB4/TB3 Status](#usb4tb3-status-aug-2026)
 - **~~cpufreq~~**: Fixed — `scmi_cpufreq` autoload via `/etc/modules-load.d/` ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
 - **~~NPU inference blocked~~**: Fixed — it was never a vendor block. FastRPC userspace (`libcdsprpc.so`), the hash-paired ASUS Hexagon binaries and a per-process SoC ID override make QNN/HTP run real inference with CPU fallback disabled. Two caveats survive: the Hexagon shell must match the signed CDSP firmware segment hashes, and the SoC ID override must stay scoped to the process (see [CDSP/NPU Fix](#15-cdspnpu-fix)).
-- **~~Battery charge control~~**: Fixed — udev rule sets 80% charge limit (see [Charge Control Fix](#16-battery-charge-control-fix))
+- **~~Battery charge control~~**: Fixed — `upower` owns the threshold, Settings → Power switches modes (see [Charge Control Fix](#16-battery-charge-control-fix))
 - **~~USB-C device links~~**: Cosmetic — `pmic_glink` logs `Failed to create device link (0x180)` for PS8833 retimers at boot. All functionality works ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6))
 - **1 unknown I2C device** on bus 4: address `0x5b` (may be camera sensor on CCI, not regular I2C)
 

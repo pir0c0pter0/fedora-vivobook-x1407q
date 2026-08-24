@@ -50,8 +50,10 @@ Phase 2: CCI0 status="okay" + CCI1 status="okay"
 **Causa:** `vreg_l7b_2p8` adicionado como filho do bloco `regulators-0` (PM8550B) que já probou no boot. O driver RPMH não re-proba para pegar filhos novos do overlay.
 **Fix:** Criar bloco RPMH separado `regulators-9` com `compatible = "qcom,pm8550-rpmh-regulators"` e `qcom,pmic-id = "b"`. O driver proba como instância nova.
 
-### 4. Sensor sem energia — pm8010 ausente
-**Causa:** pm8010 camera PMIC não existe fisicamente (SPMI scan confirma, DTB tem `status = "disabled"`).
+### 4. Sensor sem energia
+**Causa:** faltava provisionar as rails da câmera; o DTB do Zenbook traz o pm8010 com
+`status = "disabled"`. Isto ficou anos documentado como "pm8010 não existe fisicamente" —
+errado, ver a seção da IR: o LDO7 só registra em 2.912 V.
 **Fix:** Power topology extraída do patch alexVinarskis (AeoB decompiled):
 - AVDD + DVDD: `vreg_l7b_2p8` (PM8550B LDO7, 2.8V via RPMH) — módulo câmera tem LDO interno pra DVDD 1.2V
 - DOVDD: `vreg_l3m_1p8` (pm8010 RPMH LDO3, 1.8V) — fire-and-forget funciona mesmo sem pm8010 físico

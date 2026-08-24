@@ -1,5 +1,12 @@
 # IR Camera (HM1092) Discovery — Findings
 
+> **SUPERADO em 2026-08-24 — a conclusão deste documento está errada.** O pm8010
+> está no board e sempre esteve. O `-ENOTRECOVERABLE` do LDO7_M era 2.900.000 µV
+> fora da grade de 8 mV do `pmic5_pldo`; o valor certo (2.912.000 µV) vem do
+> `CAMI_RES_QRD.bin`, o binário que o Windows de fábrica desta máquina carrega. A
+> câmera IR funciona — ver `docs/research/CAMERA_STATUS.md` e a seção 19 do README.
+
+
 **Date:** 2026-04-11
 **Hardware:** ASUS Vivobook X1407QA (Snapdragon X, Purwa/X1P42100)
 **Kernel:** 6.19.10-300.fc44.aarch64

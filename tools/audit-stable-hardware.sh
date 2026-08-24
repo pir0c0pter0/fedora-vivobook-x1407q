@@ -362,16 +362,17 @@ check_cpufreq() {
 
 check_charge_limit() {
     local threshold=/sys/class/power_supply/qcom-battmgr-bat/charge_control_end_threshold
+    local stale_rule=/etc/udev/rules.d/99-battery-charge-limit.rules
 
     if [[ ! -r $threshold ]]; then
         fail charge-limit 'qcom-battmgr charge-control threshold is unavailable'
         return
     fi
-    if [[ $(<$threshold) != 80 ]]; then
-        fail charge-limit "charge-control threshold is $(<$threshold), expected 80"
+    if [[ -e $stale_rule ]]; then
+        fail charge-limit "$stale_rule reapplies 80 on every uevent, reverting the charge mode picked in Settings"
         return
     fi
-    pass charge-limit 'qcom-battmgr charge-control threshold is 80'
+    pass charge-limit "charge-control threshold is $(<$threshold), owned by upower"
 }
 
 check_camera_rgb() {

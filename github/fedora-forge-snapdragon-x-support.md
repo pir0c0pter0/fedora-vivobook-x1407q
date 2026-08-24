@@ -6,9 +6,10 @@ The **ASUS Vivobook 14 X1407QA** with **Qualcomm Snapdragon X (X1-26-100)**
 is usable as a Linux daily driver on **Fedora 44 aarch64** with the custom
 `7.2.0-x1407qa` kernel, DKMS/runtime overlays, initramfs firmware injection and
 userspace fixes. Boot is validated at 7.301s total with the graphical target
-reached in 3.278s userspace. GPU/Vulkan and the core desktop hardware work; RGB camera
-captures still/video with known non-fatal warnings. QNN/HTP inference runs on the
-NPU. IR camera and USB4/TB3 tunneling remain blocked and are documented below.
+reached in 3.278s userspace. GPU/Vulkan and the core desktop hardware work; the RGB
+camera captures still/video with a clean log on the patched 7.2 kernel and libcamera,
+and the IR camera streams through its own `hm1092` driver. QNN/HTP inference runs on the
+NPU. USB4/TB3 tunneling is the one hardware feature still blocked, documented below.
 
 This issue documents what works, what needed fixing, and what Fedora could integrate to make Snapdragon X laptops work out-of-the-box.
 
@@ -25,12 +26,12 @@ This issue documents what works, what needed fixing, and what Fedora could integ
 | **Audio** | WCD938x codec + WSA884x speakers via SoundWire, ADSP via Q6APM |
 | **Keyboard** | ASUS I2C-HID, bus 4 (`b94000`), addr `0x3a` |
 | **Camera RGB** | OV02C10 (2MP) on CCI1 bus 1 (AON), addr `0x36`, MCLK4 19.2MHz |
-| **Camera IR** | 1× IR sensor — pm8010 PMIC physically absent, not functional |
+| **Camera IR** | Himax HM1092 on CCI0 bus 0, addr `0x24`, CSIPHY0, MCLK0 24MHz, reset GPIO 109 |
 | **Battery** | 50Wh Li-ion X321-42, driver `qcom_battmgr` via `pmic_glink` |
 
 ---
 
-## Detailed breakdown — 17 issues found and fixed
+## Detailed breakdown — 19 issues found and fixed
 
 ### 1. Boot — no DTB for this laptop in the kernel
 
@@ -411,26 +412,35 @@ cannot be mistaken for acceleration.
 
 **Root cause:** The thresholds are simply unset — 0 means no limit. The `qcom_battmgr` driver supports `charge_control_end_threshold` writes, and the ADSP firmware honors them. The `OOD` technology string is a cosmetic firmware quirk.
 
-**How it was fixed:** udev rule to set charge limit when battery device appears:
+**How it was fixed:** let `upower` (1.91) own the thresholds — it applies 75/80 and persists
+the choice in `/var/lib/upower/charging-threshold-status`, so GNOME Settings → Power drives it:
 ```bash
-# /etc/udev/rules.d/99-battery-charge-limit.rules
-SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-bat", ATTR{charge_control_end_threshold}="80"
+sudo busctl call org.freedesktop.UPower \
+    /org/freedesktop/UPower/devices/battery_qcom_battmgr_bat \
+    org.freedesktop.UPower.Device EnableChargeThreshold b true
 ```
 
-**Result:** Charge stops at 80%, firmware auto-sets start threshold to 50%. Extends battery lifespan.
+**Do NOT use a udev rule for this.** The obvious
+`ATTR{charge_control_end_threshold}="80"` rule is self-triggering: writing the attribute
+makes the kernel call `power_supply_changed()`, the resulting `change` uevent re-runs the
+rule, and any later value the user picks is reverted to 80 within milliseconds. Both GNOME
+charge modes then sit at 80% and look broken.
+
+**Result:** *Preserve Battery Health* = start 75% / stop 80%; *Maximize Charge* = start 50% /
+stop 100% (firmware defaults). Both modes verified on hardware.
 
 ---
 
-### 17. RGB Camera — no CAMSS/CCI nodes in DTB, pm8010 PMIC absent
+### 17. RGB Camera — no CAMSS/CCI nodes in DTB
 
-**Problem:** Camera doesn't work. The Zenbook A14 DTB has no CAMSS, CAMCC, CCI, or CSIPHY device tree nodes. The dedicated camera PMIC (pm8010) is not physically present on the board.
+**Problem:** Camera doesn't work. The Zenbook A14 DTB has no CAMSS, CAMCC, CCI, or CSIPHY device tree nodes.
 
 **Root cause:** 7 problems solved iteratively:
 1. No DT nodes → runtime DT overlay via `of_overlay_fdt_apply()` in DKMS module
 2. Overlay -22 (EINVAL) on CCI child nodes → two-phase overlay (CCI disabled in phase 1, enabled in phase 2)
 3. CCI crash `list_add corruption` → added empty `i2c-bus@0` (master[0] was uninitialized)
 4. RPMH regulator not registering → separate `regulators-9` block (parent already probed)
-5. pm8010 absent → power from PM8550B: AVDD/DVDD `vreg_l7b_2p8` (2.8V), DOVDD `vreg_l3m_1p8` (RPMH fire-and-forget)
+5. Sensor had no power → AVDD/DVDD from PM8550B `vreg_l7b_2p8` (2.8V), DOVDD from pm8010 `vreg_l3m_1p8` over RPMH
 6. PLL8 enable timeout → `pm_runtime_get_sync(camcc_dev)` holds CAMCC awake (prevents MMCX power-off)
 7. Image upside down → `rotation = <180>` in DT node
 
@@ -453,11 +463,62 @@ monitoring dmesg during open/close).
 **Result:** OV02C10 RGB camera is functional — 1920×1080 XRGB8888 still,
 1280×720 XRGB8888 video at ~30 fps, GNOME Snapshot and PipeWire apps.
 Revalidated after an autostart reboot on 2026-08-24: service enabled/active,
-still 1080p, 60/60 720p30 frames, and PipeWire `Built-in Front Camera`. Fedora libcamera metadata/helper and
-kernel CAMCC clock warnings remain non-fatal on 7.2; there was no Oops or soft
-lockup. IR camera remains blocked.
+still 1080p, 60/60 720p30 frames, and PipeWire `Built-in Front Camera`. The libcamera
+metadata/helper and kernel CAMCC clock warnings are gone on the patched 7.2 build
+(`kernel/linux-7.2-camera-warning-fix.patch` + `libcamera-0.7.1-ov02c10.patch`); there
+was no Oops or soft lockup.
 
 **What Fedora could do:** Upstream CAMSS patches (Bryan O'Donoghue, Linaro) would eliminate the overlay approach. A proper Vivobook DTB with camera nodes would make this work at boot.
+
+---
+
+### 18. Display colour control — msm_dpu exposes CTM but no GAMMA_LUT
+
+**Problem:** No way to change saturation or contrast. `wl-gammarelay-rs` and any
+`zwlr_gamma_control` client fail because `msm_dpu` exposes the CRTC `CTM` and `PCC`
+properties but not `GAMMA_LUT`, and a Wayland client cannot become DRM master to
+drive `CTM` directly.
+
+**How it was fixed:** DKMS module `vivobook_color_ctrl` performs the DRM atomic commit
+from kernel space, which is not subject to the DRM master restriction, and exposes
+`/sys/kernel/vivobook_color/{saturation,contrast}` (0.000–2.000, 1.000 = identity).
+
+**What Fedora could do:** nothing kernel-side — this is a `msm_dpu` feature gap. A
+`GAMMA_LUT` implementation in `msm_dpu`, or compositor support for `CTM`, would make
+the module unnecessary.
+
+---
+
+### 19. IR camera (HM1092) — the "pm8010 is absent" false negative
+
+**Problem:** the Windows Hello IR sensor answered on no bus. Provisioning its AVDD rail
+made `devm_regulator_register()` return `-ENOTRECOVERABLE` for pm8010 LDO7 and take the
+whole regulator block down, which was read as "the camera PMIC is not on the board".
+
+**Root cause:** five software bugs, no missing hardware.
+1. **AVDD off the regulator step grid.** The generic `CAMI_RES_MTP.bin` asks for
+   2,900,000 µV; `pmic5_pldo` steps in 8 mV, so with `min == max` off-grid the constraint
+   is rejected and registration fails. The Purwa-specific `CAMI_RES_QRD.bin` that factory
+   Windows loads asks for **2,912,000 µV**, which lands on an exact selector and registers.
+   **This failure mode is worth knowing generally: an off-grid fixed voltage on a
+   `pmic5_pldo` looks exactly like absent silicon.**
+2. Sensor does not auto-increment the register pointer — every 16-bit register is two
+   8-bit writes, low byte first. No `CCI_REG16`.
+3. CSIPHY region size — csiphy0/1/2 need `0x2000`, not `0x1000`; `csiphy_reset()` writes at
+   `base+0x1000` and Oopses otherwise. Only csiphy4 (RGB) was large enough to hide this.
+4. Purwa has no IFE1/CSID1 (`cam_cc_ife_1_gdsc status stuck at 'off'`), so the only path is
+   `csid0 → vfe0_rdi0` — shared with the RGB sensor.
+5. One CSI lane at 180 MHz, not two — the init PLL yields `24 MHz ÷ 12 × 90`.
+
+**How it was fixed:** a dedicated `hm1092` V4L2 driver (`himax,hm1092`) plus a sensor node
+on CCI0 bus 0. Result: 560×360 Y10 at ~29.7 fps over
+`hm1092 → csiphy0 → csid0 → vfe0_rdi0`. Still missing: an IR illuminator (a PMIC flash LED
+at 700 mA per `qccamflash_ext8380`, with no DTB node), and libcamera capture — the sensor
+enumerates but the soft-ISP rejects `R10_CSI2P` since its debayer does not handle
+monochrome RAW10.
+
+**What Fedora could do:** nothing packaging-side. This one is a device driver that belongs
+upstream once the Purwa CAMSS DT lands.
 
 ---
 
@@ -502,9 +563,11 @@ Mesa: 26.0.3
 
 ## Related upstream work
 
-- **Camera RGB:** Functional via DKMS two-phase DT overlay; Fedora libcamera
-  metadata/helper and kernel 7.2 CAMCC clock warnings remain non-fatal. IR
-  camera is blocked.
+- **Camera RGB:** Functional via DKMS two-phase DT overlay, with a clean log on the
+  patched 7.2 kernel and libcamera 0.7.1.
+- **Camera IR:** Functional via the out-of-tree `hm1092` driver — 560×360 Y10 at
+  ~29.7 fps. No IR illuminator yet, and libcamera's soft-ISP cannot consume monochrome
+  RAW10, so capture goes through V4L2 directly.
 - **Camera (upstream):** Bryan O'Donoghue (Linaro) v9 patches (7 patches, reduzido de v8's 18) in LKML review (Feb 2026). Expected merge ~6.21/6.22. **Note:** patches only cover x1e80100 (Hamoa) — not Purwa/x1p42100. Our DKMS overlay remains the only working path for this SoC.
 - **Suspend:** s2idle is physically validated on `7.2.0-x1407qa` at ~0.80W;
   deep/S3 still crashes and remains disabled.

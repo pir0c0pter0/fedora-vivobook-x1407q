@@ -925,9 +925,10 @@ verify_system_configs() {
         fi
     done
 
-    # udev charge control
-    if [[ ! -f /etc/udev/rules.d/99-battery-charge-limit.rules ]]; then
-        warn "udev rule de charge control ausente!"
+    # charge control — o upower é dono do threshold; a udev rule antiga o reescrevia
+    # a cada uevent e travava os dois modos de carga em 80%
+    if [[ -f /etc/udev/rules.d/99-battery-charge-limit.rules ]]; then
+        warn "99-battery-charge-limit.rules presente — reverte o modo de carga escolhido em Ajustes; remova"
         ((issues++))
     fi
 

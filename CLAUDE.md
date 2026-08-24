@@ -21,7 +21,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 13. **Lid close** — tampa suspende via s2idle (~0.80W validado); deep/S3 crasha e continua desabilitado; família hibernate mascarada
 14. **cpufreq** — Módulo `scmi_cpufreq` in-tree autoload via `/etc/modules-load.d/` — CPU escala 710MHz–2.96GHz, governor schedutil
 15. **CDSP/NPU** — Firmware `qccdsp8380.mbn` no initramfs; CDSP online e nó não seguro em `root:render 0660`. Inferência QNN/HTP roda de verdade na NPU: FastRPC userspace (`libcdsprpc.so`), binários Hexagon da ASUS pareados por hash com o firmware e override do SoC ID escopado por processo (`tools/npu-run`)
-16. **Charge control** — udev rule seta limite 80% via `charge_control_end_threshold` — firmware aceita escrita, start auto 50%
+16. **Charge control** — o `upower` é dono do threshold; Ajustes → Energia alterna 75/80 (preservar) e 50/100 (carga máxima). A udev rule antiga reescrevia 80 a cada uevent e travava os dois modos em 80%
 17. **Câmera RGB** — DKMS `vivobook_cam_fix` (DT overlay two-phase), `system_heap` e tuning OV02C10 — autostart gráfico tardio, libcamera/Snapshot, still 1080p e vídeo 720p30
 18. **Display color control** — DKMS `vivobook_color_ctrl` (CTM via DRM atomic commit do kernel) — msm_dpu expõe CTM/PCC mas não GAMMA_LUT, wl-gammarelay-rs e zwlr_gamma_control falham, módulo kernel bypassa restrição de DRM master
 19. **Câmera IR (HM1092)** — driver próprio `hm1092` + nó no overlay; streaming 560×360 Y10 a ~29,7 fps por `csiphy0 → csid0 → vfe0_rdi0`. AVDD do pm8010 em **2.912 V** (valor do `CAMI_RES_QRD.bin`, o único que cai na grade de 8 mV do RPMh), 1 lane @ 180 MHz, sequência de init de 185 registradores extraída do dump Windows
