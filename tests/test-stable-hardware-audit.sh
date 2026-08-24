@@ -44,6 +44,10 @@ expect 'lid safety does not validate the selected s2idle mem_sleep mode' \
     grep -qF '/sys/power/mem_sleep' "$audit"
 expect 'audio audit lacks the ALSA fallback for session-less runs' \
     grep -qF 'ALSA card present (no user session bus)' "$audit"
+expect 'battery audit lacks the sysfs/UPower fallback for session-less runs' \
+    function_contains check_battery 'no reachable GNOME session'
+expect 'battery audit does not guard GNOME checks on a capability probe' \
+    function_contains check_battery 'gnome-extensions list'
 expect 'lid safety does not inspect effective logind configuration' grep -q 'systemd-analyze cat-config' "$audit"
 
 for function_name in check_wifi check_remoteproc check_gpu; do

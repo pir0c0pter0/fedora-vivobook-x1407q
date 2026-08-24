@@ -61,15 +61,18 @@ kernel), mas `/proc/swaps` vazio — hibernate exigiria criar swapfile.
 
 Qualquer resultado (inclusive s2idle crashando) → documentar no README.
 
-## Fase 1 — Runtime PM PCIe (baixo risco, ganho ~0.3–1W)
+## Fase 1 — Runtime PM PCIe ✅ TESTADA — SEM GANHO (2026-08-24)
 
-Udev rule habilitando `auto` nos root ports e NVMe. **WiFi (0004:01:00.0) por
-último e isolado** — a race PCIe que originou o `wcn_regulator_fix` pode voltar
-com runtime suspend.
-
-1. `echo auto` em `0006:00:00.0`, `0006:01:00.0`, `0004:00:00.0` → medir + `journalctl -b | grep -iE 'nvme|mhi|ath11k'` limpo.
-2. Só então testar `0004:01:00.0`. Reset MHI/RDDM no log → reverter só ele para `on` e documentar.
-3. Persistir o que passou em `/etc/udev/rules.d/` (mesma infra do charge control).
+**Resultado: no-op neste kernel.** `control=auto` aplicado nos 4 devices
+(root ports, NVMe e por fim WiFi isolado) e **nenhum jamais saiu de
+`runtime_status=active`** — sem erro MHI/RDDM, sem regressão, mas também sem
+suspend. Consumo medido na bateria, idle: baseline 2.95W → com auto 3.04W
+(ruído). Causa: os drivers não fazem runtime suspend — ath11k não implementa
+runtime PM, o NVMe já economiza via **APST (habilitado, 100ms)** sem depender
+de D3, e os root ports ficam presos pelos filhos ativos
+(`autosuspend_delay_ms` retorna -EIO = autosuspend nunca armado pelos
+drivers). Controls revertidos para `on`; **nada persistido** — udev rule
+seria clutter sem efeito. Não re-testar sem mudança de kernel/driver.
 
 ## Fase 2 — Remover `pd_ignore_unused` / `clk_ignore_unused` (maior ganho potencial, maior risco)
 

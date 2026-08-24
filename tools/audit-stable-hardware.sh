@@ -178,6 +178,12 @@ check_battery() {
         fail battery 'UPower does not report a numeric battery percentage'
         return
     fi
+    if ! gnome-extensions list >/dev/null 2>&1; then
+        # The probe covers sudo/SSH/headless runs where the Shell is not
+        # reachable on the caller's bus: skip the GNOME checks.
+        pass battery "sysfs energy and power are readable; UPower reports ${percentage} (no reachable GNOME session)"
+        return
+    fi
     if [[ $(gsettings get org.gnome.desktop.interface show-battery-percentage 2>/dev/null || true) != true ]]; then
         fail battery 'GNOME battery percentage is disabled'
         return

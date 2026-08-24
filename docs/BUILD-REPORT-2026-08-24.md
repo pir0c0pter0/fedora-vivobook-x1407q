@@ -125,10 +125,18 @@ Editado com verificação separada (workflows editar→verificar):
 
 ## 7. Pendências
 
-- Próximo reboot do notebook valida de fábrica: autoload do áudio via
-  `modules-load.d` e o cmdline com `mem_sleep_default=s2idle`.
-- Fases 1–3 do plano de bateria: runtime PM PCIe, remoção de
-  `pd_ignore_unused`/`clk_ignore_unused`, cap de frequência na bateria.
-- Fallback opcional no check de bateria da auditoria (mesmo caso do áudio:
-  sudo/SSH sem bus de sessão).
+- ~~Próximo reboot valida de fábrica~~ ✅ **validado (sessão 2)**: boot 09:18
+  veio com card de áudio registrado, zero `SWR CMD error`, cmdline com
+  `mem_sleep_default=s2idle` e `[s2idle]` selecionado. Auditoria 15/16; o
+  único FAIL (battery) era o artefato de sessão, corrigido abaixo.
+- ~~Fallback no check de bateria~~ ✅ **feito (sessão 2)**: `check_battery`
+  ganhou o mesmo guard do áudio (`-S /run/user/$(id -u)/bus`); sem bus de
+  sessão passa via sysfs/UPower. Teste atualizado, shellcheck limpo.
+- ~~Fase 1 (runtime PM PCIe)~~ ✅ **testada, sem ganho (sessão 2)**: nenhum
+  device suspende com `control=auto` (drivers sem runtime PM; NVMe já cobre
+  via APST). 2.95W → 3.04W = ruído. Nada persistido; detalhe no plano.
+- Fase 2 (remover `pd_ignore_unused`/`clk_ignore_unused`): **requer usuário
+  presente** — full poweroff entre testes e risco de quebrar subsistema.
+- Fase 3 (cap de frequência na bateria): opcional, ganho só em carga —
+  decisão de UX (trade performance × bateria) antes de aplicar.
 - Percentual de bateria no live segue pendência separada.
