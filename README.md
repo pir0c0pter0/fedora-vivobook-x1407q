@@ -66,10 +66,10 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 14 | **CPU frequency scaling** | Autoload in-tree `scmi_cpufreq` module | CPU scales 710MHz–2.96GHz, battery savings + thermal protection |
 | 15 | **CDSP online** | CDSP firmware in initramfs + restricted FastRPC access | Hexagon Compute DSP boots at early boot; QNN/HTP inference remains vendor-blocked on X1P42100 |
 | 16 | **Battery charge limit** | udev rule sets 80% threshold | Charge stops at 80%, starts at 50% — extends battery lifespan |
-| 17 | **RGB camera functional** | `vivobook_cam_fix` + OV02C10 IPA data + late graphical autostart | OV02C10 on CCI1 — still 1080p, 720p30 video and Snapshot/PipeWire after every boot; known libcamera/clock warnings remain on kernel 7.2 |
+| 17 | **RGB camera functional** | `vivobook_cam_fix` + patched kernel/libcamera + late graphical autostart | OV02C10 on CCI1 — upright image, still 1080p, 720p30 video and Snapshot/PipeWire after every boot; CAMCC and libcamera warnings gone on the 7.2 build |
 | 18 | **Display color control** | DKMS module `vivobook_color_ctrl` — CTM via DRM atomic commit from kernel space | msm_dpu exposes CTM/PCC but not GAMMA_LUT — wl-gammarelay-rs and zwlr_gamma_control both fail; kernel module bypasses DRM master restriction |
 
-**7 custom kernel modules**, **1 documented `qcom-camss` patch**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix** — most model-specific fixes run at runtime via DKMS/module overlays/LD_PRELOAD. The installed stable path uses the Zenbook A14 DTB from BLS plus the custom 7.2 kernel for early-boot fixes.
+**7 custom kernel modules**, **1 kernel camera patch applied by the 7.2 build**, **1 libcamera patch**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix** — most model-specific fixes run at runtime via DKMS/module overlays/LD_PRELOAD. The installed stable path uses the Zenbook A14 DTB from BLS plus the custom 7.2 kernel for early-boot fixes.
 
 ## Current Status
 
@@ -101,7 +101,7 @@ instalado com validação física da reconstrução atual.
 | **Charge control** | :white_check_mark: Working | Charge limit 80% via udev rule (see [Charge Control Fix](#16-battery-charge-control-fix)) |
 | **USB-C DP alt-mode** | :white_check_mark: Working | Both ports, tested DP-2 up to 2560×1600. Device link errors at boot are cosmetic ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
 | **USB4 / TB3 tunneling** | :x: Not working | DP alt-mode works, but Thunderbolt tunneling is blocked by missing Qualcomm x1e80100 host/router support in current kernels. See [USB4/TB3 Status](#usb4tb3-status-mar-2026) |
-| **Camera RGB** | :warning: Working with warnings | Late graphical autostart validated after reboot; still/video and PipeWire work. Fedora libcamera metadata warnings and non-fatal CAMCC clock warnings remain on kernel 7.2 (see [Camera Fix](#17-rgb-camera-fix)) |
+| **Camera RGB** | :white_check_mark: Working | Late graphical autostart validated after reboot; upright image, still/video and PipeWire work. CAMCC clock and libcamera metadata warnings are gone with the patched 7.2 kernel and libcamera (see [Camera Fix](#17-rgb-camera-fix)) |
 | **Camera IR** | :x: Not working | pm8010 PMIC physically absent — sensor has no power (see [Camera Research](#camera-research)) |
 | **Display color control** | :white_check_mark: Working | CTM saturation + contrast via DKMS module (see [Display Color Control Fix](#18-display-color-control-fix)) |
 
@@ -110,7 +110,7 @@ instalado com validação física da reconstrução atual.
 | Component | Result after clean reboot | Evidence |
 |-----------|---------------------------|----------|
 | Vulkan GPU | **Working** | Vulkan 1.4.341, Mesa 26.0.3, `turnip Mesa driver`, Adreno X1-45 |
-| RGB camera | **Autostart working, warnings remain** | Service enabled/active after clean reboot; 1920×1080 XRGB8888 still; 60/60 frames at 1280×720, ~30 fps; PipeWire source published; no Oops/soft lockup |
+| RGB camera | **Working** | Service enabled/active after clean reboot; upright image (sensor HFLIP/VFLIP driven by `rotation = <180>`); 1920×1080 XRGB8888 still; 60/60 frames at 1280×720, ~30 fps; PipeWire source published; no CAMCC/libcamera warnings, no Oops/soft lockup |
 | CDSP transport | **Working** | CDSP and ADSP `remoteproc` running; non-secure `/dev/fastrpc-cdsp` exposed only to group `render` |
 | NPU inference | **Blocked in vendor runtime** | QNN EP sees an NPU, but HTP backend initialization fails for real SoC ID `635`; the same failure occurs as root, so it is not a Unix permission problem |
 
@@ -120,7 +120,7 @@ cannot be mistaken for NPU acceleration.
 
 The hardware audit passed 16/16 after the autostart reboot. The status table
 still marks the independently observed boot-time regression, NPU backend,
-USB4/TB3, IR camera, and known RGB camera warnings rather
+USB4/TB3 and the IR camera rather
 than presenting them as solved.
 
 ---
@@ -1158,14 +1158,15 @@ overlay, the OV02C10 sensor has no I2C bus, clocks, ISP pipeline, or power.
 4. **Regulator not registering** — RPMH parent already probed, overlay child ignored — created separate `regulators-9` block
 5. **pm8010 absent** — camera PMIC doesn't exist physically. Power topology from AeoB firmware: AVDD/DVDD via `vreg_l7b_2p8` (PM8550B), DOVDD via `vreg_l3m_1p8` (RPMH fire-and-forget)
 6. **`cam_cc_pll8 failed to enable!`** — runtime PM suspends CAMCC after probe, MMCX powers off, all PLL registers lost (L=0). Fix: `pm_runtime_get_sync(camcc_dev)` holds CAMCC awake
-7. **Image upside down** — added `rotation = <180>` to sensor DT node
-8. **`cam_cc_slow_ahb_clk_src` WARN on `streamon`** — `qcom_camss` votes a `cpas_ahb` rate on `x1e80100` and trips `clk-rcg2.c:update_config()`. A patch removed it on kernel 6.19.8, but it is not part of the reproducible 7.2 setup and the non-fatal warning is present again.
+7. **Image upside down** — sensor is mounted 180°. `rotation = <180>` in the DT node makes libcamera drive the sensor `HFLIP`/`VFLIP` controls, so frames leave the sensor upright. Declaring `rotation = <0>` silences a warning but leaves the image inverted
+8. **`cam_cc_slow_ahb_clk_src` WARN on `streamon`** — `qcom_camss` votes a `cpas_ahb` rate on `x1e80100` and trips `clk-rcg2.c:update_config()`. `kernel/linux-7.2-camera-warning-fix.patch` skips that vote on `x1e80100-camss` and is applied by `kernel/build-linux-7.2-x1407qa.sh`, so the warning is gone on the 7.2 build.
+9. **libcamera static-property/helper warnings** — Fedora `libcamera` 0.7.1 had no `ov02c10` entry. `libcamera/libcamera-0.7.1-ov02c10.patch` adds the sensor properties and the gain helper; the same kernel patch adds `.get_selection` to `ov02c10`. Rebuild the RPMs with `libcamera/build-libcamera-0.7.1-rpms.sh`.
 
 **Solution:** final RGB stack is three layers:
 
 1. `vivobook_cam_fix` v2.0 — two-phase DT overlay + runtime PM holds for CAMCC/CAMSS/CCI
-2. Fedora `libcamera` + the bundled `ov02c10.yaml` IPA data — usable software ISP controls without a custom userspace build
-3. in-tree `qcom_camss` on kernel 7.2 — capture works, with known non-fatal CAMCC warnings; the historical patch must be rebuilt per kernel before it can suppress them
+2. patched Fedora `libcamera` 0.7.1 (`ov02c10` properties + gain helper) with the bundled `ov02c10.yaml` IPA data
+3. in-tree `qcom_camss` on kernel 7.2 patched by `kernel/linux-7.2-camera-warning-fix.patch` — capture works with a clean log
 
 Loaded automatically after the core modules and display manager:
 
@@ -1188,7 +1189,7 @@ before loading the camera overlay. The privacy shutter is purely mechanical
 (no GPIO/HID event), so software detection of open/close is not possible.
 
 **What works:**
-- `cam -l` (enumerates the internal camera; metadata/helper warnings are expected)
+- `cam -l` (enumerates the internal camera, no metadata/helper warnings)
 - 1920×1080 XRGB8888 still capture (8,294,400 bytes)
 - `cam -c 1 --capture=10 --stream role=video,width=1280,height=720` (~30 fps)
 - GNOME Snapshot app (via PipeWire/WirePlumber)
@@ -1198,21 +1199,23 @@ before loading the camera overlay. The privacy shutter is purely mechanical
 - `rmmod vivobook_cam_fix` — CAMCC GDSC corruption on re-probe, kernel crash. Unload only via reboot
 - IR camera — pm8010 PMIC physically absent, sensor has no power (see [Camera Research](#camera-research))
 
-**Validated again after clean reboot with autostart (2026-08-24, Fedora libcamera 0.7.1):**
+**Validated again after clean reboot with autostart (2026-08-24, patched kernel 7.2 + libcamera 0.7.1-1.fc44.x1407qa):**
 
 - service is `enabled` and `active`; keyboard/touchpad initialized before the camera overlay
 - OV02C10 bound at `12-0036`, with `/dev/media0` and `/dev/video*` created
-- `cam -l` enumerates the camera while reporting missing static properties/helper from Fedora libcamera
+- DT node reports `rotation = 180`; libcamera sets `HFLIP=1`/`VFLIP=1` on the sensor at configure and GNOME Snapshot shows an upright image
 - 1920×1080 XRGB8888 still frame works
 - 60/60 1280×720 XRGB8888 video frames work at ~30 fps
 - WirePlumber publishes `Built-in Front Camera` for PipeWire applications
 - `system_heap` is loaded by the service and its DMA heap is available through uaccess
-- current kernel log still reports `cam_cc_slow_ahb_clk_src`, `Lucid PLL latch
-  failed` and `cam_cc_pll8 failed to enable` during the test, but capture
-  completes and there is no `Oops` or `soft lockup`
+- the boot journal has no `cam_cc_slow_ahb_clk_src`, `Lucid PLL latch failed`,
+  `cam_cc_pll8 failed to enable` or libcamera static-property warning, and no
+  `Oops` or `soft lockup`
 
 Detailed bring-up log and timestamps: [docs/research/2026-03-24-rgb-camera-progress.md](docs/research/2026-03-24-rgb-camera-progress.md)
-Kernel-side `qcom_camss` diff used for the final warning fix: [docs/research/qcom-camss-x1e80100-cpas-ahb-fix.patch](docs/research/qcom-camss-x1e80100-cpas-ahb-fix.patch)
+Kernel patch applied by the 7.2 build: [kernel/linux-7.2-camera-warning-fix.patch](kernel/linux-7.2-camera-warning-fix.patch)
+libcamera patch and RPM rebuild: [libcamera/](libcamera/)
+Historical 6.19.8 diff: [docs/research/qcom-camss-x1e80100-cpas-ahb-fix.patch](docs/research/qcom-camss-x1e80100-cpas-ahb-fix.patch)
 
 | Property | Value |
 |----------|-------|
@@ -1223,9 +1226,10 @@ Kernel-side `qcom_camss` diff used for the final warning fix: [docs/research/qco
 | **Power** | AVDD/DVDD: `vreg_l7b_2p8` (2.8V), DOVDD: `vreg_l3m_1p8` (1.8V) |
 | **Privacy LED** | GPIO 110 |
 | **Privacy shutter** | Mechanical slide — no electronic event |
+| **Mounting** | Sensor rotated 180°; `rotation = <180>` in the overlay makes libcamera flip it in hardware |
 | **DKMS module** | `vivobook-cam-fix` v2.0 in `/usr/src/vivobook-cam-fix-2.0/` |
-| **Kernel CAMSS** | In-tree on 7.2; historical warning-suppression patch is documented but not installed by setup |
-| **libcamera state** | Fedora 0.7.1 + bundled `ov02c10.yaml`; functional with static-property/helper warnings |
+| **Kernel CAMSS** | In-tree on 7.2 + `kernel/linux-7.2-camera-warning-fix.patch` (applied by the kernel build script) |
+| **libcamera state** | Fedora 0.7.1 patched with `ov02c10` properties + gain helper (`0.7.1-1.fc44.x1407qa`) + bundled `ov02c10.yaml`; no warnings |
 | **Service** | `vivobook-camera.service` (oneshot, enabled at `graphical.target` after core modules and display manager) |
 | **Command** | `vivobook-camera start\|status` |
 

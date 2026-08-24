@@ -57,6 +57,7 @@ vulkan_config="$VULKAN_CONFIG_DIR/vulkan-hardware.conf"
 fastrpc_rule="$UDEV_RULES_DIR/99-x1407qa-fastrpc.rules"
 camera_dma_rule="$UDEV_RULES_DIR/71-vivobook-camera-dma-heap.rules"
 camera_data="$LIBCAMERA_IPA_SIMPLE_DIR/ov02c10.yaml"
+camera_overlay="$repo/modules/vivobook-cam-fix-2.0/vivobook_cam_phase1.dts"
 
 [[ $(<"$vulkan_config") == \
     'VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json' ]] || {
@@ -90,6 +91,11 @@ for algorithm in BlackLevel Awb Adjust Agc; do
         exit 1
     }
 done
+
+grep -Eq 'rotation = <180>;' "$camera_overlay" || {
+    echo 'OV02C10 mounting rotation must stay 180 so libcamera flips the sensor' >&2
+    exit 1
+}
 
 camera_systemd_root="$test_root/systemd-root"
 camera_unit="$camera_systemd_root/etc/systemd/system/vivobook-camera.service"

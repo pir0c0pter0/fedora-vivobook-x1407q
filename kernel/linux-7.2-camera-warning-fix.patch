@@ -1,0 +1,53 @@
+diff --git a/drivers/media/i2c/ov02c10.c b/drivers/media/i2c/ov02c10.c
+--- a/drivers/media/i2c/ov02c10.c
++++ b/drivers/media/i2c/ov02c10.c
+@@ -755,6 +755,25 @@ static int ov02c10_enum_frame_size(struct v4l2_subdev *sd,
+ 	return 0;
+ }
+ 
++static int ov02c10_get_selection(struct v4l2_subdev *sd,
++				 struct v4l2_subdev_state *state,
++				 struct v4l2_subdev_selection *sel)
++{
++	switch (sel->target) {
++	case V4L2_SEL_TGT_CROP:
++	case V4L2_SEL_TGT_CROP_BOUNDS:
++	case V4L2_SEL_TGT_CROP_DEFAULT:
++	case V4L2_SEL_TGT_NATIVE_SIZE:
++		sel->r = (struct v4l2_rect) {
++			.width = supported_modes[0].width,
++			.height = supported_modes[0].height,
++		};
++		return 0;
++	default:
++		return -EINVAL;
++	}
++}
++
+ static int ov02c10_init_state(struct v4l2_subdev *sd,
+ 			      struct v4l2_subdev_state *sd_state)
+ {
+@@ -773,6 +792,7 @@ static const struct v4l2_subdev_pad_ops ov02c10_pad_ops = {
+ 	.get_fmt = v4l2_subdev_get_fmt,
+ 	.enum_mbus_code = ov02c10_enum_mbus_code,
+ 	.enum_frame_size = ov02c10_enum_frame_size,
++	.get_selection = ov02c10_get_selection,
+ 	.enable_streams = ov02c10_enable_streams,
+ 	.disable_streams = ov02c10_disable_streams,
+ };
+diff --git a/drivers/media/platform/qcom/camss/camss-csid.c b/drivers/media/platform/qcom/camss/camss-csid.c
+--- a/drivers/media/platform/qcom/camss/camss-csid.c
++++ b/drivers/media/platform/qcom/camss/camss-csid.c
+@@ -591,6 +591,12 @@ static int csid_set_clock_rates(struct csid_device *csid)
+ 				return ret;
+ 			}
+ 		} else if (clock->nfreqs) {
++			/* Firmware already configures this X1E80100 shared clock. */
++			if (!strcmp(clock->name, "cpas_ahb") &&
++			    of_device_is_compatible(csid->camss->dev->of_node,
++						    "qcom,x1e80100-camss"))
++				continue;
++
+ 			clk_set_rate(clock->clk, clock->freq[0]);
+ 		}
+ 	}

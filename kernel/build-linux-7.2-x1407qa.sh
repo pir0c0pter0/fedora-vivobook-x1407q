@@ -8,6 +8,7 @@ REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 readonly REPO_ROOT
 readonly CONFIG_PREPARER=$REPO_ROOT/kernel/prepare-linux-7.2-x1407qa-config.sh
 readonly MANIFEST_WRITER=$REPO_ROOT/kernel/write-linux-artifact-manifest.sh
+readonly CAMERA_SOURCE_PATCH=$REPO_ROOT/kernel/linux-7.2-camera-warning-fix.patch
 readonly DEFAULT_TARBALL=$REPO_ROOT/linux-7.2.tar.xz
 readonly DEFAULT_WORK=/var/lib/x1407qa-kernel-7.2
 readonly REFERENCE_CONFIG=${X1407QA_REFERENCE_CONFIG:-/boot/config-7.2.0-x1407qa}
@@ -42,6 +43,8 @@ SOURCE_ROOT=$WORK_ROOT/linux-7.2
 BUILD_ROOT=$WORK_ROOT/build
 STAGING_ROOT=$WORK_ROOT/staging
 SOURCE_PATCH=${X1407QA_SOURCE_PATCH:-}
+SOURCE_PATCHES=("$CAMERA_SOURCE_PATCH")
+[[ -z $SOURCE_PATCH ]] || SOURCE_PATCHES+=("$SOURCE_PATCH")
 
 make_arch=(ARCH=arm64)
 if [[ $(uname -m) != aarch64 ]]; then
@@ -62,17 +65,17 @@ rm -rf -- "$SOURCE_ROOT" "$BUILD_ROOT" "$STAGING_ROOT" "$ARTIFACT_ROOT"
 tar -xJf "$TARBALL" -C "$WORK_ROOT"
 mkdir -p "$BUILD_ROOT" "$STAGING_ROOT" "$ARTIFACT_ROOT"
 
-if [[ -n $SOURCE_PATCH ]]; then
-    [[ -f $SOURCE_PATCH && ! -L $SOURCE_PATCH ]] || {
-        echo "ERROR: source patch missing or unsafe: $SOURCE_PATCH" >&2
+for source_patch in "${SOURCE_PATCHES[@]}"; do
+    [[ -f $source_patch && ! -L $source_patch ]] || {
+        echo "ERROR: source patch missing or unsafe: $source_patch" >&2
         exit 1
     }
-    patch --batch --forward --fuzz=0 --dry-run -d "$SOURCE_ROOT" -p1 < "$SOURCE_PATCH" >/dev/null || {
-        echo "ERROR: source patch does not apply cleanly: $SOURCE_PATCH" >&2
+    patch --batch --forward --fuzz=0 --dry-run -d "$SOURCE_ROOT" -p1 < "$source_patch" >/dev/null || {
+        echo "ERROR: source patch does not apply cleanly: $source_patch" >&2
         exit 1
     }
-    patch --batch --forward --fuzz=0 -d "$SOURCE_ROOT" -p1 < "$SOURCE_PATCH" >/dev/null
-fi
+    patch --batch --forward --fuzz=0 -d "$SOURCE_ROOT" -p1 < "$source_patch" >/dev/null
+done
 
 [[ -x $CONFIG_PREPARER ]] || { echo 'ERROR: Linux config preparer missing' >&2; exit 1; }
 "$CONFIG_PREPARER" "$SOURCE_ROOT" "$BUILD_ROOT" "$REFERENCE_CONFIG"
