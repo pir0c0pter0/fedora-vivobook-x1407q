@@ -137,10 +137,17 @@ Editado com verificação separada (workflows editar→verificar):
   via APST). 2.95W → 3.04W = ruído. Nada persistido; detalhe no plano.
 - Fase 2 (remover `pd_ignore_unused`/`clk_ignore_unused`): **requer usuário
   presente** — full poweroff entre testes e risco de quebrar subsistema.
-- ~~Fase 3 (cap de frequência na bateria)~~ ✅ **aplicada (sessão 2, a
-  pedido)**: script `vivobook-battery-freq-cap` + udev rule nos eventos de
-  AC/USB — 2380800 na bateria, 2956800 plugado. Cap validado em Discharging;
-  restore valida no próximo plug. Governor `teo` não aplicado (medir antes).
+- ~~Fase 3 (cap de frequência na bateria)~~ ✅ **aplicada e validada
+  (sessão 2, a pedido)**: script `vivobook-battery-freq-cap` + udev rule
+  `qcom-battmgr-*` — 2380800 na bateria, 2956800 plugado. Ciclo real
+  desplug/replug provado nos dois sentidos, ambos automáticos. Só o objeto
+  `qcom-battmgr-bat` emite uevent no plug/desplug (a primeira versão com
+  match `ac|usb` nunca disparava). Governor `teo` não aplicado (medir antes).
+- `tests/test-stable-hardware-audit.sh` tem 4 falhas pré-existentes no PC de
+  build (idênticas no HEAD, ambientais — mocks de journalctl neste host):
+  3× "journal failure is not classified as infrastructure" + "GPU accepts a
+  render node whose dev attribute is unreadable". Não são regressão; limpeza
+  futura.
 - Review do Codex pegou bug no fallback do check de bateria: socket
   `/run/user/$UID/bus` existe em qualquer login SSH sem GNOME — trocado por
   probe real (`gnome-extensions list`), mesmo estilo do `pactl info` do
