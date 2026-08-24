@@ -4,19 +4,31 @@
 
 - **Dock**: Elgato Thunderbolt 3 Dock — USB ID `0fd9:005f`, bcdDevice 4.51
 - **Portas USB-C**: 2x portas (`a600000.usb` port0, `a800000.usb` port1), USB4 com suporte TB3
+- **SoC real**: `qcom,x1p42100` (**Purwa**), não X1E80100/Hamoa. O DT de
+  Purwa inclui `hamoa.dtsi`, por isso vários blocos IP continuam usando
+  compatibles e nomes `x1e80100`.
+- **DT em uso**: ASUS Zenbook A14 UX3407QA; ele descreve DWC3 + QMP USB3/DP +
+  PS8833 para as duas portas, mas nenhum host-router USB4.
 
 ## Blockers identificados
 
-A primeira barreira observada foi o PHY incorreto no DTB, mas a investigação
-posterior mostrou que esse não é o bloqueio final. O estado atual ficou:
+A primeira barreira observada foi atribuída ao PHY, mas a investigação de
+2026-08-24 isolou três peças concretas:
 
-- **Blocker 1 — topologia DT/PHY ainda incompleta para USB4**: o DT atual
-  expõe só o caminho hoje aproveitado por USB3+DP; para USB4 ainda faltam
-  host/router, graph completo e os follow-ups públicos de PHY/DP
-- **Blocker 2 — firmware/PPM não deixa o Linux entrar no altmode**:
-  `ALT_MODE_OVERRIDE` ausente e `SET_NEW_CAM` retorna `Operation not supported`
-- **Blocker 3 — falta o host/router USB4 para x1e80100 no kernel**:
-  sem esse driver, não existe barramento USB4 funcional para o dock tunelar
+- **Blocker 1 — driver host-router Qualcomm ainda privado**: o suporte NHI
+  não-PCI genérico já entrou no upstream, mas o driver de plataforma que tira
+  o router do reset, carrega o MCU e registra o domínio USB4 não foi publicado.
+- **Blocker 2 — PHY USB4 ainda em review**: a série v4 de 2026-08-20 adiciona
+  o terceiro PHY (`QMP_USB43DP_USB4_PHY`), modo TBT e o quinto clock
+  `p2rr2p_pipe`. O kernel/DT vivo ainda têm somente o caminho USB3+DP.
+- **Blocker 3 — DT/graph do router incompletos publicamente**: o RFC publicou
+  um exemplo do HR0; os recursos e a topologia final das duas instâncias ainda
+  não existem em um DTS upstream utilizável.
+
+A ausência de `ALT_MODE_OVERRIDE` no UCSI é um achado real, mas **não é um
+blocker independente comprovado**. O firmware Qualcomm também conduz altmodes
+fora do UCSI; DP funciona nesta máquina mesmo com a lista de altmodes do partner
+vazia. O primeiro bloqueio observável continua sendo a ausência do host-router.
 
 ```
 /proc/device-tree/soc@0/phy@fd5000/compatible  → qcom,x1e80100-qmp-usb3-dp-phy
@@ -29,9 +41,10 @@ SoC continua sendo `qcom,x1e80100-qmp-usb3-dp-phy`. Em outras palavras:
 inventar `qcom,x1e80100-qmp-usb43dp-phy` num overlay local não alinha com o
 que existe hoje upstream.
 
-O driver `phy-qcom-qmp-combo.ko` JÁ contém `x1e80100_usb43dp_serdes_tbl`
-(tabelas USB4 Gen3+DP), então o gargalo deixou de ser "achar um compatible
-mágico" e passou a ser subir a pilha USB4 completa com DT/graph corretos.
+O driver atual contém a configuração USB3+DP usada pelo `compatible` acima.
+As tabelas e o terceiro PHY específicos de USB4/TBT3 só aparecem na série PHY
+v4 ainda não mergeada. Portanto, também não adianta procurar um `compatible`
+"mágico": é necessário aplicar a série real e, depois, o driver do router.
 
 ## Thunderbolt no kernel: ausente no 7.2 (e inútil se ligado)
 
@@ -44,13 +57,16 @@ CONFIG_USB4                 ✗ "is not set" em /boot/config-7.2.0-x1407qa
 thunderbolt.ko              ✗ não existe em /lib/modules
 ```
 
-Isso **não é regressão a corrigir**: `CONFIG_USB4` ainda é `depends on PCI` e
-só constrói o NHI da Intel (`nhi.c`, dispositivo PCI). O host router da
-Qualcomm é MMIO e não aparece no barramento PCI, então ligar `CONFIG_USB4=y`
-no 7.2 não cria domínio nenhum — foi o que já acontecia no 6.19.8, onde
-`CONFIG_USB4=y` convivia com `/sys/bus/usb4/` inexistente.
+Isso **não é regressão a corrigir**. A refatoração genérica para NHI não-PCI
+foi mergeada em maio de 2026, mas `CONFIG_USB4` ainda depende de PCI e a árvore
+não contém nenhum objeto Qualcomm/platform no `Makefile`. O host-router deste
+SoC é MMIO; ligar a opção sem o driver Qualcomm não cria domínio nenhum — foi
+o que já acontecia no 6.19.8, onde `CONFIG_USB4=y` convivia com
+`/sys/bus/thunderbolt/` inexistente.
 
-`typec_thunderbolt.ko` nunca carrega porque o altmode TB3 nunca é negociado.
+No teste de 2026-03-24, nenhum altmode TB3 de partner foi registrado/entrado;
+portanto o caminho `typec_thunderbolt` não avançou até um túnel. Isso descreve
+o resultado, não atribui a causa ao UCSI.
 
 ## Altmodes registrados no port0 (lado local)
 
@@ -60,11 +76,12 @@ no 7.2 não cria domínio nenhum — foi o que já acontecia no 6.19.8, onde
 /sys/class/typec/port0/port0.1/vdo  → 0x001f1cc5
 ```
 
-Porém o partner (dock) não anuncia altmodes:
+Naquele teste, o partner do dock ficou sem altmodes registrados:
 ```
 /sys/class/typec/port0-partner/number_of_alternate_modes → 0
 ```
-Isso porque sem USB4 host controller ativo, a negociação TB3 não acontece.
+Como DP depois funcionou com esse mesmo contador em zero, o valor isolado não
+identifica por qual camada a negociação TB3 parou.
 
 ## UCSI confirmado: sem ALT_MODE_OVERRIDE
 
@@ -91,13 +108,15 @@ Teste direto do PPM:
 SET_NEW_CAM (connector 1, enter=1, cam=0/1) -> Operation not supported
 ```
 
-Conclusão prática: o firmware/PPM expõe detalhes de altmode, mas não expõe o caminho
-de controle para o Linux entrar neles.
+Conclusão limitada: o PPM não oferece **override manual via UCSI**. Isso não
+prova que o firmware impeça USB4, porque o caminho Qualcomm usa notificações
+PMIC GLINK/ADSP fora dessa interface. O kernel 7.2 já contém
+`UCSI_USB4_IMPLIES_USB`; esse quirk não cria o host-router ausente.
 
-## Bug: data_role pode inicializar errado
+## Observação histórica: data_role no kernel 6.19.8
 
-O estado incorreto não está limitado ao `port0`. Diagnóstico atual do kernel
-`6.19.8-300.fc44.aarch64` mostrou as duas portas em:
+O diagnóstico de 2026-03-24 no kernel `6.19.8-300.fc44.aarch64` mostrou as
+duas portas em:
 ```
 /sys/class/typec/port0/data_role → host [device]
 /sys/class/typec/port1/data_role → host [device]
@@ -108,20 +127,28 @@ Fix manual confirmado funcional:
 echo "host" | sudo tee /sys/class/typec/port0/data_role
 ```
 
-Sem esse fix, o dock nem aparece como Billboard no USB.
-Com o fix, o dock aparece como Billboard USB (classe 0x11, Low Speed) — estado de fallback
-quando negociação TB3 falha.
+Naquele kernel, sem o fix o dock nem aparecia como Billboard; forçar `host`
+permitia o fallback USB.
 
-**Status no repo:** fase 0 iniciada com `install-usb4-role-fix.sh`,
+No snapshot vivo do 7.2, port0 já estava em `[host]` com o Dell SD25 e port1
+ocioso em `[device]`. Portanto o workaround **não foi revalidado como requisito
+do 7.2** e não deve ser aplicado cegamente. Só investigar a role novamente se
+um dispositivo USB conectado não enumerar.
+
+**Artefatos históricos no repo:** `install-usb4-role-fix.sh`,
 `modules/vivobook-usb4-fix-1.0/70-vivobook-usb4.rules` e helper
 `vivobook-usb4-role-fix` para auto-forçar `host` nas portas Type-C.
 
-## pmic_glink_altmode: firmware não envia USBC_NOTIFY
+## Observação histórica: sem USBC_NOTIFY no teste TB3 de 2026-03-24
 
 - PDR notifica `charger_pd` → `pmic_glink_altmode_pdr_notify()` é chamado → agenda `enable_work`
 - `enable_work` envia `ALTMODE_PAN_ENABLE` ao firmware ADSP
-- Firmware **nunca responde** com `USBC_NOTIFY` quando dock está conectado
+- Naquele teste, o firmware não respondeu com `USBC_NOTIFY` quando o dock TB3
+  estava conectado
 - Sem `USBC_NOTIFY`, o driver não programa o PS8833 retimer para nenhum modo
+
+Isso descreve o sintoma daquele caminho sem host-router; não prova uma limitação
+do firmware nem substitui o bloqueio de driver identificado depois.
 
 PS8833 retimers (I2C):
 ```
@@ -158,7 +185,8 @@ O módulo experimental agora deixa essa rota **desligada por padrão** via:
 emulate_tb3_port_ops=0
 ```
 
-Ela só deve ser religada manualmente para debug controlado, porque pode repetir o Oops.
+Não religar essa rota antes de existir um host-router real; ela já causou Oops e
+não tem como criar o domínio ausente.
 
 ## O que o dock precisa para funcionar
 
@@ -171,29 +199,26 @@ Para funcionar completamente precisa:
 3. `typec_thunderbolt.ko` conseguir negociar altmode
 4. boltctl autorizar o dispositivo
 
-## Abordagem DKMS: útil para debug, insuficiente sozinha
+## DKMS experimental: somente instrumentação passiva
 
-Seguindo o padrão do projeto (INSYDE bloqueia DTB override):
-- Criar módulo DKMS com `of_overlay_fdt_apply()`
-- Overlay precisa:
-  - Alinhar nós de PHY/connector/retimer ao stack público de USB4 do X1E
-  - Adicionar nó USB4 NHI/router para `a600000.usb` e `a800000.usb`
-- Referência de padrão: `vivobook_cam_fix.c` (two-phase overlay)
+Um overlay não pode antecipar uma ABI de driver que ainda não existe. O módulo
+`vivobook_usb4_fix` continua servindo para logs, sempre com a rota de escrita
+desligada:
 
-Limite atual dessa abordagem:
-- O overlay ainda é útil para validar DT/PHY e deixar a topologia pronta
-- O módulo `vivobook_usb4_fix` continua útil para instrumentação e logs
-- Mas **isso não basta** para o Elgato TB3 Dock: sem driver host/router no kernel,
-  o túnel Thunderbolt nunca fecha
-- Portanto o DKMS virou **fase de groundwork**, não mais a solução principal
+```text
+dry_run=1 attempt_usb4=0 emulate_tb3_port_ops=0
+```
 
-## Alternativa mais simples: DP Alt Mode direto
+Não habilitar `attempt_usb4` ou a emulação sintética. Além do Oops já observado,
+uma falha parcial ao programar switch/mux/retimer pode deixar o caminho em estado
+inconsistente até a desconexão. Corrigir esse experimento não criaria o
+host-router e, portanto, não avançaria o tunneling.
 
-Se um adaptador USB-C → HDMI/DP simples (não Thunderbolt) for testado:
-- O firmware pode enviar `USBC_NOTIFY` com modo DP (sem precisar de TB3)
-- `pmic_glink_altmode_enable_dp()` programa o PS8833 para roteamento DP
-- Evita toda a complexidade USB4/TB3
-- Vale testar antes de atacar o overlay USB4
+## Alternativa funcional: DP Alt Mode direto
+
+Um dock/adaptador USB-C que não dependa de túnel já foi validado. USB3 a
+10 Gbps, 2.5GbE, carga e DP funcionam pelo caminho DWC3/QMP/PS8833 atual, sem
+host-router USB4.
 
 ## Erros conhecidos (não bloqueantes)
 
@@ -209,106 +234,165 @@ Não causam falha funcional.
 Com dock plugado durante o boot, o sistema trava por 2-3 minutos e não inicia.
 Sempre desconectar o dock antes de reiniciar. Conectar só após o boot completo.
 
-## Conclusão: próximo passo = kernel custom
+## Estado fechado em 2026-08-24
 
-**Revisado em 2026-03-24.** O diagnóstico fecha em:
+O tunneling ainda não pode funcionar, mas a investigação avançou muito além do
+diagnóstico de março: a preparação NHI não-PCI já foi mergeada, apareceu uma
+série PHY USB4 pública e o firmware do MCU foi recuperado do driver Windows.
+O bloqueio que continua absoluto é o **driver Qualcomm do host-router**, junto
+da ABI/DT final que ele consumirá.
 
-- o fix de `data_role` continua necessário como fase 0
-- o DKMS experimental continua útil para debug
-- mas o caso do dock TB3 **não será resolvido** sem um kernel com suporte
-  host/router USB4 para `x1e80100`
+| Recurso | Status atual |
+|---------|--------------|
+| USB3 SuperSpeed via USB-C | ✅ Funciona a 10 Gbps |
+| DP Alt Mode | ✅ Funciona |
+| Firmware do MCU USB4 | ✅ Localizado e extraído do driver Windows |
+| PHY USB4/TBT no upstream | 🟡 Série v4 pública, ainda não mergeada |
+| Host-router Qualcomm no upstream | ❌ Driver ainda não publicado |
+| **USB4 / TB3 tunneling** | ❌ Sem domínio/driver para criar o túnel |
 
-Em outras palavras: a investigação saiu de "tentar destravar altmode no runtime"
-para "carregar a pilha USB4 correta dentro do kernel".
+### Prova ao vivo no notebook
 
-| Recurso | Status | Kernel mínimo |
-|---------|--------|---------------|
-| USB3 SuperSpeed via USB-C | ✅ Funciona | 6.8+ |
-| DP Alt Mode (tela via USB-C) | ✅ Funciona | 6.16+ |
-| **USB4 / TB3 tunneling** | ❌ **Driver inexistente** | N/A |
+Toda a validação abaixo foi somente leitura via SSH, sem carregar módulo, mudar
+sysfs/debugfs ou reiniciar:
 
-**Por que o dock não funciona:** O Elgato TB3 Dock roteia USB hub, ethernet e HDMI inteiramente através do túnel Thunderbolt 3. Sem o túnel TB3 ativo, nada é acessível.
+```text
+kernel                         7.2.0-x1407qa
+compatible                     qcom,x1p42100 (Purwa)
+CONFIG_USB4                    is not set
+/sys/bus/thunderbolt           ausente
+QMP fd5000/fda000 clock-names  aux,ref,com_aux,usb3_pipe
+host-router no DT              ausente
+```
 
-**Status upstream (Mar 2026):**
-- A árvore upstream de Thunderbolt/USB4 continua sem driver Qualcomm específico
-  para host/router em `drivers/thunderbolt/`
-- Konrad Dybcio (Qualcomm) está escrevendo `qcom_usb4.c` — RFC bindings postados Set/2025, driver "not yet 100% ready to share"
-- Mantenedor Mika Westerberg exige submissão de bindings + driver juntos
-- GCC USB4 clocks/resets mergeados (6.12.63+, 6.17.13+) — só infraestrutura
-- UCSI glink quirk para x1e80100 em review (Jan/2026)
-- Nenhum kernel disponível (incluindo 6.19.9, COPR kevin/x1e80100kernel 6.17-rc1) tem o driver
+O `clk_summary` é uma contraprova útil: todos os clocks HR0/HR1 e
+`gcc_usb4_{0,1}_phy_p2rr2p_pipe_clk` existem no provider, mas estão desligados,
+com contagem zero e consumer `deviceless`. USB3/DP usam os mesmos QMPs e estão
+ativos. Portanto o silício e a infraestrutura GCC existem; faltam consumidores
+DT/driver.
 
-**ETA:** Desconhecido. Mesmo a árvore de desenvolvimento atual não expõe ainda
-um driver host/router Qualcomm pronto para teste imediato.
+### Upstream avançou, mas ainda não chegou ao driver
 
-## Reverificação 2026-08-24 — dump Windows + upstream
+- A série [non-PCI NHI prep v4](https://patchew.org/linux/20260515-topic-usb4._5Fnonpcie._5Fprepwork-v4-0-5c818378243e@oss.qualcomm.com/)
+  foi mergeada em 2026-05-21. Ela remove pressupostos PCI da parte comum, mas
+  não adiciona um probe Qualcomm; `CONFIG_USB4` ainda depende de PCI.
+- A série [QMP USB4 PHY v4](https://lkml.iu.edu/hypermail/linux/kernel/2608.2/08363.html)
+  foi postada em 2026-08-20. Ela adiciona `PHY_MODE_TBT`, o terceiro PHY USB4,
+  tabelas Hamoa/Purwa e `p2rr2p_pipe`; ainda não está no master.
+- O cover da própria série diz que o driver do host-router será publicado
+  separadamente. Não há objeto Qualcomm em `drivers/thunderbolt/` no master,
+  linux-next ou árvore do mantenedor.
+- O quirk `UCSI_USB4_IMPLIES_USB` já está no kernel instalado e associado a
+  `qcom,x1e80100-pmic-glink`; ele resolve enumeração UCSI, não substitui o HR.
 
-Feita depois de extrair `windows-drivers/X1407QA_DRV-full-2026-08-19.tar.zst`,
-para testar a hipótese de que os arquivos do Windows destravariam o caso.
-**Não destravam.** O bloqueio é um só: o driver não existe em lugar nenhum.
+Purwa inclui `hamoa.dtsi`, então os patches PHY aplicados ao Hamoa alcançam os
+QMPs `fd5000`/`fda000` desta máquina automaticamente. Não se deve trocar o
+compatible existente nem inventar um nó `qcom,x1p42100-usb4-hr`: o RFC só
+define `qcom,x1e80100-usb4-hr` e ainda não é ABI aceita.
 
-### Upstream: três árvores, nenhuma tem o driver
+### Windows: identidade e arquitetura do bloco
 
-`drivers/thunderbolt/Makefile` é byte a byte o mesmo nas três, sem qcom:
-
-| Árvore | Resultado |
-|--------|-----------|
-| `torvalds/linux` master (pós-7.2) | sem qcom; `USB4 depends on PCI` |
-| `linux-next` | idêntico ao master |
-| `westeri/thunderbolt.git` branch `next` (árvore do mantenedor) | idêntico ao master |
-
-Ou seja: quase um ano depois da RFC de bindings (Set/2025), o `qcom_usb4.c`
-continua fora até da árvore onde ele entraria primeiro. Segue sem ETA.
-
-### O hardware, confirmado pelos INFs do dump
-
-O dump não traz driver aproveitável (é `.sys` ARM64/PE), mas fecha a
-identidade e a arquitetura do bloco:
+O dump `windows-drivers/X1407QA_DRV-full-2026-08-19.tar.zst` fecha a cadeia:
 
 | Item | Valor | Origem |
 |------|-------|--------|
-| Bus enumerador | `ACPI\QCOM0C6D` — "Qualcomm(R) USB4(TM) Host Router Bus" | `QcUsb4Bus8380.inf` |
-| Host router | `USB4\QCOM0CD10001` | `QcUsb4Filter8380.inf` |
-| Driver do router | genérico da Microsoft, ligado a `ACPI\ACPI0015` | `usb4hostrouter.inf` |
-| Papel da Qualcomm | só um **lower filter** + o bus | ambos INFs |
-| Firmware do router | residente, versionado, build `Nov 24 2024`; só atualizável via CFU | strings de `QcUsb4Filter8380.sys` |
+| Bus enumerador | `ACPI\QCOM0C6D` | `QcUsb4Bus8380.inf` |
+| PDO padrão criado pelo bus | `ACPI\ACPI0015` / `USB4\QCOM0CD10001` | `QcUsb4Bus8380.sys` |
+| Host router | driver USB4 genérico da Microsoft | `usb4hostrouter.inf` |
+| Cola Qualcomm | bus dinâmico + lower filter | `QcUsb4Bus8380` / `QcUsb4Filter8380` |
+| Instâncias de PHY/router | `QCOM0C8B\0`, `QCOM0C8C\1`, `QCOM0D07\2` | paths de preset no filter |
 
-Dois pontos que importam para o port Linux:
+O filter reconhece janelas NHI `0x1563f000`, `0x1573f000` e `0x1553f000` e
+mapeia os containers de 1 MiB `0x15600000`, `0x15700000` e `0x15500000`.
+Também mapeia os QMPs `0xfd5000`, `0xfda000` e `0xfdf000`. Isso corrige a
+hipótese anterior de que a segunda instância teria base `0x15800000`.
 
-1. **Não é PCI.** O router é MMIO e o Windows usa `ACPI0015` (host interface
-   padrão do spec USB4). Confere com a RFC: "Because it's not a PCIe device,
-   all the places where the code assumes it can freehand dereference
-   `nhi->pdev` are altered to instead consume a `struct device *`". É por isso
-   que o `nhi.c` da Intel não serve.
-2. **O router roda firmware num MCU.** A string
-   `Starting USB4 FW ver: %x.%x.%x (%s boot)` confirma; a RFC descreve o driver
-   Linux carregando esse firmware com `memcpy_toio()` e acordando o MCU.
+O [BSP/BIOS 314 oficial da ASUS](https://dlcdnets.asus.com/pub/ASUS/nb/Image/Driver/DriverPackage/50054/SOCPackage_forWebSite_Qualcomm_Z_V1.314.8800.0_50054.exe),
+SHA-256 publicado e verificado
+`caf0cbd096a4eca8788f4a910a4d34ca1c2174b9e0875d0feaada7fa45356f17`,
+é a mesma versão instalada. O capsule confirma `SCP_PURWA`, reserva USB4 de
+3 MiB em `0x15500000`, três SIDs (`0x1440`, `0x1480`, `0x14c0`), três QMPs e
+os retimers PS8833 da placa. Isso prova presença/configuração do hardware, não
+fornece um driver Linux.
 
-### O firmware NÃO está no dump
+A DSDT do mesmo capsule fecha também os `_CRS` das duas portas físicas. Ambas
+têm `_CID = ACPI0015`; os números abaixo são GSIs ACPI e, entre parênteses, o
+SPI do GIC (`GSI - 32`):
 
-Verificado, não presumido:
+| Porta | NHI `_CRS` | ring | wake | firmware | `PSET` |
+|-------|------------|------|------|----------|--------|
+| PRT0 / HR0 | `0x1563f000`, len `0xbffff` | 504 (SPI 472) | 287 (SPI 255) | 611 (SPI 579) | buffer `{0x6f}` |
+| PRT1 / HR1 | `0x1573f000`, len `0xbffff` | 637 (SPI 605) | 555 (SPI 523) | 639 (SPI 607) | buffer `{0x6f}` |
 
-- Os pacotes `qcusb4bus8380` e `qcusb4filter8380` têm exatamente **3 arquivos
-  cada** (`.cat`, `.inf`, `.sys`) — declarado nos `.ini` do DriverStore
-- Nenhum `.mbn` de USB4 no dump inteiro (5421 arquivos): só ADSP, CDSP, GPU,
-  WLAN, vídeo, câmera, HDCP, WPSS, AV1E, VSS
-- `QcUsb4Filter8380.sys` não tem blob embutido: as 8 seções PE são de driver
-  normal, e as strings de link training (`Lanes bonded successfully`,
-  `Phase 5. Preset %x`, `PHY ack lane %x`) ficam em `.data` — é o **catálogo de
-  trace** que o driver usa para decodificar eventos do MCU, não a imagem
+HR0 ring/firmware coincide exatamente com os SPI 472/579 do RFC. A terceira
+interrupção é wake e não aparece no binding RFC de duas IRQs. Isso permite
+revisar um futuro DTS de HR1 sem inferir stride, mas ACPI e o BSP continuam sem
+definir a ABI Linux de graph/power-contract.
 
-Coerente com o INF, que só declara `ComponentFirmwareUpdate` (atualização),
-nunca carga inicial: quem carrega o firmware do router é a cadeia UEFI/XBL.
+### Correção decisiva: o firmware está embutido no filter
 
-### Conclusão
+A conclusão anterior de que as strings eram apenas um catálogo de trace estava
+errada. O código ARM64 do `QcUsb4Filter8380.sys` aponta diretamente para um
+stream de `0x9f70` bytes em `.data`, interpreta records e escreve cada DWORD em
+MMIO. As três versões do filter têm código, dados e firmware idênticos.
 
-Faltam **duas** peças, e o dump não entrega nenhuma: o driver (Qualcomm-interno)
-e o firmware do MCU em formato carregável pelo Linux. O que o dump entrega é
-identidade e arquitetura — útil para revisar a série quando ela sair, inútil
-para fazer o dock funcionar hoje.
+No filter `1.0.4458.2600`:
 
-Não há o que ligar, aplicar ou configurar. Reabrir só quando o `qcom_usb4.c`
-aparecer publicamente.
+```bash
+SYS=QcUsb4Filter8380.sys
+dd if="$SYS" of=/tmp/qcusb4-fw-stream.bin bs=1 \
+  skip=$((0x4b9c0)) count=$((0x9f70))
+```
+
+Formato little-endian do stream:
+
+```text
+<u32 destino><u32 quantidade_de_dwords><payload> ...
+
+record 0: dest 0x0000, 0x1ea0 dwords -> HR + 0x13000, 0x7a80 bytes
+record 1: dest 0x8000, 0x0938 dwords -> HR + 0x1b000, 0x24e0 bytes
+```
+
+Hashes reproduzidos localmente:
+
+| Artefato | SHA-256 |
+|----------|---------|
+| stream `0x9f70` | `cd4f5929b51f2dbb0b583693ff8d024521c87f0d2e45c7adc142fed976650b99` |
+| payload 0 | `6fa1aa966d7159c3997fef3c40438dea98927a10c863854341299ff36f905d08` |
+| payload 1 | `d504c63d69c447b43a86ffc7721ef5a4ad6fe502fc09b90f6b08e15544a9caaa` |
+
+O payload contém código e dados do MCU, `Qualcomm, Inc.`, `SC8380`,
+USB4/TBT3/DROM/HSE/PMEM/DMEM/VUIC e o build
+`Nov 24 2024 17:03:31`. O loader limpa `HR+0x22000`, preserva o intervalo
+`HR+0x1aa80..0x1afff`, carrega os dois segmentos e executa a sequência de
+wake/readiness.
+
+O stream inteiro **não** pode ser passado a uma única `memcpy_toio()`: isso
+copiaria os headers e fecharia indevidamente o buraco de `0x580` bytes. Um port
+deve interpretar os dois records ou copiar somente os payloads nos destinos
+acima. O Windows usa writes little-endian de 32 bits com barreira; a largura e
+a ordenação precisam ser confirmadas no driver Linux, não presumidas.
+
+Não foi dado um nome/licença redistribuível ao blob. Por isso ele não foi
+adicionado a `firmware/`; os comandos e hashes permitem reproduzir a extração
+do dump local quando a interface do driver público definir o formato esperado.
+
+### Limite técnico atual
+
+O firmware deixa de ser peça perdida, mas **não é executável sozinho**. Ainda
+faltam publicamente:
+
+1. driver Qualcomm de plataforma/NHI, resets, MCU, mailbox e PM;
+2. binding definitivo e graph Type-C/retimer/native protocols;
+3. DTS das duas instâncias para Purwa/esta placa;
+4. RCs/adaptadores PCIe de tunneling e integração DP final.
+
+Aplicar apenas a série PHY v4 produziria infraestrutura sem consumer. Criar um
+HR por overlay sem o driver é inócuo; adivinhar propriedades/IRQs pode travar o
+boot. Não existe ajuste seguro de runtime que feche o túnel hoje. O próximo
+teste funcional começa quando o driver Qualcomm for publicado; instalar o
+kernel/DTB resultante exigirá reinicialização. **Não há razão para reiniciar
+agora.**
 
 ## Dock USB-C sem túnel: validado 2026-08-24
 
@@ -399,24 +483,28 @@ Conclusão: um dock USB-C que não dependa de túnel entrega hub 10 Gbps + 2.5Gb
 carga + saída de vídeo hoje, sem kernel custom e sem driver faltando. O Elgato TB3 continua sem
 solução porque roteia *tudo* por dentro do túnel Thunderbolt.
 
-**Próximo passo aprovado (Mar/2026) — SUPERSEDIDO pela reverificação acima.**
+**Próximo passo aprovado em março de 2026 — supersedido.**
 
-O plano de "kernel custom com patch stack USB4/TB3" pressupunha que existisse um
-patch stack para aplicar. Em 2026-08-24 foi confirmado que não existe: nem no
-master, nem no linux-next, nem na árvore do mantenedor. Buildar kernel custom
-hoje não muda nada — não há patch para colocar nele.
+Já existe preparação pública NHI e PHY, mas ainda não existe um patch stack
+completo que possa produzir tunneling. Buildar kernel custom hoje só permitiria
+testar infraestrutura sem consumer; não criaria `/sys/bus/thunderbolt`.
 
 `docs/research/2026-03-24-usb4-custom-kernel-plan.md` e
 `docs/research/2026-03-24-usb4-upstream-patch-checklist.md` continuam válidos
 como *procedimento*, para o dia em que a série sair. Não são acionáveis agora.
 
 **O que dá para fazer enquanto isso:**
-- Hub USB-A, ou dock USB-C que não dependa de túnel (USB3 + DP alt mode funcionam)
-- Acompanhar `westeri/thunderbolt.git` — é onde o `qcom_usb4.c` aparece primeiro
-- Gatilho para reabrir: `drivers/thunderbolt/Makefile` ganhar objeto qcom
+
+- usar dock USB-C sem túnel (USB3 + DP alt mode funcionam);
+- acompanhar a série Qualcomm e `westeri/thunderbolt.git`;
+- reabrir quando `drivers/thunderbolt/Makefile` ganhar um objeto Qualcomm e a
+  série trouxer driver + binding/DT compatíveis;
+- então aplicar NHI + PHY + HR/DT, compilar, instalar e reiniciar uma única vez
+  para o primeiro teste real.
 
 ## Artefatos iniciados no repositório
 
 - `diagnose-usb4.sh` — coleta o estado atual de Type-C, altmodes, USB, logs e UCSI debugfs
-- `install-usb4-role-fix.sh` — instala a regra `udev` para corrigir `data_role`
+- `install-usb4-role-fix.sh` — workaround histórico do `data_role` no 6.19.8;
+  não revalidado como necessário no 7.2
 - `modules/vivobook-usb4-fix-1.0/` — base DKMS experimental para instrumentação do caminho Type-C/retimer

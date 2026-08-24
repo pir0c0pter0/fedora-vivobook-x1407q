@@ -1,37 +1,51 @@
 # USB4 / TB3 — Plano para Kernel Custom
 
 **Data:** 2026-03-24
-**Status:** Decisão tomada — DKMS sozinho não fecha o caso; seguir com kernel custom
-**Kernel base:** `6.19.8-300.fc44` (`kernel-6.19.8-300.fc44.src.rpm` na raiz do repositório)
+**Reverificado:** 2026-08-24
+**Status:** **SUSPENSO** — procedimento histórico; não há stack público funcional para buildar
+**Kernel base histórico:** `6.19.8-300.fc44`
 
 ---
 
 ## Decisão
 
-O estado atual da investigação é:
+**Não seguir com kernel custom hoje e não reiniciar por USB4.** Desde a criação
+deste plano, a preparação NHI não-PCI foi mergeada e o PHY USB4/TBT3 apareceu
+em v4, mas o driver Qualcomm do host-router continua privado. Um build com as
+peças públicas só adicionaria infraestrutura sem consumer e não criaria um
+domínio USB4.
 
-- `install-usb4-role-fix.sh` corrige a fase 0 (`data_role`)
+O alvo vivo também foi corrigido: é X1P42100/**Purwa**, que inclui
+`hamoa.dtsi` e reutiliza IP/compatibles `x1e80100`; não é uma placa Hamoa.
+
+O estado histórico dos artefatos locais é:
+
+- `install-usb4-role-fix.sh` corrigia `data_role` no 6.19.8; não foi revalidado
+  como requisito no 7.2
 - `diagnose-usb4.sh` já coleta o before/after necessário
 - `modules/vivobook-usb4-fix-1.0/` ajuda a instrumentar Type-C, mux e retimer
 - mas o dock Elgato TB3 continua bloqueado por ausência do host/router USB4 no kernel
 
-Conclusão prática: insistir só em overlay ou altmode sintético no runtime não fecha
-o túnel Thunderbolt. O próximo passo útil é bootar um kernel com a pilha USB4
-certa para `x1e80100`.
+Conclusão prática: overlay ou altmode sintético não fecha o túnel. Reativar este
+plano somente quando um **patch stack público coerente** trouxer driver HR,
+binding/DT e interface de firmware. Nesse momento, atualizar a base do kernel e os comandos
+abaixo antes de executar; os números 6.19.8 são apenas o registro histórico.
 
 ## Escopo mínimo do patch stack
 
 ### 1. Host/router USB4 Qualcomm
 
-Objetivo: adicionar o driver que faltava para o SoC `x1e80100`.
+Objetivo futuro: adicionar o driver do bloco `x1e80100` compartilhado pelo
+X1P42100/Purwa.
 
 Arquivos esperados:
 - `drivers/thunderbolt/` com novo arquivo Qualcomm (`qcom_usb4.c` ou equivalente da série real)
 - `drivers/thunderbolt/Kconfig`
 - `drivers/thunderbolt/Makefile`
 
-Sem esse bloco, `/sys/bus/usb4/` não deve aparecer e o dock continuará preso em
-Billboard.
+Sem esse bloco, nenhum `domain*` Qualcomm aparece em
+`/sys/bus/thunderbolt/devices/`; o diretório do bus sozinho só prova que o core
+Thunderbolt foi carregado. O dock continuará preso em Billboard.
 
 ### 2. Device Tree para o host USB4
 
@@ -84,7 +98,7 @@ Regra:
 - se ainda houver crash após o host/router existir, o problema passa a ser depuração
   do retimer com contexto real, não emulação
 
-## Estratégia de build
+## Estratégia de build histórica — não executar no estado atual
 
 Seguir exatamente o padrão já usado na pesquisa de `s2idle`: build RPM local sobre
 o SRPM Fedora.
@@ -163,18 +177,21 @@ sudo bash diagnose-usb4.sh | tee /tmp/usb4-before.txt
 Checklist mínimo:
 
 1. `uname -r` mostra `6.19.8-300.usb4.fc44.aarch64`
-2. `/sys/bus/usb4/` existe
-3. `journalctl -b | rg 'qcom_usb4|thunderbolt|usb4|ucsi|typec|ps883'`
-4. dock conectado **após** o boot completo
-5. `sudo boltctl list` mostra o dock ou algum domínio detectado
-6. `lsusb -t` deixa de mostrar apenas Billboard fallback
-7. `ip link show` expõe a interface ethernet do dock
+2. `/sys/bus/thunderbolt/` existe (somente core carregado)
+3. `/sys/bus/thunderbolt/devices/domain*` existe e o log confirma probe do HR
+   Qualcomm
+4. `journalctl -b | rg 'qcom_usb4|thunderbolt|usb4|ucsi|typec|ps883'`
+5. dock conectado **após** o boot completo
+6. `sudo boltctl list` mostra o dock ou algum domínio detectado
+7. `lsusb -t` deixa de mostrar apenas Billboard fallback
+8. `ip link show` expõe a interface ethernet do dock
 
 ### Critério de sucesso por nível
 
 | Nível | Sinal | Interpretação |
 |-------|-------|---------------|
-| 1 | `/sys/bus/usb4/` existe | host/router Qualcomm probou |
+| 0 | `/sys/bus/thunderbolt/` existe | core USB4/Thunderbolt carregou; não prova HR |
+| 1 | `devices/domain*` + log de probe Qualcomm | host-router Qualcomm probou |
 | 2 | `boltctl` ou altmodes do partner aparecem | pilha Type-C/TB3 saiu do fallback |
 | 3 | USB hub + ethernet do dock enumeram | túnel TB3 funcional |
 
@@ -182,23 +199,27 @@ Checklist mínimo:
 
 ### Go
 
-Prosseguir com kernel custom se pelo menos uma destas condições for verdadeira:
+Prosseguir com kernel custom somente quando **todas** estas condições forem
+verdadeiras:
 
-- a série RFC do host/router Qualcomm foi obtida
-- existe branch pública testável com `drivers/thunderbolt` atualizado para Qualcomm
-- o patch de PHY/DT consegue ser alinhado com essa série
+- existe fonte pública testável do host-router Qualcomm;
+- driver, binding e DT correspondem à mesma revisão do stack;
+- a série PHY necessária aplica na mesma base;
+- o driver define o nome/formato de firmware esperado;
+- os recursos das duas portas conferem com o mapa BIOS/Windows.
 
 ### No-Go
 
 Parar e não gastar mais tempo em DKMS se:
 
 - a série do host/router não estiver disponível
-- o kernel custom ainda não criar `/sys/bus/usb4/`
+- o kernel custom ainda não criar `devices/domain*` nem logar probe do HR
 - o único avanço possível depender de reativar a rota sintética que já derrubou `ps883x`
 
 ## Papel dos artefatos já existentes
 
-- `install-usb4-role-fix.sh`: manter instalado; é pré-condição para o dock aparecer ao menos como Billboard
+- `install-usb4-role-fix.sh`: workaround histórico do 6.19.8; não tratar como
+  pré-condição no 7.2 sem reproduzir a falha de role
 - `diagnose-usb4.sh`: rodar antes e depois de cada kernel
 - `modules/vivobook-usb4-fix-1.0/`: usar só como instrumentação enquanto o host/router real não está estável
 - `USB4-TB3-investigation.md`: documento de diagnóstico raiz

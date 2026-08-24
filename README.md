@@ -100,7 +100,7 @@ instalado com validação física da reconstrução atual.
 | **CDSP / NPU** | :white_check_mark: Working | CDSP, FastRPC and QNN HTP inference all work with CPU fallback disabled; the SoC ID override is applied per process by `tools/npu-run`, never system-wide (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
 | **Charge control** | :white_check_mark: Working | Charge limit 80% via udev rule (see [Charge Control Fix](#16-battery-charge-control-fix)) |
 | **USB-C DP alt-mode** | :white_check_mark: Working | Both ports, tested DP-2 up to 2560×1600. Device link errors at boot are cosmetic ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
-| **USB4 / TB3 tunneling** | :x: Not working | DP alt-mode and plain USB-C docks work (Dell SD25 validated: 10 Gbps hub + 2.5GbE + charging + external display), but Thunderbolt tunneling is blocked: the Qualcomm USB4 host/router driver does not exist in any public tree (Aug 2026). See [USB4/TB3 Status](#usb4tb3-status-aug-2026) |
+| **USB4 / TB3 tunneling** | :x: Not working | DP alt-mode and plain USB-C docks work (Dell SD25: 10 Gbps hub + 2.5GbE + charging + display). Firmware and hardware map were recovered from Windows/BIOS, but the Qualcomm host-router driver and final DT stack are not public (Aug 2026). See [USB4/TB3 Status](#usb4tb3-status-aug-2026) |
 | **Camera RGB** | :white_check_mark: Working | Late graphical autostart validated after reboot; upright image, still/video and PipeWire work. CAMCC clock and libcamera metadata warnings are gone with the patched 7.2 kernel and libcamera (see [Camera Fix](#17-rgb-camera-fix)) |
 | **Camera IR** | :white_check_mark: Working | Himax HM1092 streams 560×360 Y10 at ~29.7 fps through `csiphy0 → csid0 → vfe0_rdi0`; own `hm1092` driver. pm8010 is present after all — LDO7 only registers at 2.912 V, the value ASUS' own `CAMI_RES_QRD.bin` asks for. No IR illuminator yet, so only IR sources show up (see [Camera Research](#camera-research)) |
 | **Display color control** | :white_check_mark: Working | CTM saturation + contrast via DKMS module (see [Display Color Control Fix](#18-display-color-control-fix)) |
@@ -128,30 +128,34 @@ them as done.
 ## USB4/TB3 Status (Aug 2026)
 
 The laptop really does ship USB4 hardware — ASUS specifies two USB4 Gen 3
-Type-C ports, and both advertise the Thunderbolt alt-mode SVID `8087` locally.
-Plain USB-C DP alt-mode already works on both. The remaining problem is
-specifically Thunderbolt tunneling for docks like the Elgato TB3 Dock.
+Type-C ports, and both advertise Thunderbolt SVID `8087` locally. The live SoC
+is X1P42100/**Purwa** (not Hamoa), inheriting the X1E USB blocks through
+`purwa.dtsi`. Plain USB-C/DP works; the missing function is tunneling.
 
-**The blocker is a single missing driver, and it does not exist publicly.**
-Re-verified on 2026-08-24: `drivers/thunderbolt/Makefile` is identical — with no
-Qualcomm object — in `torvalds/linux` master, in `linux-next`, and in
-`westeri/thunderbolt.git` `next`, the maintainer tree where it would land first.
-`CONFIG_USB4` is still `depends on PCI` and only builds Intel's PCI NHI.
+The public stack is advancing but is not complete:
 
-Why the existing stack cannot drive it (confirmed from the Windows driver dump):
+- non-PCI NHI preparation was merged in May 2026;
+- a QMP USB4/TBT3 PHY v4 series for Hamoa/Purwa was posted on 2026-08-20 but is
+  not merged;
+- the Qualcomm platform driver that boots the router MCU and registers a USB4
+  domain is still unpublished, and the final HR/Type-C DT graph is not public;
+- the installed kernel has `CONFIG_USB4` unset and no
+  Thunderbolt bus. Enabling the option alone would still provide no Qualcomm
+  probe.
 
-- the host router is **MMIO, not PCI** — Windows binds Microsoft's generic
-  `Usb4HostRouter.sys` to `ACPI\ACPI0015`, the spec-standard USB4 host interface
-- Qualcomm ships only a **lower filter** (`USB4\QCOM0CD10001`) plus an enumeration
-  bus (`ACPI\QCOM0C6D`); the filter owns the proprietary link layer
-- the router runs **firmware on an MCU** (`Starting USB4 FW ver: … [Nov 24 2024]`),
-  loaded by the UEFI/XBL chain — the driver packages only do CFU *updates*
+The Windows dump and official ASUS BIOS 314 do advance a future port. They
+confirm the MMIO host routers (`0x15600000`, `0x15700000`, third block at
+`0x15500000`), QMPs, SIDs and the `ACPI\QCOM0C6D` → `ACPI\ACPI0015` →
+`USB4\QCOM0CD10001` enumeration chain.
 
-The Windows dump does **not** unblock this. It contains no USB4 firmware: both
-driver packages declare exactly three files (`.cat`/`.inf`/`.sys`), there is no
-USB4 `.mbn` among the dump's 5421 files, and `QcUsb4Filter8380.sys` has no
-embedded blob — its link-training strings live in `.data` as the trace catalog
-used to decode MCU events, not as the image.
+Most importantly, the USB4 MCU firmware **is embedded** in
+`QcUsb4Filter8380.sys`; the previous trace-catalog/UEFI conclusion was wrong.
+Its `0x9f70`-byte container has SHA-256
+`cd4f5929b51f2dbb0b583693ff8d024521c87f0d2e45c7adc142fed976650b99`
+and carries two payloads written to `HR+0x13000` and `HR+0x1b000`. This removes
+the firmware as an unknown, but the blob cannot create a domain without the
+unpublished reset/mailbox/PM/platform driver. Full offsets, hashes and an exact
+extraction command are in [USB4-TB3-investigation.md](USB4-TB3-investigation.md).
 
 ### A non-tunneling USB-C dock works today (validated 2026-08-24)
 
@@ -210,12 +214,14 @@ Practical conclusion:
 
 - **USB-C DP alt-mode:** working
 - **Plain USB-C dock (no tunnel):** working — 10 Gbps hub + 2.5GbE + charging + DP output
-- **USB4/TB3 dock tunneling:** blocked — driver does not exist anywhere public.
-  The Elgato TB3 Dock stays unusable because it routes *everything* through the
-  Thunderbolt tunnel
-- **Not worth doing:** enabling `CONFIG_USB4` (builds only the Intel PCI NHI, which
-  never matches this SoC), or building a custom kernel (there is no patch to apply)
-- **Reopen trigger:** a qcom object appearing in `drivers/thunderbolt/Makefile`
+- **USB4/TB3 dock tunneling:** blocked — firmware and hardware resources are now
+  known, but the Qualcomm HR driver and complete DT contract are not public. The
+  Elgato TB3 Dock stays unusable because it routes *everything* through the tunnel
+- **Not worth doing yet:** enabling `CONFIG_USB4`, applying only the PHY v4, or
+  inventing an HR overlay; none supplies the missing platform probe
+- **Reopen trigger:** a Qualcomm object in `drivers/thunderbolt/Makefile` plus a
+  matching binding/DT series. Installing that stack will require a reboot; there
+  is no reason to reboot for USB4 before it exists
 
 Documents:
 
@@ -227,6 +233,9 @@ External tracking:
 
 - [Qualcomm Linux `kernel-topics` issue #825: public DTS/DTB support request for ASUS Vivobook 14 X1407QA](https://github.com/qualcomm-linux/kernel-topics/issues/825)
 - [Technical follow-up comment on issue #825 with current USB4/TB3 blockers](https://github.com/qualcomm-linux/kernel-topics/issues/825#issuecomment-4118158804)
+- [Non-PCI NHI preparation v4](https://patchew.org/linux/20260515-topic-usb4._5Fnonpcie._5Fprepwork-v4-0-5c818378243e@oss.qualcomm.com/)
+- [QMP USB4/TBT PHY v4 cover](https://lkml.iu.edu/hypermail/linux/kernel/2608.2/08363.html)
+- [Qualcomm USB4 Host Router RFC](https://patchew.org/linux/20250916-topic-qcom._5Fusb4._5Fbindings-v1-1-943ecb2c0fa7@oss.qualcomm.com/)
 
 ---
 
@@ -1761,7 +1770,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **~~Firewall~~**: Fixed — the custom 7.2 config now builds nftables, FIB/reject/NAT expressions, and the NetBIOS conntrack helper required by the FedoraWorkstation zone. `firewalld` is `active/running` and the generated ruleset is loaded.
 - **Camera IR**: pm8010 PMIC physically absent — sensor has no power. No one upstream has IR camera working on Snapdragon X Linux (see [Camera Research](#camera-research))
 - **Suspend**: `deep` (S3) still crashes and stays disabled. `s2idle` validated 2026-08-24 on the installed `7.2.0-x1407qa` — 2 clean cycles, ~0.80W suspended (see [Lid Close Fix](#13-lid-close-fix)). No RTC alarm on pm8xxx — wake by lid/power button only ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
-- **USB4 / Thunderbolt 3**: Plain DP alt-mode works, but TB3 dock tunneling is blocked. The single blocker is the missing Qualcomm USB4 host/router driver, absent from master, linux-next and the maintainer tree as of Aug 2026; the Windows dump supplies the hardware identity but no firmware and no driver. See [USB4/TB3 Status](#usb4tb3-status-aug-2026)
+- **USB4 / Thunderbolt 3**: Plain DP alt-mode works, but TB3 tunneling is blocked. Reverse engineering recovered the embedded MCU firmware and exact HR/QMP identity; public upstream has non-PCI NHI prep and a pending PHY v4, but still lacks the Qualcomm host-router driver and final DT graph as of Aug 2026. See [USB4/TB3 Status](#usb4tb3-status-aug-2026)
 - **~~cpufreq~~**: Fixed — `scmi_cpufreq` autoload via `/etc/modules-load.d/` ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
 - **~~NPU inference blocked~~**: Fixed — it was never a vendor block. FastRPC userspace (`libcdsprpc.so`), the hash-paired ASUS Hexagon binaries and a per-process SoC ID override make QNN/HTP run real inference with CPU fallback disabled. Two caveats survive: the Hexagon shell must match the signed CDSP firmware segment hashes, and the SoC ID override must stay scoped to the process (see [CDSP/NPU Fix](#15-cdspnpu-fix)).
 - **~~Battery charge control~~**: Fixed — udev rule sets 80% charge limit (see [Charge Control Fix](#16-battery-charge-control-fix))

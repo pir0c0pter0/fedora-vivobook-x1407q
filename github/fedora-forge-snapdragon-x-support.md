@@ -508,7 +508,12 @@ Mesa: 26.0.3
 - **Camera (upstream):** Bryan O'Donoghue (Linaro) v9 patches (7 patches, reduzido de v8's 18) in LKML review (Feb 2026). Expected merge ~6.21/6.22. **Note:** patches only cover x1e80100 (Hamoa) — not Purwa/x1p42100. Our DKMS overlay remains the only working path for this SoC.
 - **Suspend:** s2idle is physically validated on `7.2.0-x1407qa` at ~0.80W;
   deep/S3 still crashes and remains disabled.
-- **USB4 / Thunderbolt 3:** USB-C DP alt-mode works, but TB3 tunneling is still blocked. UCSI exposes no `ALT_MODE_OVERRIDE`, the firmware never sends `USBC_NOTIFY` for the dock path, and current kernels still lack Qualcomm `x1e80100` USB4 host/router support. This is the first feature on this machine that looks likely to require a real custom-kernel path.
+- **USB4 / Thunderbolt 3:** USB-C DP alt-mode works, but TB3 tunneling is still
+  blocked. Non-PCI NHI preparation is upstream and a Hamoa/Purwa PHY v4 is in
+  review; the Qualcomm host-router driver and final DT graph are still private.
+  Reverse engineering recovered the MCU firmware embedded in the Windows
+  lower-filter, so firmware is no longer the unknown. A custom kernel becomes
+  useful only after the missing driver series is public.
 - **PCIe race condition:** Upstream fix expected ~6.21, would eliminate WiFi DKMS module.
 - **CDSP/NPU:** Working end to end — CDSP/FastRPC transport plus QNN/HTP
   inference with CPU fallback disabled. Two things would let this work without

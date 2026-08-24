@@ -1,112 +1,146 @@
 # USB4 / TB3 — Checklist Exata do Patch Stack Upstream
 
-**Data:** 2026-03-24
-**Status:** mapa de dependências públicas para o primeiro kernel USB4/TB3 testável no X1407QA
+**Criado:** 2026-03-24 · **Reverificado:** 2026-08-24
 
----
+**Alvo real:** X1P42100/Purwa, herdando os blocos USB de `hamoa.dtsi`
 
-## Resumo curto
+**Status:** ainda não existe um stack público funcional; não buildar nem reiniciar
 
-Hoje o bloqueio real para o Elgato TB3 Dock é este:
+## Resumo
 
-1. **a peça central ainda não foi publicada**: driver Qualcomm do host/router USB4
-2. **o resto do stack já pode ser separado em pré-requisitos públicos**:
-   clocks/resets, UCSI quirks, graph Type-C/retimer e follow-ups de DP/PHY
-3. **o X1407QA ainda não tem DTS público próprio** para a topologia USB4/TB3
+O trabalho público avançou, mas ainda termina antes da peça que cria o domínio
+USB4:
 
-Ou seja: já dá para preparar a fila de cherry-picks, mas ainda não dá para
-montar um kernel funcional só com patches públicos porque falta justamente o
-driver do host/router.
+1. a preparação genérica para NHI não-PCI foi mergeada;
+2. o PHY USB4/TBT3 de Hamoa/Purwa foi publicado em v4, mas ainda está em review;
+3. o quirk UCSI e clocks/resets já estão no kernel instalado;
+4. o driver Qualcomm do host-router e sua ABI/DT final continuam inéditos.
+
+O dump Windows e o BIOS 314 resolveram identidade, firmware e parte importante
+do mapa de hardware. Eles não substituem o driver de plataforma, mailbox, PM e
+integração Type-C que ainda faltam.
 
 ## Checklist por subsistema
 
-| Subsystem | Série / patch público | Estado (Mar/2026) | Impacto prático | Ação |
-|-----------|------------------------|-------------------|-----------------|------|
-| `drivers/thunderbolt/` + `Documentation/devicetree/bindings/thunderbolt/` + `arch/arm64/boot/dts/qcom/` | RFC `dt-bindings: thunderbolt: Add Qualcomm USB4 Host Router` | **Bloqueador principal**. Só o binding RFC apareceu; o driver ainda não foi publicado. Na revisão, pediram bindings + driver juntos e um exemplo completo do sistema. | Sem isso, `/sys/bus/usb4/` não aparece e o dock fica preso em Billboard/fallback. | Monitorar a série do Konrad ou qualquer branch pública com o driver. Sem isso, não vale buildar um kernel `.usb4` esperando tunneling real. |
-| `drivers/usb/typec/ucsi/ucsi.c` | `usb: typec: ucsi: Add UCSI_USB4_IMPLIES_USB quirk for X1E80100` | **Público, ainda em review**. Qualcomm postou em 2026-03-12; Heikki respondeu positivamente em 2026-03-13. | Corrige o caso em que o firmware marca `USB4_GEN3` mas não marca `PARTNER_FLAG_USB`, evitando `ROLE_NONE` em dock USB4. | Carregar esse patch se a base escolhida ainda não o tiver. É o primeiro cherry-pick claro fora do host router. |
-| `drivers/usb/typec/ucsi/ucsi_glink.c` | match data para `qcom,x1e80100-pmic-glink` / quirk `UCSI_DELAY_DEVICE_PDOS` | **Público** e já faz parte da linha de base moderna do X1E. | Garante o comportamento específico de UCSI/PMIC GLINK para a plataforma. | Verificar se o kernel base já contém esse suporte; se não, portar junto do patch acima. |
-| `drivers/clk/qcom/` + `include/dt-bindings/clock/` + `arch/arm64/boot/dts/qcom/` | `X1E GCC USB4 clock fix-ups` | **Público** e já apareceu em changelogs estáveis recentes. | Entrega clocks/resets básicos do bloco USB4. Sem isso, o host/router não sobe mesmo com driver. | Tratar como pré-requisito obrigatório da base. Se faltar, cherry-pickar antes do driver USB4. |
-| `drivers/clk/qcom/dispcc-x1e80100.c` | `dt-bindings: clock: qcom: x1e80100-dispcc: Add USB4 router link resets` + `clk: qcom: dispcc-x1e80100: Add USB4 router link resets` | **Público**. Série focada em DP tunneling sobre USB4. | Leva resets adicionais usados pela rota de link DP via USB4 router. | Carregar se a série do host/router ou do DP tunneling depender disso e a base ainda não tiver. |
-| `drivers/gpu/drm/msm/dp/` + DTS `x1e80100` | `x1e80100: Describe the full "link" region of DP hosts` | **Público**. Série ligada a DP sobre USB4. | Expõe o bloco completo de link dos hosts DP, que passa a importar quando o túnel USB4/DP entra na jogada. | Manter na lista de dependências prováveis do primeiro enablement real. |
-| `drivers/phy/qualcomm/` + `Documentation/devicetree/bindings/phy/` | `dt-bindings: phy: qcom,sc8280xp-qmp-usb43dp-phy: Document X1E80100 compatible` | **Aceito** desde 2023-12-07. | Confirma que o suporte público do PHY já existe e que o X1E entra no binding USB43DP. | Não inventar um `compatible` local fora do upstream. O caveat é que o arquivo do binding é `usb43dp`, mas o `compatible` público do X1E continua `qcom,x1e80100-qmp-usb3-dp-phy`. |
-| `Documentation/devicetree/bindings/phy/` + `drivers/phy/qualcomm/phy-qcom-qmp-combo.c` | follow-ups de `usb-switch` / `mode-switch` e mapeamento de lanes no QMP combo | **Públicos**, mas em parte ainda em review. | Servem para descrever corretamente complexos USB-C/DP mais completos. | Tratar como bucket de verificação, não como P0. O Fedora 6.19 já faz DP alt-mode; então aqui a regra é portar só o que a série do host/router realmente exigir. |
-| `drivers/usb/typec/mux/` + `drivers/usb/typec/retimer/` + DTS de placas X1E/X1P | séries públicas de PS8830/PS8833, CRD/T14s external DP e ASUS Vivobook S15 USB-C/retimer | **Públicas**. Já existem exemplos de graph/retimer próximos do hardware que nos interessa. | Mostram como ligar conector, retimer, DP controller e USB controller no DT. | Usar como referência para o port local do X1407QA quando o host/router existir. Hoje não substituem o driver Qualcomm ausente. |
-| `arch/arm64/boot/dts/qcom/` | DTS específico do X1407QA para USB4/TB3 | **Inexistente publicamente**. | Sem isso, mesmo com o driver, ainda faltará a cola exata da placa. | Preparar port local a partir das séries CRD/T14s/Vivobook S15 assim que houver o driver do host/router. |
+| Subsistema | Estado em 2026-08-24 | Evidência / impacto | Ação |
+|------------|----------------------|---------------------|------|
+| NHI comum não-PCI | **Mergeado** em 2026-05-21 | Commits `8c3ff7c5ae15`, `e241d98e04ef`, `dd60fb487e55`, `15bcac35ba04`; a série foi testada pela Qualcomm em X1E CRD com driver privado e monitor TB3 | Usar como base futura; sozinho não cria probe Qualcomm |
+| Host-router Qualcomm | **Bloqueador, não publicado** | O RFC descreve MMIO/MCU e um exemplo HR0; não há objeto Qualcomm em `drivers/thunderbolt/` | Esperar driver + binding revisado; não reconstruir por tentativa |
+| QMP USB4/TBT PHY | **v4 pública, não mergeada** | Adiciona `PHY_MODE_TBT`, `QMP_USB43DP_USB4_PHY`, tabelas USB4/TBT3 e `p2rr2p_pipe`; testada no X1E CRD | Aplicar somente junto de um stack HR testável |
+| UCSI `USB4_IMPLIES_USB` | **Mergeado e presente no 7.2 instalado** | `ucsi_glink.c` aplica `UCSI_DELAY_DEVICE_PDOS | UCSI_USB4_IMPLIES_USB` ao X1E/Purwa herdado | Nenhum cherry-pick necessário |
+| GCC/DISPCC USB4 | **Mergeado e presente** | Clocks HR0/HR1/P2RR2P existem no `clk_summary`, mas ficam 0/`deviceless` sem DT/driver | Nenhuma ação isolada |
+| DT QMP de Hamoa/Purwa | **Patch v4 em review** | O DT vivo tem só quatro clocks e PHY índice 0 para USB3; falta quinto clock/índice 2 | Virá da série PHY, herdida por `purwa.dtsi` |
+| DT host-router | **Incompleto publicamente** | O DT vivo não tem HR. O RFC fornece HR0; graph/power-contract e DTS de placa ainda não fecharam | Esperar a série do driver; não inventar ABI |
+| Firmware MCU | **Extraído do filter Windows** | Dois payloads em `.data`, carregados em `HR+0x13000` e `HR+0x1b000`; hashes documentados na investigação principal | Manter extração reproduzível; definir nome/formato só quando o driver publicar a interface |
+| Recursos Purwa/placa | **Parcialmente recuperados** | Filter e BIOS confirmam routers `0x15600000`, `0x15700000`, `0x15500000`, QMPs e SIDs | Usar para revisar a futura série, não para ativar overlay hoje |
 
-## O que já pode entrar na fila de cherry-pick
+## O que existe no notebook hoje
 
-### Prioridade P0
+```text
+compatible                     qcom,x1p42100
+kernel                         7.2.0-x1407qa
+CONFIG_USB4                    is not set
+/sys/bus/thunderbolt           ausente
+QMP fd5000/fda000              USB3+DP, quatro clocks
+host-router no DT              ausente
+clocks USB4 HR/P2RR2P          presentes, desligados, deviceless
+```
 
-- Série do **host/router USB4 Qualcomm** quando ela finalmente aparecer
-- DTS/DT binding que vierem junto com essa série
+Purwa inclui `hamoa.dtsi`; manter
+`compatible = "qcom,x1e80100-qmp-usb3-dp-phy"` é correto. O nome do binding
+USB43DP não autoriza inventar `qcom,x1e80100-qmp-usb43dp-phy` nem
+`qcom,x1p42100-usb4-hr`.
 
-### Prioridade P1
+## Lacuna exata de DT
 
-- `usb: typec: ucsi: Add UCSI_USB4_IMPLIES_USB quirk for X1E80100`
-- `X1E GCC USB4 clock fix-ups` se a base escolhida ainda não tiver
+Para cada uma das duas portas físicas, o DT atual já liga:
 
-### Prioridade P2
+```text
+DWC3 USB3 ─┐
+DP host ───┼─ QMP USB3/DP ─ PS8833 ─ conector Type-C
+SBU ───────┘
+```
 
-- `dispcc-x1e80100: Add USB4 router link resets`
-- `x1e80100: Describe the full "link" region of DP hosts`
-- follow-ups de `mode-switch`/lane mapping no QMP combo, mas só se a série real depender deles
+A série PHY v4 acrescenta o quinto clock `p2rr2p_pipe` e um terceiro handle PHY
+no mesmo QMP. O driver HR deverá consumir esse handle; o DWC3 continua sendo o
+native USB3 protocol adapter.
 
-## O que NÃO é mais hipótese principal
+O RFC publica para HR0 a janela `0x15600000` (NHI em `0x1563f000`), SID
+`0x1440`, IRQs SPI 472/579, clocks, resets e PHY fd5000 índice 2. A engenharia
+reversa confirma ainda:
 
-- **Trocar manualmente o `compatible` do PHY para `qcom,x1e80100-qmp-usb43dp-phy`**.
-  Isso não aparece no binding público aceito para X1E. O nome do arquivo YAML é
-  `usb43dp`, mas o `compatible` público segue `qcom,x1e80100-qmp-usb3-dp-phy`.
-- **Insistir em altmode sintético como caminho final**.
-  Esse caminho já provou só servir para debug e ainda bate no `ps883x`.
-- **Buildar kernel renomeado sem patch real**.
-  Continua sem valor; o helper `build-usb4-kernel.sh` já recusa isso.
+| Índice | Container HR | NHI visto pelo Windows | QMP | SID do BIOS |
+|--------|--------------|-------------------------|-----|-------------|
+| 0 | `0x15600000` | `0x1563f000` | `0xfd5000` | `0x1440` |
+| 1 | `0x15700000` | `0x1573f000` | `0xfda000` | `0x1480` |
+| 2 | `0x15500000` | `0x1553f000` | `0xfdf000` | `0x14c0` |
 
-## Port local que ainda vamos ter que fazer
+Esses dados corrigem a antiga extrapolação de HR1 em `0x15800000`. A DSDT do
+BIOS 314 fornece ainda os GSIs exatos: HR0 ring/wake/fw = 504/287/611 (SPI
+472/255/579); HR1 = 637/555/639 (SPI 605/523/607). Isso ainda não autoriza um
+nó ativo: faltam a ABI Linux/graph final, integração `usb4-host-interface`, RCs
+PCIe tunelados e o driver que define o contrato.
 
-Quando a série do host/router aparecer, o X1407QA ainda vai precisar de:
+## Firmware recuperado
 
-- nós USB4/host-router ligados às duas portas (`a600000.usb` e `a800000.usb`)
-- graph completo entre controller USB, controller DP, conector USB-C e retimer
-- validação das duas instâncias PS8833 da placa
-- revisão do caminho UCSI/role switch com o dock real
+No `QcUsb4Filter8380.sys` 1.0.4458.2600, o stream fica em raw `0x4b9c0`, mede
+`0x9f70` e tem SHA-256:
 
-## Monitoramento prático
+```text
+cd4f5929b51f2dbb0b583693ff8d024521c87f0d2e45c7adc142fed976650b99
+```
 
-Buscar por estes termos:
+Ele contém dois records little-endian:
 
-- `Qualcomm USB4 Host Router`
-- `x1e80100 usb4 hr`
-- `UCSI_USB4_IMPLIES_USB`
-- `x1e80100-dispcc USB4 router link resets`
-- `Describe the full "link" region of DP hosts`
+- payload 0: raw `0x4b9c8`, `0x7a80` bytes → `HR+0x13000`;
+- payload 1: raw `0x53450`, `0x24e0` bytes → `HR+0x1b000`.
 
-Quando aparecer uma série testável:
+Não copiar o container inteiro com uma `memcpy_toio()`: os headers não são
+firmware e o loader Windows preserva um intervalo de `0x580` bytes entre os
+destinos. Ver comandos e hashes individuais em `USB4-TB3-investigation.md`.
 
-1. salvar em `~/rpmbuild/SOURCES/usb4-*.patch`
-2. rodar `bash prepare-usb4-kernel.sh`
-3. rodar `bash build-usb4-kernel.sh`
+## Ordem futura do patch stack
+
+Quando o driver Qualcomm for publicado, a ordem mínima de revisão/build será:
+
+1. base contendo a preparação NHI não-PCI;
+2. série QMP USB4 PHY/P2RR2P;
+3. driver Qualcomm HR + binding da mesma revisão;
+4. DTS Hamoa/Purwa e board graph exigidos pelo driver;
+5. firmware no nome/formato que o driver declarar;
+6. somente então habilitar `CONFIG_USB4`, compilar e instalar.
+
+Não preparar patch local de HR antes do passo 3: qualquer propriedade inventada
+será descartável e pode programar MMIO/reset incorreto.
+
+## Go / No-Go
+
+### Go
+
+Prosseguir para build e reboot somente se todos forem verdadeiros:
+
+- existe fonte pública do driver Qualcomm no patch stack;
+- binding e DTS de exemplo correspondem à mesma revisão;
+- a série PHY exigida aplica na mesma base;
+- o driver define como solicita/carrega o firmware;
+- os recursos de ambas as portas podem ser comparados ao BIOS/Windows acima.
+
+### No-Go atual
+
+- só NHI genérico ou só PHY v4 disponível;
+- apenas binding RFC sem driver;
+- tentativa baseada em altmode sintético ou escrita manual no PS8833;
+- nó HR fabricado a partir de stride/endereço presumido.
 
 ## Referências
 
-- Qualcomm USB4 Host Router RFC bindings:
-  - https://lists.openwall.net/linux-kernel/2025/09/16/1588
-  - https://lists.openwall.net/linux-kernel/2025/09/16/1789
-  - https://lists.openwall.net/linux-kernel/2025/09/17/262
-- Árvore Thunderbolt atual, ainda sem driver Qualcomm específico:
-  - https://kernel.googlesource.com/pub/scm/linux/kernel/git/westeri/thunderbolt/+/refs/heads/master/drivers/thunderbolt/
-- UCSI quirks:
-  - https://www.spinics.net/lists/linux-usb/msg270684.html
-  - https://www.spinics.net/lists/kernel/msg6093384.html
-  - https://www.spinics.net/lists/kernel/msg6096047.html
-- Clocks / resets / DP link:
-  - https://www.spinics.net/lists/devicetree/msg851575.html
-  - https://www.spinics.net/lists/devicetree/msg869631.html
-  - https://www.spinics.net/lists/devicetree/msg854670.html
-- PHY / QMP combo:
-  - https://patches.linaro.org/project/linux-devicetree/patch/20231201-x1e80100-phy-combo-v1-1-6938ec41f3ac@linaro.org/
-  - https://lkml.org/lkml/2025/8/7/846
-  - https://lkml.org/lkml/2025/9/8/982
-- Exemplos públicos de graph / retimer / USB-C em placas próximas:
-  - https://www.spinics.net/lists/devicetree/msg706149.html
-  - https://lkml.org/lkml/2024/9/3/293
-  - https://lkml.org/lkml/2025/11/3/268
+- [Non-PCI NHI prep v4](https://patchew.org/linux/20260515-topic-usb4._5Fnonpcie._5Fprepwork-v4-0-5c818378243e@oss.qualcomm.com/)
+- [QMP USB4 PHY v4 — cover](https://lkml.iu.edu/hypermail/linux/kernel/2608.2/08363.html)
+- [QMP USB4 PHY v4 — binding/índice](https://lkml.iu.edu/hypermail/linux/kernel/2608.2/08365.html)
+- [QMP USB4 PHY v4 — suporte preliminar](https://lkml.iu.edu/hypermail/linux/kernel/2608.2/08368.html)
+- [QMP USB4 PHY v4 — config Hamoa](https://lkml.iu.edu/hypermail/linux/kernel/2608.2/08369.html)
+- [QMP USB4 PHY v4 — P2RR2P no DTS](https://lkml.iu.edu/hypermail/linux/kernel/2608.2/08370.html)
+- [Qualcomm USB4 Host Router RFC](https://patchew.org/linux/20250916-topic-qcom._5Fusb4._5Fbindings-v1-1-943ecb2c0fa7@oss.qualcomm.com/)
+- [Hamoa mainline](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/arch/arm64/boot/dts/qcom/hamoa.dtsi)
+- [Purwa mainline](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/arch/arm64/boot/dts/qcom/purwa.dtsi)
+- [Investigação principal](../../USB4-TB3-investigation.md)
