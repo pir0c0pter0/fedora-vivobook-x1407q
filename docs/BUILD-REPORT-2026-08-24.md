@@ -137,6 +137,12 @@ Editado com verificação separada (workflows editar→verificar):
   via APST). 2.95W → 3.04W = ruído. Nada persistido; detalhe no plano.
 - Fase 2 (remover `pd_ignore_unused`/`clk_ignore_unused`): **requer usuário
   presente** — full poweroff entre testes e risco de quebrar subsistema.
-- Fase 3 (cap de frequência na bateria): opcional, ganho só em carga —
-  decisão de UX (trade performance × bateria) antes de aplicar.
+- ~~Fase 3 (cap de frequência na bateria)~~ ✅ **aplicada (sessão 2, a
+  pedido)**: script `vivobook-battery-freq-cap` + udev rule nos eventos de
+  AC/USB — 2380800 na bateria, 2956800 plugado. Cap validado em Discharging;
+  restore valida no próximo plug. Governor `teo` não aplicado (medir antes).
+- Review do Codex pegou bug no fallback do check de bateria: socket
+  `/run/user/$UID/bus` existe em qualquer login SSH sem GNOME — trocado por
+  probe real (`gnome-extensions list`), mesmo estilo do `pactl info` do
+  áudio. Revalidado 16/16 no notebook.
 - Percentual de bateria no live segue pendência separada.

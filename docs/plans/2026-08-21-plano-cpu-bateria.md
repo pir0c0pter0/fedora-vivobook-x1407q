@@ -84,11 +84,16 @@ Esses flags são dreno constante desde o boot. Teste controlado:
 4. Passou → repetir removendo também `clk_ignore_unused`.
 5. Qualquer quebra → voltar pro fallback e registrar QUAL subsistema quebrou (isso vira dado pra proteger o domínio específico no futuro).
 
-## Fase 3 — cpufreq na bateria (opcional, ganho só em carga)
+## Fase 3 — cpufreq na bateria ✅ APLICADA (2026-08-24)
 
-- Cap de frequência em bateria: udev rule no evento `power_supply` seta
-  `scaling_max_freq` ≈ 2.4GHz desplugado, restaura 2.96GHz no AC.
-- Idle governor `menu` → `teo` (`cpuidle.governor=teo`): marginal, medir antes de manter.
+- Cap aplicado: `/usr/local/bin/vivobook-battery-freq-cap` +
+  `/etc/udev/rules.d/99-battery-freq-cap.rules` (eventos de
+  `qcom-battmgr-ac`/`-usb` + coldplug no boot). Na bateria
+  `scaling_max_freq=2380800` (maior OPP ≤2.4GHz), no AC/USB 2956800.
+  Validado no hardware: cap ativo nas 2 policies em Discharging e re-aplicado
+  via `udevadm trigger`. Restore no AC valida no próximo plug do carregador.
+- Idle governor `menu` → `teo` (`cpuidle.governor=teo`): **não aplicado** —
+  marginal, medir antes de manter.
 
 ## Fase 4 — Institucionalizar
 

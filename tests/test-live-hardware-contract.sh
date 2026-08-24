@@ -86,7 +86,8 @@ fi
 }
 setup="$repo/setup-vivobook.sh"
 require_file "$setup"
-for token in 'snd_soc_wcd938x' 'HandleLidSwitch=suspend'; do
+for token in 'snd_soc_wcd938x' 'HandleLidSwitch=suspend' 'vivobook-battery-freq-cap' \
+    '99-battery-freq-cap.rules' '2380800'; do
     require_token "$setup" "$token"
 done
 

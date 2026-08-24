@@ -1351,12 +1351,32 @@ log "  cpufreq autoload"
 step 15 $TOTAL "CDSP/NPU (firmware early boot)..."
 log "  firmware CDSP incluído em qcom-remoteproc.conf"
 
-# ─── 16. Charge control — udev rule 80% ─────────────────────────────────────
+# ─── 16. Charge control — udev rule 80% + freq cap na bateria ───────────────
 step 16 $TOTAL "Charge control (limite 80%)..."
 echo 'SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-bat", ATTR{charge_control_end_threshold}="80"' > /etc/udev/rules.d/99-battery-charge-limit.rules
-udevadm control --reload-rules 2>/dev/null || true
 echo 80 > /sys/class/power_supply/qcom-battmgr-bat/charge_control_end_threshold 2>/dev/null || true
-log "  Charge limit 80%"
+
+# Freq cap na bateria (plano de bateria Fase 3): 2.38GHz na bateria, 2.96GHz no AC/USB
+cat > /usr/local/bin/vivobook-battery-freq-cap << 'EOF'
+#!/bin/sh
+# vivobook-battery-freq-cap: cap CPU max freq on battery, restore on AC/USB power.
+# 2380800 = highest OPP <= 2.4GHz on X1-26-100; 2956800 = cpuinfo_max_freq.
+ac=$(cat /sys/class/power_supply/qcom-battmgr-ac/online 2>/dev/null)
+usb=$(cat /sys/class/power_supply/qcom-battmgr-usb/online 2>/dev/null)
+if [ "$ac" = 1 ] || [ "$usb" = 1 ]; then
+    freq=2956800
+else
+    freq=2380800
+fi
+for p in /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq; do
+    echo "$freq" > "$p" 2>/dev/null || true
+done
+EOF
+chmod 755 /usr/local/bin/vivobook-battery-freq-cap
+echo 'SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-ac|qcom-battmgr-usb", RUN+="/usr/local/bin/vivobook-battery-freq-cap"' > /etc/udev/rules.d/99-battery-freq-cap.rules
+udevadm control --reload-rules 2>/dev/null || true
+/usr/local/bin/vivobook-battery-freq-cap || true
+log "  Charge limit 80% + freq cap 2.38GHz na bateria"
 
 # ─── 17. Câmera RGB — DKMS + systemd on-demand ──────────────────────────────
 log "Câmera RGB (vivobook_cam_fix — on-demand)..."
