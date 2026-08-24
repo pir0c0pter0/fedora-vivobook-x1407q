@@ -240,7 +240,7 @@ O tunneling ainda não pode funcionar, mas a investigação avançou muito além
 diagnóstico de março: a preparação NHI não-PCI já foi mergeada, apareceu uma
 série PHY USB4 pública e o firmware do MCU foi recuperado do driver Windows.
 O bloqueio que continua absoluto é o **driver Qualcomm do host-router**, junto
-da ABI/DT final que ele consumirá.
+da série correspondente de binding/DTS e do graph final.
 
 | Recurso | Status atual |
 |---------|--------------|
@@ -278,7 +278,7 @@ DT/driver.
   não adiciona um probe Qualcomm; `CONFIG_USB4` ainda depende de PCI.
 - A série [QMP USB4 PHY v4](https://lkml.iu.edu/hypermail/linux/kernel/2608.2/08363.html)
   foi postada em 2026-08-20. Ela adiciona `PHY_MODE_TBT`, o terceiro PHY USB4,
-  tabelas Hamoa/Purwa e `p2rr2p_pipe`; ainda não está no master.
+  suporte Hamoa herdado por Purwa e `p2rr2p_pipe`; ainda não está no master.
 - O cover da própria série diz que o driver do host-router será publicado
   separadamente. Não há objeto Qualcomm em `drivers/thunderbolt/` no master,
   linux-next ou árvore do mantenedor.
@@ -311,23 +311,27 @@ O [BSP/BIOS 314 oficial da ASUS](https://dlcdnets.asus.com/pub/ASUS/nb/Image/Dri
 SHA-256 publicado e verificado
 `caf0cbd096a4eca8788f4a910a4d34ca1c2174b9e0875d0feaada7fa45356f17`,
 é a mesma versão instalada. O capsule confirma `SCP_PURWA`, reserva USB4 de
-3 MiB em `0x15500000`, três SIDs (`0x1440`, `0x1480`, `0x14c0`), três QMPs e
-os retimers PS8833 da placa. Isso prova presença/configuração do hardware, não
-fornece um driver Linux.
+3 MiB em `0x15500000`, três QMPs e os retimers PS8833 da placa; o IORT fornece
+os três SIDs (`0x1440`, `0x1480`, `0x14c0`). Isso prova presença/configuração
+do hardware, não fornece um driver Linux. A DSDT só expõe HR0/HR1 como
+interfaces físicas; o papel externo do terceiro bloco permanece desconhecido.
 
-A DSDT do mesmo capsule fecha também os `_CRS` das duas portas físicas. Ambas
-têm `_CID = ACPI0015`; os números abaixo são GSIs ACPI e, entre parênteses, o
-SPI do GIC (`GSI - 32`):
+A DSDT do mesmo capsule expõe um pai `UBF0` com `_HID = QCOM0C6D` e dois filhos
+`PRT0`/`PRT1` com `_CID = ACPI0015`. O `_CRS` de cada filho contém a janela NHI
+e três descritores de interrupção sem nome; os números abaixo são GSIs ACPI e,
+entre parênteses, o SPI do GIC (`GSI - 32`):
 
-| Porta | NHI `_CRS` | ring | wake | firmware | `PSET` |
-|-------|------------|------|------|----------|--------|
-| PRT0 / HR0 | `0x1563f000`, len `0xbffff` | 504 (SPI 472) | 287 (SPI 255) | 611 (SPI 579) | buffer `{0x6f}` |
-| PRT1 / HR1 | `0x1573f000`, len `0xbffff` | 637 (SPI 605) | 555 (SPI 523) | 639 (SPI 607) | buffer `{0x6f}` |
+| Porta | NHI `_CRS` | IRQ 1 | IRQ 2 | IRQ 3 |
+|-------|------------|-------|-------|-------|
+| PRT0 / HR0 | `0x1563f000`, len `0xbffff` | 504 (SPI 472) | 287 (SPI 255) | 611 (SPI 579) |
+| PRT1 / HR1 | `0x1573f000`, len `0xbffff` | 637 (SPI 605) | 555 (SPI 523) | 639 (SPI 607) |
 
-HR0 ring/firmware coincide exatamente com os SPI 472/579 do RFC. A terceira
-interrupção é wake e não aparece no binding RFC de duas IRQs. Isso permite
-revisar um futuro DTS de HR1 sem inferir stride, mas ACPI e o BSP continuam sem
-definir a ABI Linux de graph/power-contract.
+Os papéis ring/wake/firmware são inferidos pela ordem do HR0 no RFC: as IRQs 1
+e 3 de HR0 coincidem exatamente com os SPI 472/579 publicados, enquanto ACPI
+marca explicitamente a IRQ 2 como `SharedAndWake`. Separadamente do `_CRS`, o
+método `PSET()` de cada filho retorna `PRS0`/`PRS1`, ambos `Buffer { 0x6f }`.
+Isso permite revisar um futuro DTS de HR1 sem inferir stride, mas ACPI e o BSP
+continuam sem definir a ABI Linux de graph/power-contract.
 
 ### Correção decisiva: o firmware está embutido no filter
 

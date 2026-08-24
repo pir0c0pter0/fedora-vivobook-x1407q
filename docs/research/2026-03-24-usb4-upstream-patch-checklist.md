@@ -12,7 +12,8 @@ O trabalho público avançou, mas ainda termina antes da peça que cria o domín
 USB4:
 
 1. a preparação genérica para NHI não-PCI foi mergeada;
-2. o PHY USB4/TBT3 de Hamoa/Purwa foi publicado em v4, mas ainda está em review;
+2. o PHY USB4/TBT3 de Hamoa, herdado por Purwa, foi publicado em v4, mas ainda
+   está em review;
 3. o quirk UCSI e clocks/resets já estão no kernel instalado;
 4. o driver Qualcomm do host-router e sua ABI/DT final continuam inéditos.
 
@@ -29,10 +30,10 @@ integração Type-C que ainda faltam.
 | QMP USB4/TBT PHY | **v4 pública, não mergeada** | Adiciona `PHY_MODE_TBT`, `QMP_USB43DP_USB4_PHY`, tabelas USB4/TBT3 e `p2rr2p_pipe`; testada no X1E CRD | Aplicar somente junto de um stack HR testável |
 | UCSI `USB4_IMPLIES_USB` | **Mergeado e presente no 7.2 instalado** | `ucsi_glink.c` aplica `UCSI_DELAY_DEVICE_PDOS | UCSI_USB4_IMPLIES_USB` ao X1E/Purwa herdado | Nenhum cherry-pick necessário |
 | GCC/DISPCC USB4 | **Mergeado e presente** | Clocks HR0/HR1/P2RR2P existem no `clk_summary`, mas ficam 0/`deviceless` sem DT/driver | Nenhuma ação isolada |
-| DT QMP de Hamoa/Purwa | **Patch v4 em review** | O DT vivo tem só quatro clocks e PHY índice 0 para USB3; falta quinto clock/índice 2 | Virá da série PHY, herdida por `purwa.dtsi` |
+| DT QMP de Hamoa, herdado por Purwa | **Patch v4 em review** | O DT vivo tem só quatro clocks e PHY índice 0 para USB3; falta quinto clock/índice 2 | O suporte Hamoa virá da série PHY e será herdado por `purwa.dtsi` |
 | DT host-router | **Incompleto publicamente** | O DT vivo não tem HR. O RFC fornece HR0; graph/power-contract e DTS de placa ainda não fecharam | Esperar a série do driver; não inventar ABI |
 | Firmware MCU | **Extraído do filter Windows** | Dois payloads em `.data`, carregados em `HR+0x13000` e `HR+0x1b000`; hashes documentados na investigação principal | Manter extração reproduzível; definir nome/formato só quando o driver publicar a interface |
-| Recursos Purwa/placa | **Parcialmente recuperados** | Filter e BIOS confirmam routers `0x15600000`, `0x15700000`, `0x15500000`, QMPs e SIDs | Usar para revisar a futura série, não para ativar overlay hoje |
+| Recursos Purwa/placa | **Parcialmente identificados** | Filter/DAL identificam MMIO e QMPs; IORT fornece os SIDs; DSDT expõe apenas HR0/HR1 como portas físicas | Usar para revisar a futura série, não para ativar overlay hoje |
 
 ## O que existe no notebook hoje
 
@@ -62,24 +63,27 @@ SBU ───────┘
 ```
 
 A série PHY v4 acrescenta o quinto clock `p2rr2p_pipe` e um terceiro handle PHY
-no mesmo QMP. O driver HR deverá consumir esse handle; o DWC3 continua sendo o
-native USB3 protocol adapter.
+no mesmo QMP. O binding/DTS deverá fornecer esse handle ao driver HR; o DWC3
+continua sendo o native USB3 protocol adapter.
 
 O RFC publica para HR0 a janela `0x15600000` (NHI em `0x1563f000`), SID
 `0x1440`, IRQs SPI 472/579, clocks, resets e PHY fd5000 índice 2. A engenharia
 reversa confirma ainda:
 
-| Índice | Container HR | NHI visto pelo Windows | QMP | SID do BIOS |
+| Índice | Container HR | NHI visto pelo Windows | QMP | SID do IORT |
 |--------|--------------|-------------------------|-----|-------------|
 | 0 | `0x15600000` | `0x1563f000` | `0xfd5000` | `0x1440` |
 | 1 | `0x15700000` | `0x1573f000` | `0xfda000` | `0x1480` |
 | 2 | `0x15500000` | `0x1553f000` | `0xfdf000` | `0x14c0` |
 
-Esses dados corrigem a antiga extrapolação de HR1 em `0x15800000`. A DSDT do
-BIOS 314 fornece ainda os GSIs exatos: HR0 ring/wake/fw = 504/287/611 (SPI
-472/255/579); HR1 = 637/555/639 (SPI 605/523/607). Isso ainda não autoriza um
-nó ativo: faltam a ABI Linux/graph final, integração `usb4-host-interface`, RCs
-PCIe tunelados e o driver que define o contrato.
+Esses dados corrigem a antiga extrapolação de HR1 em `0x15800000`. A DSDT tem
+um pai `QCOM0C6D` e dois filhos `ACPI0015` para HR0/HR1; o papel externo do
+índice 2 é desconhecido. Os `_CRS` fornecem três IRQs sem nome: HR0 =
+504/287/611 (SPI 472/255/579), HR1 = 637/555/639 (SPI 605/523/607). Os papéis
+ring/wake/fw são inferidos da ordem publicada para HR0; ACPI só marca a IRQ 2
+como `SharedAndWake`. Isso ainda não autoriza um nó ativo: faltam o conjunto
+driver + binding/DTS, a ABI Linux/graph final, integração
+`usb4-host-interface` e RCs PCIe tunelados.
 
 ## Firmware recuperado
 
@@ -106,7 +110,7 @@ Quando o driver Qualcomm for publicado, a ordem mínima de revisão/build será:
 1. base contendo a preparação NHI não-PCI;
 2. série QMP USB4 PHY/P2RR2P;
 3. driver Qualcomm HR + binding da mesma revisão;
-4. DTS Hamoa/Purwa e board graph exigidos pelo driver;
+4. DTS Hamoa herdado por Purwa e board graph exigidos pelo stack;
 5. firmware no nome/formato que o driver declarar;
 6. somente então habilitar `CONFIG_USB4`, compilar e instalar.
 

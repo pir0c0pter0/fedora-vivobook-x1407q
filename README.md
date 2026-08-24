@@ -136,18 +136,21 @@ is X1P42100/**Purwa** (not Hamoa), inheriting the X1E USB blocks through
 The public stack is advancing but is not complete:
 
 - non-PCI NHI preparation was merged in May 2026;
-- a QMP USB4/TBT3 PHY v4 series for Hamoa/Purwa was posted on 2026-08-20 but is
-  not merged;
+- a QMP USB4/TBT3 PHY v4 series for Hamoa was posted on 2026-08-20 and is
+  inherited by Purwa, but is not merged;
 - the Qualcomm platform driver that boots the router MCU and registers a USB4
-  domain is still unpublished, and the final HR/Type-C DT graph is not public;
+  domain is still unpublished, as are its matching binding/DTS series and final
+  HR/Type-C graph;
 - the installed kernel has `CONFIG_USB4` unset and no
   Thunderbolt bus. Enabling the option alone would still provide no Qualcomm
   probe.
 
-The Windows dump and official ASUS BIOS 314 do advance a future port. They
-confirm the MMIO host routers (`0x15600000`, `0x15700000`, third block at
-`0x15500000`), QMPs, SIDs and the `ACPI\QCOM0C6D` → `ACPI\ACPI0015` →
-`USB4\QCOM0CD10001` enumeration chain.
+The Windows dump and official ASUS BIOS 314 do advance a future port. Vendor
+firmware and Windows-driver artifacts identify the MMIO host routers
+(`0x15600000`, `0x15700000`, third block at `0x15500000`) and QMPs, while IORT
+supplies their SIDs. The DSDT exposes one `ACPI\QCOM0C6D` parent with two
+`ACPI\ACPI0015` physical children for HR0/HR1; the external-port role of the
+third block remains unknown.
 
 Most importantly, the USB4 MCU firmware **is embedded** in
 `QcUsb4Filter8380.sys`; the previous trace-catalog/UEFI conclusion was wrong.
@@ -155,8 +158,9 @@ Its `0x9f70`-byte container has SHA-256
 `cd4f5929b51f2dbb0b583693ff8d024521c87f0d2e45c7adc142fed976650b99`
 and carries two payloads written to `HR+0x13000` and `HR+0x1b000`. This removes
 the firmware as an unknown, but the blob cannot create a domain without the
-unpublished reset/mailbox/PM/platform driver. Full offsets, hashes and an exact
-extraction command are in [USB4-TB3-investigation.md](USB4-TB3-investigation.md).
+public platform driver plus matching binding/DTS stack. Full offsets, hashes
+and an exact extraction command are in
+[USB4-TB3-investigation.md](USB4-TB3-investigation.md).
 
 ### A non-tunneling USB-C dock works today (validated 2026-08-24)
 
@@ -233,7 +237,7 @@ Documents:
 External tracking:
 
 - [Qualcomm Linux `kernel-topics` issue #825: public DTS/DTB support request for ASUS Vivobook 14 X1407QA](https://github.com/qualcomm-linux/kernel-topics/issues/825)
-- [Technical follow-up comment on issue #825 with current USB4/TB3 blockers](https://github.com/qualcomm-linux/kernel-topics/issues/825#issuecomment-4118158804)
+- [August 2026 technical update and corrections on issue #825](https://github.com/qualcomm-linux/kernel-topics/issues/825#issuecomment-5401973579)
 - [Non-PCI NHI preparation v4](https://patchew.org/linux/20260515-topic-usb4._5Fnonpcie._5Fprepwork-v4-0-5c818378243e@oss.qualcomm.com/)
 - [QMP USB4/TBT PHY v4 cover](https://lkml.iu.edu/hypermail/linux/kernel/2608.2/08363.html)
 - [Qualcomm USB4 Host Router RFC](https://patchew.org/linux/20250916-topic-qcom._5Fusb4._5Fbindings-v1-1-943ecb2c0fa7@oss.qualcomm.com/)

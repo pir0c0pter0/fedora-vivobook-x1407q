@@ -572,8 +572,9 @@ Mesa: 26.0.3
 - **Suspend:** s2idle is physically validated on `7.2.0-x1407qa` at ~0.80W;
   deep/S3 still crashes and remains disabled.
 - **USB4 / Thunderbolt 3:** USB-C DP alt-mode works, but TB3 tunneling is still
-  blocked. Non-PCI NHI preparation is upstream and a Hamoa/Purwa PHY v4 is in
-  review; the Qualcomm host-router driver and final DT graph are still private.
+  blocked. Non-PCI NHI preparation is upstream and a Hamoa PHY v4, inherited by
+  Purwa, is in review; the Qualcomm host-router driver plus matching binding/DTS
+  and final DT graph are still private.
   Reverse engineering recovered the MCU firmware embedded in the Windows
   lower-filter, so firmware is no longer the unknown. A custom kernel becomes
   useful only after the missing driver series is public.
