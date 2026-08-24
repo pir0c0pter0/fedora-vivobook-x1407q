@@ -92,7 +92,7 @@ Teste via entry BLS one-shot (`grub2-reboot`) + full poweroff entre boots:
 - **Consumo**: idle bateria 2.77W (média 90s, tela GDM) vs baseline
   2.85–2.95W → ganho marginal ~0.1–0.2W.
 - Fica no alvo uma entry `x1407qa-fallback-fase2.conf` (cmdline antiga com
-  pd+clk) selecionável no GRUB — remover na Fase 4 após soak.
+  pd+clk) selecionável no GRUB — remover somente após soak suficiente.
 
 ## Fase 3 — cpufreq na bateria ✅ APLICADA (2026-08-24)
 
@@ -108,11 +108,22 @@ Teste via entry BLS one-shot (`grub2-reboot`) + full poweroff entre boots:
 - Idle governor `menu` → `teo` (`cpuidle.governor=teo`): **não aplicado** —
   marginal, medir antes de manter.
 
-## Fase 4 — Institucionalizar
+## Fase 4 — Institucionalizar ✅ REPO CONCLUÍDO (2026-08-24)
 
-- Congelar o que ganhou: udev rules + entry GRUB definitiva em `/etc/grub.d/08_vivobook`.
-- Atualizar `setup-vivobook.sh`, README (Problema → Causa raiz → Solução → tabela) e adicionar teste em `tests/`.
-- Registrar os números (antes/depois em W) no BUILD-STATE.md.
+- O cap 2.38/2.96GHz já está no `setup-vivobook.sh` via udev.
+- O setup remove `pd_ignore_unused` das entries existentes, mantém
+  `clk_ignore_unused` e força `mem_sleep_default=s2idle`; BLS e `custom.cfg`
+  gerados pelo instalador/resgate usam o mesmo contrato. Não foi criada uma
+  terceira entry em `/etc/grub.d/08_vivobook`: os caminhos BLS/custom já foram
+  provados fisicamente e duplicar a configuração só criaria drift.
+- A ISO live conserva `pd_ignore_unused`: a Fase 2 validou o sistema instalado,
+  não o early boot do live USB.
+- README, BUILD-STATE e relatório atualizados; regressões cobertas em
+  `test-build-regressions.sh` e `test-live-hardware-contract.sh`.
+- O `post-install-protect.sh` legado foi desativado e o `vivobook-update.sh`
+  passou a validar BLS/custom.cfg + clk/s2idle sem restaurar 08_vivobook/pd.
+- Limpeza física adiada por segurança: remover
+  `x1407qa-fallback-fase2.conf` apenas depois do soak.
 
 ## Fora de alcance por enquanto
 

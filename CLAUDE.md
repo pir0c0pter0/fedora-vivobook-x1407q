@@ -43,6 +43,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 - **NÃO forçar GPIO5 output LOW** — mesmo efeito, mata a tela
 - **NÃO usar `gpio_to_irq()`** — não funciona no Qualcomm TLMM, usar `irq_create_fwspec_mapping()`
 - **NÃO usar `GSK_RENDERER=ngl` como fix definitivo** — é workaround. O fix real é `vk_pool_fix.so` que mantém Vulkan
+- **NÃO usar `post-install-protect.sh`** — legado desativado; criava BLS duplicado e restaurava `pd_ignore_unused`
 - **NÃO atualizar kernel/mesa sem testar** — auto-updates desabilitados por motivo, cada update pode quebrar os módulos DKMS
 
 ## Padrões técnicos
@@ -54,7 +55,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 | Vulkan fix | LD_PRELOAD em `/usr/local/lib64/` + `VK_DRIVER_FILES` via `~/.config/environment.d/` — MR 37622 corrige device select mas LVP ainda carrega sem o override, degradando rendering |
 | Terminal sync | `sync_render` PTY proxy em `/usr/local/bin/`, Mode 2026 synchronized output |
 | Extensão GNOME | `~/.local/share/gnome-shell/extensions/<uuid>/`, ESM modules, GNOME 50 |
-| GRUB | Entry custom em `/etc/grub.d/08_vivobook` com `clk_ignore_unused pd_ignore_unused` |
+| GRUB instalado | BLS + `custom.cfg` com `clk_ignore_unused mem_sleep_default=s2idle`; sem `pd_ignore_unused` |
 | Bateria sysfs | `/sys/class/power_supply/qcom-battmgr-bat/` (energy_now, power_now em µW) |
 | UCM2 áudio | `/usr/share/alsa/ucm2/conf.d/x1e80100/x1e80100.conf` — regex DMI matching |
 

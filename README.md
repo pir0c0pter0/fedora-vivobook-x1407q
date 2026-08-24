@@ -19,11 +19,11 @@
 
 > **ISO personalizada atual:**
 > `Fedora-44-X1407QA-Linux-7.2-hardware-ram.iso`, SHA-256
-> `ffd0f459c07e8b5cf5ae591818c6bafae0e626a444b37dae72f1bf113a7a5cbf`.
+> `af7a230eebfa803f1d5400158ba16cae58031964d7204cbd18404e0ca7866398`.
 > Ela corrige a ordem de inicialização do WCN6855, inclui tethering USB/PAN e
-> restaura as permissões do live rootfs. Foi auditada e relida do pendrive, mas
-> ainda aguarda boot físico; o percentual da bateria permanece pendente. No
-> GRUB, teste primeiro **RAM, principal**.
+> restaura as permissões do live rootfs. Foi auditada, relida do pendrive e
+> validada fisicamente até a instalação; o percentual da bateria no live
+> permanece pendente. No GRUB, teste primeiro **RAM, principal**.
 
 ## Hardware
 
@@ -253,7 +253,7 @@ BIOS version, USB port used, and a photo of the last visible line in
 3. Reboot into the installed system
 
 > **Important:** At first boot from NVMe, edit GRUB again with
-> `clk_ignore_unused pd_ignore_unused systemd.tpm2_wait=0` (without the temporary
+> `clk_ignore_unused mem_sleep_default=s2idle systemd.tpm2_wait=0` (without the temporary
 > `qcom_q6v5_pas` blacklist) — you'll make this permanent in Step 6.
 
 ### Step 6 — Apply firmware + all fixes (Part 2)
@@ -475,12 +475,13 @@ The following scripts have been removed and replaced:
 
 **Solution:** Boot using the Zenbook A14 DTB (`x1p42100-asus-zenbook-a14.dtb`) which shares the same Qualcomm "Purwa" die. The INSYDE UEFI firmware cannot be overridden (7 methods tested), so all hardware differences are fixed via runtime kernel modules.
 
-**Kernel parameters** (required in GRUB):
+**Kernel parameters:**
 
 | Parameter | Purpose |
 |-----------|---------|
 | `clk_ignore_unused` | Prevents kernel from disabling Qualcomm clocks needed by firmware |
-| `pd_ignore_unused` | Prevents kernel from disabling power domains needed by firmware |
+| `pd_ignore_unused` | Live USB safety guard only; removal from the installed system passed 16/16 hardware checks and saves ~0.1–0.2W |
+| `mem_sleep_default=s2idle` | Installed system: selects the suspend mode validated on this hardware; `deep` crashes |
 | `systemd.tpm2_wait=0` | Skips the two false TPM waits |
 | `modprobe.blacklist=qcom_q6v5_pas` | Live USB only: prevents the ADSP restart from disconnecting USB-C storage |
 | `rd.driver.pre=wcn_regulator_fix` | Loads WiFi regulator fix before PCIe scan |
@@ -490,7 +491,7 @@ The following scripts have been removed and replaced:
 **Full kernel cmdline used:**
 
 ```
-BOOT_IMAGE=/vmlinuz-6.19.6-300.fc44.aarch64 root=UUID=<your-uuid> ro rootflags=subvol=root quiet rhgb clk_ignore_unused pd_ignore_unused systemd.tpm2_wait=0 rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device
+BOOT_IMAGE=/vmlinuz-7.2.0-x1407qa root=UUID=<your-uuid> ro rootflags=subvol=root quiet rhgb clk_ignore_unused mem_sleep_default=s2idle systemd.tpm2_wait=0 rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device
 ```
 
 ### 2. WiFi Fix
@@ -1242,7 +1243,7 @@ echo "1.15" | sudo tee /sys/kernel/vivobook_color/contrast
 
 ```
 /etc/default/grub
-    GRUB_CMDLINE_LINUX_DEFAULT="quiet rhgb clk_ignore_unused pd_ignore_unused
+    GRUB_CMDLINE_LINUX_DEFAULT="quiet rhgb clk_ignore_unused mem_sleep_default=s2idle
         rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"
 
 /etc/dracut.conf.d/
@@ -1329,13 +1330,12 @@ gsettings set org.gnome.software download-updates-notify false
 
 ### Protect Against Kernel Updates
 
-Run the post-install protection script to ensure new kernels get the correct DTB and boot parameters:
-
-```bash
-sudo bash post-install-protect.sh
-```
-
-See [GUIA-POS-INSTALACAO.md](GUIA-POS-INSTALACAO.md) for details.
+Automatic kernel updates remain disabled. `post-install-protect.sh` is retired:
+it created duplicate BLS entries and restored the obsolete installed-system
+power-domain guard. Use `setup-vivobook.sh` for the current configuration and
+`rescue-installed-boot --repair` for boot recovery. A new kernel must be tested
+physically before replacing `7.2.0-x1407qa`; see
+[`docs/GUIA-POS-INSTALACAO.md`](docs/GUIA-POS-INSTALACAO.md).
 
 ---
 
@@ -1475,7 +1475,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 ├── vivobook-update.sh             # Safe update manager
 ├── extract-qcom-firmware.sh       # Extract firmware from Windows
 ├── install-battery-time-ext.sh    # GNOME battery time extension
-├── post-install-protect.sh        # Kernel update boot protection
+├── post-install-protect.sh        # Retired legacy guard; exits without changes
 ├── vk_pool_fix.c                  # Vulkan descriptor pool fix (source)
 ├── sync_render.c                  # PTY proxy for flicker-free terminal (source)
 ├── sync_render                    # PTY proxy binary

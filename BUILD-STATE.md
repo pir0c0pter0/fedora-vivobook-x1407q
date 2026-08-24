@@ -108,8 +108,15 @@
   `modules-load.d` do áudio; tplg descomprimido.
 - O RTC pm8xxx não tem alarme (sem `wakealarm`) — acordar é sempre por
   botão/tampa.
-- **Pendência**: o próximo reboot físico valida o autoload do áudio
-  (`modules-load.d`) e o cmdline novo.
+- **Reboot físico validado**: áudio autocarregou sem erros SoundWire, o cmdline
+  contém `mem_sleep_default=s2idle`, `[s2idle]` ficou selecionado e a auditoria
+  final passou 16/16 no notebook.
+- **Plano CPU/bateria, Fases 0–4**: Runtime PM PCIe não trouxe ganho e não foi
+  persistido; `pd_ignore_unused` foi removido do sistema instalado com 16/16
+  PASS (~0.1–0.2W de ganho), enquanto `clk_ignore_unused` continua obrigatório
+  para o PCIe/Wi-Fi; o cap automático de CPU foi validado em 2.3808GHz na
+  bateria e 2.9568GHz no AC/USB. O repo agora reproduz esse contrato no setup,
+  BLS e `custom.cfg`; o live USB mantém pd+clk por segurança.
 
 ## ISO final
 
@@ -147,15 +154,13 @@ zstd --long=31 -t windows-drivers/X1407QA_DRV-full-2026-08-19.tar.zst
 
 ## Pendente
 
-- ~~Diagnosticar o não-boot do sistema instalado~~ — **resolvido em
-  2026-08-24**: o instalado boota do NVMe via entrada BLS com `devicetree`
-  (ver seção acima).
-- Próximo reboot físico: validar o autoload do áudio
-  (`/etc/modules-load.d/vivobook-audio.conf`) e o cmdline novo com
-  `mem_sleep_default=s2idle`.
+- Remover `x1407qa-fallback-fase2.conf` do notebook somente depois de soak
+  suficiente da entry principal sem `pd_ignore_unused`.
+- Substituir o post-script morto do Anaconda pelo hook de `kernel-install`
+  antes de considerar uma instalação futura automaticamente bootável.
 - O percentual da bateria no live continua uma pendência separada e não deve
   ser considerado corrigido até o teste físico.
 
-Consulte [`docs/BUILD-REPORT-2026-08-20.md`](docs/BUILD-REPORT-2026-08-20.md)
-para a memória completa desta execução. O relatório de 19/08 foi preservado
-como histórico e não descreve o artefato atual.
+Consulte [`docs/BUILD-REPORT-2026-08-24.md`](docs/BUILD-REPORT-2026-08-24.md)
+para a memória completa desta execução. Os relatórios anteriores foram
+preservados como histórico e não descrevem o estado atual.

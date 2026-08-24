@@ -200,7 +200,7 @@ if [[ $REPAIR -eq 1 ]]; then
     opts="root=$root_spec ro"
     [[ -n $subvol ]] && opts="$opts rootflags=$subvol"
     opts="$opts rd.driver.pre=pwrseq_qcom_wcn rd.driver.pre=wcn_regulator_fix"
-    opts="$opts clk_ignore_unused pd_ignore_unused mem_sleep_default=s2idle systemd.tpm2_wait=0"
+    opts="$opts clk_ignore_unused mem_sleep_default=s2idle systemd.tpm2_wait=0"
     opts="$opts rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"
 
     if [[ ! -s $MNT/boot/$DTB_REL ]]; then

@@ -87,14 +87,56 @@ fi
 setup="$repo/setup-vivobook.sh"
 require_file "$setup"
 for token in 'snd_soc_wcd938x' 'HandleLidSwitch=suspend' 'vivobook-battery-freq-cap' \
-    '99-battery-freq-cap.rules' '2380800'; do
+    '99-battery-freq-cap.rules' '2380800' 'mem_sleep_default=s2idle' \
+    '--remove-args="pd_ignore_unused mem_sleep_default"'; do
     require_token "$setup" "$token"
 done
+setup_grubby=$(grep -F 'grubby --update-kernel=ALL' "$setup")
+[[ $setup_grubby == *'--args="clk_ignore_unused mem_sleep_default=s2idle '* ]] || {
+    echo 'FAIL: installed-system setup does not preserve the required clock guard and s2idle' >&2
+    exit 1
+}
+
+update_manager="$repo/vivobook-update.sh"
+require_file "$update_manager"
+for token in 'mem_sleep_default=s2idle' "! grep -q 'pd_ignore_unused'" \
+    'for target in sleep.target suspend.target' \
+    'for target in hibernate.target hybrid-sleep.target suspend-then-hibernate.target'; do
+    require_token "$update_manager" "$token"
+done
+if grep -qF '/etc/grub.d/08_vivobook' "$update_manager" || \
+    grep -qF 'rodar setup-all.sh' "$update_manager"; then
+    echo 'FAIL: update manager still enforces the retired installed-system boot policy' >&2
+    exit 1
+fi
+
+legacy_guard="$repo/post-install-protect.sh"
+require_file "$legacy_guard"
+if legacy_output=$(bash "$legacy_guard" 2>&1); then
+    echo 'FAIL: retired post-install boot guard still mutates the installed system' >&2
+    exit 1
+fi
+[[ $legacy_output == *'desativado'* ]] || {
+    echo 'FAIL: retired post-install boot guard does not explain its replacement' >&2
+    exit 1
+}
 
 fallback_linux=$(awk '/menuentry .*fallback USB/ { found=1 } found && /^[[:space:]]*linux / { print; exit }' "$iso_builder")
 [[ $fallback_linux != *rd.live.ram* && $fallback_linux == *modprobe.blacklist=qcom_q6v5_pas* ]] || {
     echo 'FAIL: USB fallback RAM/ADSP policy is invalid' >&2
     exit 1
 }
+
+mapfile -t live_linux < <(grep -E '^[[:space:]]+linux .*root=live:' "$iso_builder")
+[[ ${#live_linux[@]} -eq 3 ]] || {
+    echo "FAIL: expected three live boot entries, found ${#live_linux[@]}" >&2
+    exit 1
+}
+for linux_line in "${live_linux[@]}"; do
+    [[ $linux_line == *clk_ignore_unused* && $linux_line == *pd_ignore_unused* ]] || {
+        echo 'FAIL: a live boot entry lost the conservative clock/power-domain guards' >&2
+        exit 1
+    }
+done
 
 echo 'PASS: X1407QA live hardware source and ISO contracts are present'

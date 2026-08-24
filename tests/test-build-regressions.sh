@@ -156,6 +156,11 @@ grep -qF 'rd.driver.pre=pwrseq_qcom_wcn rd.driver.pre=wcn_regulator_fix' "$ks" \
     || fail 'anaconda post-script is missing the WCN driver ordering'
 grep -qF 'mem_sleep_default=s2idle' "$ks" \
     || fail 'anaconda post-script cmdline is missing mem_sleep_default=s2idle'
+grep -qF 'clk_ignore_unused mem_sleep_default=s2idle' "$ks" \
+    || fail 'anaconda post-script cmdline does not preserve the required clock guard'
+if grep -qF 'pd_ignore_unused' "$ks"; then
+    fail 'anaconda post-script still disables power-domain cleanup'
+fi
 grep -qF 'custom.cfg' "$ks" \
     || fail 'anaconda post-script is missing the custom.cfg fallback'
 grep -qF 'search --no-floppy --fs-uuid --set=root' "$ks" \
@@ -167,6 +172,9 @@ bash -n "$rescue" || fail 'rescue-installed-boot helper does not parse'
     || fail 'installable helper did not embed the rescue tool in the live root'
 cmp -s "$rescue" "$tmp/rootfs/usr/local/sbin/rescue-installed-boot" \
     || fail 'embedded rescue tool differs from the repo copy'
+if grep -qF 'pd_ignore_unused' "$tmp/rootfs/usr/local/sbin/rescue-installed-boot"; then
+    fail 'embedded rescue tool still disables power-domain cleanup'
+fi
 "$installable" "$tmp/rootfs" >/dev/null || fail 'installable helper is not idempotent'
 mkdir -p "$tmp/rootfs-bad/usr" "$tmp/rootfs-bad/boot"
 if "$installable" "$tmp/rootfs-bad" >/dev/null 2>&1; then

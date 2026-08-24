@@ -1104,10 +1104,15 @@ desktop_extension_status=0
 step 1 $TOTAL "Parâmetros de kernel (GRUB)..."
 # O blacklist só protege o boot do Live USB; no NVMe o ADSP é necessário.
 rm -f /etc/modprobe.d/anaconda-denylist.conf
-if ! grep -q "clk_ignore_unused" /etc/default/grub 2>/dev/null; then
-    sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet rhgb clk_ignore_unused pd_ignore_unused systemd.tpm2_wait=0 rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"/' /etc/default/grub
+if [[ -f /etc/default/grub ]]; then
+    sed -Ei 's/ pd_ignore_unused//g; s/ mem_sleep_default=[^ "]+//g' /etc/default/grub
+    if ! grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=.*clk_ignore_unused' /etc/default/grub; then
+        sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT=/ s/"$/ clk_ignore_unused"/' /etc/default/grub
+    fi
+    sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT=/ s/"$/ mem_sleep_default=s2idle"/' /etc/default/grub
 fi
-grubby --update-kernel=ALL --args="clk_ignore_unused pd_ignore_unused systemd.tpm2_wait=0 rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device" 2>/dev/null || true
+grubby --update-kernel=ALL --remove-args="pd_ignore_unused mem_sleep_default" 2>/dev/null || true
+grubby --update-kernel=ALL --args="clk_ignore_unused mem_sleep_default=s2idle systemd.tpm2_wait=0 rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device" 2>/dev/null || true
 log "  GRUB configurado"
 
 # ─── 2. WiFi — DKMS wcn_regulator_fix ───────────────────────────────────────

@@ -83,11 +83,12 @@ s2idle; hibernate-family targets remain masked") e `audio` passa pelo fallback
 ALSA. Único FAIL: `battery` — artefato de rodar via sudo/SSH sem bus de sessão
 (o gsettings como root lê o schema default); como usuário o valor é `true`.
 
-## 5. Institucionalização no repo (Fase 4)
+## 5. Institucionalização no repo (Fase 4 — concluída)
 
 Editado com verificação separada (workflows editar→verificar):
 
-- `setup-vivobook.sh` — step 13 vira lid=suspend s2idle
+- `setup-vivobook.sh` — step 1 remove `pd_ignore_unused` das entries antigas,
+  preserva `clk_ignore_unused` e força `mem_sleep_default=s2idle`; step 13 vira lid=suspend s2idle
   (`configure_sleep_targets`: unmask sleep/suspend, mask família hibernate;
   alias de compatibilidade `keep_sleep_targets_masked` preservado para o
   runner de recovery); step 12 ganha o `xz -dk` idempotente do tplg e o
@@ -96,10 +97,16 @@ Editado com verificação separada (workflows editar→verificar):
   `FW_LOADER_COMPRESS_XZ` após o config preparer; `verify-linux-7.2-x1407qa.sh`
   passa a exigir as duas.
 - `tools/make-rootfs-installable.sh` e `tools/rescue-installed-boot.sh` —
-  `mem_sleep_default=s2idle` em todas as gerações de cmdline do sistema
-  instalado (BLS e custom.cfg saem da mesma variável `opts`).
+  `clk_ignore_unused mem_sleep_default=s2idle`, sem `pd_ignore_unused`, em
+  todas as gerações de cmdline do sistema instalado (BLS e custom.cfg saem da
+  mesma variável `opts`). A ISO live conserva pd+clk porque seu early boot não
+  foi validado sem o guard de power domains.
 - `tools/audit-stable-hardware.sh` — contrato novo de lid-safety + fallback
   ALSA no check de áudio.
+- `post-install-protect.sh` — fluxo legado desativado: copiava DTB wifi-fix,
+  criava entries BLS duplicadas e restaurava `pd_ignore_unused`.
+- `vivobook-update.sh` — compatibilidade de boot agora valida BLS/custom.cfg,
+  clk+s2idle sem pd e o contrato atual dos targets de suspend/hibernate.
 - Testes — `test-stable-hardware-audit.sh` atualizado para o contrato novo;
   `test-build-regressions.sh` exige o parâmetro novo no kickstart e ganhou
   fixture completa do verifier (banner `Linux version 7.2.0-x1407qa `, configs
@@ -135,8 +142,10 @@ Editado com verificação separada (workflows editar→verificar):
 - ~~Fase 1 (runtime PM PCIe)~~ ✅ **testada, sem ganho (sessão 2)**: nenhum
   device suspende com `control=auto` (drivers sem runtime PM; NVMe já cobre
   via APST). 2.95W → 3.04W = ruído. Nada persistido; detalhe no plano.
-- Fase 2 (remover `pd_ignore_unused`/`clk_ignore_unused`): **requer usuário
-  presente** — full poweroff entre testes e risco de quebrar subsistema.
+- ~~Fase 2 (remover `pd_ignore_unused`/`clk_ignore_unused`)~~ ✅ **testada**:
+  `pd_ignore_unused` removido com 16/16 PASS e ganho marginal de ~0.1–0.2W;
+  sem `clk_ignore_unused` o PCIe do WCN6855 falha antes do probe, portanto clk
+  permanece obrigatório. A entry fallback antiga fica até completar o soak.
 - ~~Fase 3 (cap de frequência na bateria)~~ ✅ **aplicada e validada
   (sessão 2, a pedido)**: script `vivobook-battery-freq-cap` + udev rule
   `qcom-battmgr-*` — 2380800 na bateria, 2956800 plugado. Ciclo real

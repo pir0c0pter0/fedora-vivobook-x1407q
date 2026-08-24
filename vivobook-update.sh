@@ -566,19 +566,27 @@ check_systemd_compat() {
     fi
 }
 
+installed_boot_params_ok() {
+    local config=/etc/default/grub
+
+    [[ -f $config ]] \
+        && grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=.*clk_ignore_unused' "$config" \
+        && grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=.*mem_sleep_default=s2idle' "$config" \
+        && ! grep -q 'pd_ignore_unused' "$config"
+}
+
 check_grub_compat() {
     local changelog="$1"
-    # Pre-check: custom GRUB entry exists
-    if [[ ! -f /etc/grub.d/08_vivobook ]]; then
-        echo -e "  ${RED}❌${NC} /etc/grub.d/08_vivobook NÃO existe — GRUB update pode quebrar boot!" | tee -a "$LOG_FILE"
+    if installed_boot_params_ok; then
+        echo -e "  ${GREEN}✅${NC} Kernel params instalados (clk + s2idle, sem guard global de power domains)" | tee -a "$LOG_FILE"
     else
-        echo -e "  ${GREEN}✅${NC} Custom GRUB entry (08_vivobook) presente" | tee -a "$LOG_FILE"
+        echo -e "  ${RED}❌${NC} Contrato do cmdline instalado inválido em /etc/default/grub" | tee -a "$LOG_FILE"
     fi
-    if ! grep -q "clk_ignore_unused" /etc/default/grub 2>/dev/null || \
-       ! grep -q "pd_ignore_unused" /etc/default/grub 2>/dev/null; then
-        echo -e "  ${RED}❌${NC} clk_ignore_unused/pd_ignore_unused ausente em /etc/default/grub!" | tee -a "$LOG_FILE"
+    if grep -q '^devicetree ' /boot/loader/entries/x1407qa-*.conf 2>/dev/null \
+        && grep -q 'devicetree ' /boot/grub2/custom.cfg 2>/dev/null; then
+        echo -e "  ${GREEN}✅${NC} BLS X1407QA e fallback custom.cfg preservam o devicetree" | tee -a "$LOG_FILE"
     else
-        echo -e "  ${GREEN}✅${NC} Kernel params (clk_ignore_unused pd_ignore_unused) presentes" | tee -a "$LOG_FILE"
+        echo -e "  ${RED}❌${NC} BLS X1407QA ou fallback custom.cfg sem devicetree" | tee -a "$LOG_FILE"
     fi
     if echo "$changelog" | grep -qi "BLS\|devicetree\|aarch64\|boot.*loader"; then
         echo -e "  ${YELLOW}⚠️${NC}  Changelog menciona BLS/devicetree/aarch64 — atenção ao boot" | tee -a "$LOG_FILE"
@@ -796,12 +804,14 @@ post_update() {
 
     # GRUB regeneration if kernel changed
     if [[ -n "$updated_kernel" ]]; then
-        # Pre-checks
-        if [[ ! -f /etc/grub.d/08_vivobook ]]; then
-            warn "/etc/grub.d/08_vivobook ausente! Restaurar antes de regenerar GRUB"
+        if ! installed_boot_params_ok; then
+            warn "Contrato do cmdline instalado inválido em /etc/default/grub"
         fi
-        if ! grep -q "clk_ignore_unused" /etc/default/grub 2>/dev/null; then
-            warn "clk_ignore_unused ausente em /etc/default/grub!"
+        if ! grep -q '^devicetree ' /boot/loader/entries/*"$updated_kernel"*.conf 2>/dev/null; then
+            warn "Entrada BLS do kernel $updated_kernel sem devicetree — não selecionar no próximo boot"
+        fi
+        if ! grep -q 'devicetree ' /boot/grub2/custom.cfg 2>/dev/null; then
+            warn "Fallback /boot/grub2/custom.cfg ausente ou sem devicetree"
         fi
         log "Atualizando GRUB..."
         grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1 | tee -a "$LOG_FILE" || \
@@ -878,15 +888,22 @@ verify_system_configs() {
         ((issues++))
     fi
 
-    # Suspend masks
-    if [[ ! -L /etc/systemd/system/suspend.target ]]; then
-        warn "suspend.target não está masked!"
-        ((issues++))
-    fi
-    if [[ ! -L /etc/systemd/system/suspend-then-hibernate.target ]]; then
-        warn "suspend-then-hibernate.target não está masked!"
-        ((issues++))
-    fi
+    # s2idle usa sleep/suspend; hibernate continua proibido (sem swap).
+    local target status
+    for target in sleep.target suspend.target; do
+        status=$(systemctl is-enabled "$target" 2>&1 || true)
+        if [[ $status == masked ]]; then
+            warn "$target está masked; s2idle pela tampa não funcionará"
+            ((issues++))
+        fi
+    done
+    for target in hibernate.target hybrid-sleep.target suspend-then-hibernate.target; do
+        status=$(systemctl is-enabled "$target" 2>&1 || true)
+        if [[ $status != masked ]]; then
+            warn "$target está ${status:-not-found}; esperado masked"
+            ((issues++))
+        fi
+    done
 
     # udev charge control
     if [[ ! -f /etc/udev/rules.d/99-battery-charge-limit.rules ]]; then
@@ -916,7 +933,7 @@ verify_system_configs() {
     if [[ $issues -eq 0 ]]; then
         log "Configs do sistema intactos"
     else
-        warn "$issues config(s) precisam de atenção — rodar setup-all.sh para restaurar"
+        warn "$issues config(s) precisam de atenção — rodar setup-vivobook.sh para restaurar"
     fi
 }
 
