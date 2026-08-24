@@ -4,7 +4,7 @@
 
 | Câmera | Status | Detalhes |
 |--------|--------|---------|
-| RGB #1 (OV02C10) | **FUNCIONANDO COM WARNINGS** | CCI1 bus 1 (AON), addr 0x36; still XRGB8888 1080p e vídeo XRGB8888 720p30 validados. libcamera/CAMCC ainda avisam no kernel 7.2, sem impedir captura |
+| RGB #1 (OV02C10) | **FUNCIONANDO** | CCI1 bus 1 (AON), addr 0x36; still XRGB8888 1080p e vídeo XRGB8888 720p30 validados. Imagem na orientação correta via `rotation = <180>`. Sem warnings de libcamera/CAMCC no kernel 7.2 patchado |
 | IR (HM1092) | **PESQUISADA, NÃO RESOLVIDA** | Sensor confirmado Hynix HM1092, ACPI VEN_QCOM&DEV_0C99, binding Asus Purwa = QRD_Pw, AVDD pm8010 LDO7_M @ 2.91V, DOVDD pm8010 LDO4_M @ 1.82V, MCLK0 GPIO 96, reset GPIO 109, AosShareResource=0. pm8010 ausente no SPMI scan mas Windows usa essas LDOs. Checkpoint A = YELLOW. I2C bus ainda TBD. Ver `2026-04-11-ir-camera-discovery.md` |
 
 ## Módulo DKMS: `vivobook-cam-fix` v2.0
@@ -79,12 +79,17 @@ Phase 2: CCI0 status="okay" + CCI1 status="okay"
   heaps.
 - `systemctl stop vivobook-camera` é intencionalmente no-op: os módulos ficam
   carregados. **Nunca usar `rmmod`**; reboot é o único unload seguro.
-- Fedora libcamera 0.7.1 carrega `ov02c10.yaml`, mas ainda avisa sobre static
-  properties, crop ioctls e sensor helper ausentes.
-- Kernel 7.2 ainda registra `cam_cc_slow_ahb_clk_src`, `Lucid PLL latch failed`
-  e `cam_cc_pll8 failed to enable` durante o teste. O patch que suprimiu esses
-  avisos no 6.19.8 não é instalado pelo setup e precisa ser reconstruído por
-  kernel. A captura atual conclui sem Oops/soft lockup.
+- Fedora libcamera 0.7.1 patchado (`0.7.1-1.fc44.x1407qa`) registra `ov02c10`
+  em `camera_sensor_properties.cpp` e o gain helper, então os avisos de static
+  properties e sensor helper sumiram. Patch em `libcamera/`.
+- Kernel 7.2 é construído com `kernel/linux-7.2-camera-warning-fix.patch`
+  (aplicado sempre por `kernel/build-linux-7.2-x1407qa.sh`): `.get_selection`
+  no `ov02c10` e skip do voto `cpas_ahb` no camss `x1e80100`. O journal do boot
+  já não traz `cam_cc_slow_ahb_clk_src`, `Lucid PLL latch failed` nem
+  `cam_cc_pll8 failed to enable`, e a captura conclui sem Oops/soft lockup.
+- O sensor é montado 180°. `rotation = <180>` no overlay é o que faz o
+  libcamera dirigir `HFLIP`/`VFLIP` do OV02C10; com `<0>` a imagem sai de ponta
+  cabeça.
 
 ### Câmera IR — BLOQUEADA
 - **DSDT HID:** QCOM0C99 = "Qualcomm Spectra 695 ISP Camera Auxiliary Sensor Device" (WOA-Project BOM)
@@ -216,8 +221,9 @@ snapshot
 - PipeWire publicou `ov02c10 [libcamera]` e `Built-in Front Camera`;
 - `systemctl stop` manteve o módulo carregado, como projetado; unload só por
   reboot.
-- o tuning YAML foi usado, mas os avisos de metadata/helper do libcamera e os
-  avisos CAMCC do kernel 7.2 permaneceram; captura concluiu sem Oops/soft lockup.
+- o tuning YAML foi usado; com o kernel 7.2 patchado e o libcamera
+  `0.7.1-1.fc44.x1407qa` os avisos de metadata/helper do libcamera e os avisos
+  CAMCC sumiram, e a captura concluiu sem Oops/soft lockup.
 
 ## NUNCA FAZER
 

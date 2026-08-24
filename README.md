@@ -1557,7 +1557,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **Audio**: UCM2 fix modifies system file — will be overwritten by `alsa-ucm-conf` updates (needs upstream PR)
 - **GPU**: Firmware must be in initramfs for early loading. SELinux may block `.xz` firmware (`setenforce 0` as workaround)
 - **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
-- **Camera RGB**: Late graphical autostart works for 1080p still, 720p30 video and PipeWire. Fedora libcamera still warns about OV02C10 static metadata/helper, and kernel 7.2 emits non-fatal CAMCC clock warnings. `rmmod` is unsafe — reboot to unload (see [Camera Fix](#17-rgb-camera-fix))
+- **~~Camera RGB warnings~~**: Fixed — the 7.2 build applies `kernel/linux-7.2-camera-warning-fix.patch` and the patched `libcamera` 0.7.1 registers `ov02c10`, so the CAMCC clock and static-property warnings are gone. Late graphical autostart still drives 1080p still, 720p30 video and PipeWire, and `rmmod` remains unsafe — reboot to unload (see [Camera Fix](#17-rgb-camera-fix))
 - **~~Boot-time regression~~**: Fixed — installed zram/Plymouth waits removed; current boot is 7.301s total with `graphical.target` at 3.278s userspace, while `rd.live.ram` remains exclusive to the main live entry.
 - **~~Firewall~~**: Fixed — the custom 7.2 config now builds nftables, FIB/reject/NAT expressions, and the NetBIOS conntrack helper required by the FedoraWorkstation zone. `firewalld` is `active/running` and the generated ruleset is loaded.
 - **Camera IR**: pm8010 PMIC physically absent — sensor has no power. No one upstream has IR camera working on Snapdragon X Linux (see [Camera Research](#camera-research))

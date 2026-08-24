@@ -132,9 +132,12 @@
   Após reboot: still XRGB8888 1920×1080 (8.294.400 bytes) e vídeo XRGB8888
   1280×720 com 60/60 frames a ~30 fps; o serviço ficou `enabled/active`, a
   fonte PipeWire foi publicada e teclado/touchpad registraram antes do overlay.
-  `stop` não descarrega módulos e o unload seguro é reboot. Permanecem
-  avisos não fatais de propriedades/helper no libcamera e de clocks CAMCC no
-  kernel 7.2; não houve Oops/soft lockup e as capturas concluíram.
+  `stop` não descarrega módulos e o unload seguro é reboot. Com o kernel 7.2
+  construído com `kernel/linux-7.2-camera-warning-fix.patch` e o libcamera
+  patchado (`0.7.1-1.fc44.x1407qa`), os avisos de propriedades/helper e de
+  clocks CAMCC deixaram de aparecer; a imagem sai na orientação correta porque
+  `rotation = <180>` faz o libcamera dirigir `HFLIP`/`VFLIP` do sensor. Não
+  houve Oops/soft lockup e as capturas concluíram.
 - **Estado global atual:** auditoria estável 16/16; boot total de 7.301s
   (3.325s userspace, `graphical.target` em 3.278s e comandos do módulo da
   câmera em 112ms). O
