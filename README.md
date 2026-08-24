@@ -18,12 +18,13 @@
 > descarregar, reconfigurar ou colocar USB em risco.
 
 > **ISO personalizada atual:**
-> `Fedora-44-X1407QA-Linux-7.2-hardware-ram.iso`, SHA-256
-> `af7a230eebfa803f1d5400158ba16cae58031964d7204cbd18404e0ca7866398`.
-> Ela corrige a ordem de inicialização do WCN6855, inclui tethering USB/PAN e
-> restaura as permissões do live rootfs. Foi auditada, relida do pendrive e
-> validada fisicamente até a instalação; o percentual da bateria no live
-> permanece pendente. No GRUB, teste primeiro **RAM, principal**.
+> `Fedora-44-X1407QA-Linux-7.2-all-2026-08-24.iso`, SHA-256
+> `00c1660804557c666bf98312a8290f440f28b246ca6cc424894ab25e5bc3bd37`.
+> Ela traz o kernel 7.2 reconstruído, firmware selecionado, correções de boot e
+> instalação e o payload offline atual em `/opt/vivobook-fixes`. O EROFS foi
+> recomprimido com LZMA e a imagem passou pela auditoria de software; o primeiro
+> boot físico desta reconstrução ainda está pendente. No GRUB, teste primeiro
+> **RAM, principal**.
 
 ## Hardware
 

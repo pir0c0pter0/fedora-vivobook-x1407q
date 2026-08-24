@@ -178,22 +178,36 @@
 
 ## ISO final
 
-Reempacotada em 20/08 (tarde) via `tools/resume-personal-iso-repack.sh` dentro
-de `podman unshare` (o rootfs extraído usa o mapeamento subuid
-`mariostjr:524288`; fora do namespace os UIDs aparecem deslocados e o
-empacotamento gravaria donos errados). Novidades desta imagem: post-script do
-Anaconda com fallback `custom.cfg` e kit de resgate embutido no live em
-`/usr/local/bin/rescue-installed-boot` (instalado via symlink `sbin -> bin`).
-`fsck.erofs` limpo.
+Reconstruída do zero em 24/08 a partir do commit
+`caaa24b0a789891417f42345983875f0e4739bab`. O kernel 7.2, todos os módulos e o
+initramfs foram recompilados para AArch64. O live inclui firmware selecionado,
+as correções de boot/instalação e o payload offline atual em
+`/opt/vivobook-fixes` (módulos, câmera, NPU/Hexagon, firmware e ferramentas).
+O EROFS foi recomprimido com LZMA nível 9, dicionário de 8 MiB, clusters de
+1 MiB, fragments e compressão de metadados/diretórios.
+
+Validação de software concluída: `fsck.erofs`, kernel/artifact manifest,
+kernel/DTB/initramfs embutidos, firmware obrigatório, entradas GRUB, UID/GID e
+setuid do `sudo`, payload offline, SHA-256, XZ e reconstrução das partes. O
+primeiro boot físico desta imagem ainda está pendente.
 
 ```text
-Nome: Fedora-44-X1407QA-Linux-7.2-hardware-ram.iso
-Tamanho: 4.667.998.208 bytes
-SHA-256: af7a230eebfa803f1d5400158ba16cae58031964d7204cbd18404e0ca7866398
+Nome: Fedora-44-X1407QA-Linux-7.2-all-2026-08-24.iso
+Tamanho: 2.982.281.216 bytes
+SHA-256: 00c1660804557c666bf98312a8290f440f28b246ca6cc424894ab25e5bc3bd37
 ```
 
-Checksum: `Fedora-44-X1407QA-Linux-7.2-hardware-ram.iso.sha256`. A imagem
-anterior (072c715d…) foi substituída; hash preservado aqui como histórico.
+O pacote XZ extremo tem 2.837.367.556 bytes e SHA-256
+`324b25b88fc9015f704b2e37faaad4bf367f120c5f7b1604189c1eb2fb1299cd`.
+Como cada asset do GitHub Release deve ficar abaixo de 2 GiB, ele foi dividido
+em `part01` (1.992.294.400 bytes) e `part02` (845.073.156 bytes). Para remontar:
+
+```bash
+cat Fedora-44-X1407QA-Linux-7.2-all-2026-08-24.iso.xz.part01 \
+    Fedora-44-X1407QA-Linux-7.2-all-2026-08-24.iso.xz.part02 \
+    > Fedora-44-X1407QA-Linux-7.2-all-2026-08-24.iso.xz
+xz -dk Fedora-44-X1407QA-Linux-7.2-all-2026-08-24.iso.xz
+```
 
 ## Backup dos drivers Windows
 
