@@ -102,7 +102,7 @@ instalado com validação física da reconstrução atual.
 | **USB-C DP alt-mode** | :white_check_mark: Working | Both ports, tested DP-2 up to 2560×1600. Device link errors at boot are cosmetic ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
 | **USB4 / TB3 tunneling** | :x: Not working | DP alt-mode and plain USB-C docks work (Dell SD25 validated: 10 Gbps hub + 2.5GbE + charging + external display), but Thunderbolt tunneling is blocked: the Qualcomm USB4 host/router driver does not exist in any public tree (Aug 2026). See [USB4/TB3 Status](#usb4tb3-status-aug-2026) |
 | **Camera RGB** | :white_check_mark: Working | Late graphical autostart validated after reboot; upright image, still/video and PipeWire work. CAMCC clock and libcamera metadata warnings are gone with the patched 7.2 kernel and libcamera (see [Camera Fix](#17-rgb-camera-fix)) |
-| **Camera IR** | :x: Not working | pm8010 PMIC physically absent — sensor has no power (see [Camera Research](#camera-research)) |
+| **Camera IR** | :white_check_mark: Working | Himax HM1092 streams 560×360 Y10 at ~29.7 fps through `csiphy0 → csid0 → vfe0_rdi0`; own `hm1092` driver. pm8010 is present after all — LDO7 only registers at 2.912 V, the value ASUS' own `CAMI_RES_QRD.bin` asks for. No IR illuminator yet, so only IR sources show up (see [Camera Research](#camera-research)) |
 | **Display color control** | :white_check_mark: Working | CTM saturation + contrast via DKMS module (see [Display Color Control Fix](#18-display-color-control-fix)) |
 
 ### Accelerator validation snapshot — 2026-08-24

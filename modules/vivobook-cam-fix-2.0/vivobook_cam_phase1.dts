@@ -17,8 +17,9 @@
  * by Aleksandrs Vinarskis). Camera module has internal LDO for DVDD 1.2V
  * from the 2.8V rail — both AVDD and DVDD use vreg_l7b_2p8.
  *
- * pm8010 is physically absent (SPMI scan confirms) but RPMH regulators
- * work fire-and-forget — firmware ARM TF-A handles the request.
+ * pm8010 nao aparece no SPMI (o no do DTB vem "disabled"), mas os
+ * reguladores RPMH dele funcionam fire-and-forget — quem atende o pedido
+ * e o firmware.
  *
  * Copyright (c) 2026 Pir0c0pter0
  * SPDX-License-Identifier: GPL-2.0
@@ -77,21 +78,45 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
-		/* IR camera DOVDD — 1.8V (kept for future IR probe) */
+		/* IR camera DOVDD — 1.8V */
 		vreg_l4m_1p8: ldo4 {
 			regulator-name = "vreg_l4m_1p8";
 			regulator-min-microvolt = <1800000>;
 			regulator-max-microvolt = <1800000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-always-on;
 		};
 
-		/*
-		 * vreg_l7m_2p9 (LDO7 pm8010 "m", 2.9V IR AVDD) REMOVED:
-		 * RPMH returns -ENOTRECOVERABLE on voltage read, killing
-		 * the entire regulators-8 block (including l3m/l4m).
-		 * IR camera AVDD needs separate investigation.
+		/* LDO7 (IR AVDD) fica em regulators-10, bloco separado:
+		 * se ele falhar em registrar nao derruba l3m (DOVDD da RGB).
 		 */
 	};
+
+	/*
+	 * IR camera AVDD — pm8010 LDO7.
+	 *
+	 * A tentativa de 2026-04 usou 2.900V, vindo do CAMI_RES_MTP.bin
+	 * (referencia generica), e o registro morria com -ENOTRECOVERABLE.
+	 * O binario que o Windows da ASUS realmente carrega e o
+	 * CAMI_RES_QRD.bin (INF liga SUBSYS_13041043&REV_0001 -> QRD_Pw) e
+	 * ele pede 2.912V. 2912000 cai exatamente num seletor do pmic5_pldo
+	 * (passo de 8mV); 2900000 nao cai, entao o core nao consegue aplicar
+	 * a constraint min==max e a registragem falha.
+	 */
+	regulators-10 {
+		compatible = "qcom,pm8010-rpmh-regulators";
+		qcom,pmic-id = "m";
+
+		vdd-l7-supply = <&vreg_bob1>;
+
+		vreg_l7m_2p9: ldo7 {
+			regulator-name = "vreg_l7m_2p9";
+			regulator-min-microvolt = <2912000>;
+			regulator-max-microvolt = <2912000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+
 };
 
 /* ------------------------------------------------------------------ */
@@ -233,11 +258,41 @@
 			clock-frequency = <1000000>;
 			#address-cells = <1>;
 			#size-cells = <0>;
-			/* IR camera: blocked — pm8010 LDO7 (AVDD 2.9V) not
-			 * physically available. RPMH CMD-DB has ldom7 entry but
-			 * write has no effect (pm8010 absent from SPMI). Sensor
-			 * model unknown (QCOM0C99 = ISP auxiliary sensor).
-			 * Needs upstream ISP/camera support or pm8010 enablement. */
+
+			/* Camera IR (Windows Hello) — Himax HM1092.
+			 * Endereco 0x24 confirmado por varredura; model ID
+			 * 0x1091 lido em 0x0000/0x0001. */
+			camera@24 {
+				compatible = "himax,hm1092";
+				reg = <0x24>;
+
+				reset-gpios = <&tlmm 109 GPIO_ACTIVE_LOW>;
+				pinctrl-0 = <&cam_ir_default>;
+				pinctrl-names = "default";
+
+				clocks = <&camcc CAM_CC_MCLK0_CLK>;
+				clock-names = "xvclk";
+				assigned-clocks = <&camcc CAM_CC_MCLK0_CLK>;
+				assigned-clock-rates = <24000000>;
+
+				orientation = <0>; /* front-facing */
+				rotation = <0>;
+
+				avdd-supply = <&vreg_l7m_2p9>;
+				dovdd-supply = <&vreg_l4m_1p8>;
+
+				port {
+					hm1092_ep: endpoint {
+						/* 1 lane: a PLL do init da 24MHz/12*90 =
+						 * 180MHz, e 180MHz DDR = 360Mbps, que a
+						 * 10bpp e exatamente os 36 Mpix/s do modo.
+						 * Com 2 lanes sobraria o dobro de banda. */
+						data-lanes = <1>;
+						link-frequencies = /bits/ 64 <180000000>;
+						remote-endpoint = <&csiphy0_ep>;
+					};
+				};
+			};
 		};
 
 		cci0_i2c1: i2c-bus@1 {
@@ -322,9 +377,14 @@
 		      <0x00 0x0acc6000 0x00 0x1000>,
 		      <0x00 0x0acca000 0x00 0x1000>,
 		      <0x00 0x0acb6000 0x00 0x1000>,
-		      <0x00 0x0ace4000 0x00 0x1000>,
-		      <0x00 0x0ace6000 0x00 0x1000>,
-		      <0x00 0x0ace8000 0x00 0x1000>,
+		      /* CSIPHY0/1/2: 0x2000 cada, nao 0x1000 — o passo entre
+		       * as bases e 0x2000 e o csiphy_reset() escreve em
+		       * base+0x1000. Com 0x1000 o kernel leva Oops de paging
+		       * no primeiro stream (o csiphy4 da RGB nunca sofreu
+		       * porque ja tinha 0x4000). */
+		      <0x00 0x0ace4000 0x00 0x2000>,
+		      <0x00 0x0ace6000 0x00 0x2000>,
+		      <0x00 0x0ace8000 0x00 0x2000>,
 		      <0x00 0x0acec000 0x00 0x4000>,
 		      <0x00 0x0acf6000 0x00 0x1000>,
 		      <0x00 0x0acf7000 0x00 0x1000>,
@@ -433,7 +493,22 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 
-			/* CSIPHY0 for IR camera — blocked (see cci0_i2c0 comment) */
+			/* CSIPHY0 — camera IR HM1092.
+			 * Qual CSIPHY a IR usa nao esta em lugar nenhum do
+			 * dump; 0/1/2 sao os candidatos (o 4 e da RGB).
+			 * Comeca no 0. */
+			port@0 {
+				reg = <0>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				csiphy0_ep: endpoint@0 {
+					reg = <0>;
+					clock-lanes = <7>;
+					data-lanes = <0>;
+					remote-endpoint = <&hm1092_ep>;
+				};
+			};
 
 			/* CSIPHY4 — connected to OV02C10 RGB */
 			port@3 {

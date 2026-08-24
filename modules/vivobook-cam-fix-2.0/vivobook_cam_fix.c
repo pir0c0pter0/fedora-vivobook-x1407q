@@ -251,4 +251,4 @@ module_exit(vivobook_cam_fix_exit);
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Pir0c0pter0");
 MODULE_DESCRIPTION("Two-phase DT overlay for ASUS Vivobook X1407QA camera (OV02C10)");
-MODULE_SOFTDEP("pre: camcc_x1e80100 i2c_qcom_cci qcom_camss ov02c10 v4l2_cci v4l2_fwnode");
+MODULE_SOFTDEP("pre: camcc_x1e80100 i2c_qcom_cci qcom_camss ov02c10 hm1092 v4l2_cci v4l2_fwnode");

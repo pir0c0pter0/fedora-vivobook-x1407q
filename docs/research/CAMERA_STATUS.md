@@ -5,7 +5,7 @@
 | Câmera | Status | Detalhes |
 |--------|--------|---------|
 | RGB #1 (OV02C10) | **FUNCIONANDO** | CCI1 bus 1 (AON), addr 0x36; still XRGB8888 1080p e vídeo XRGB8888 720p30 validados. Imagem na orientação correta via `rotation = <180>`. Sem warnings de libcamera/CAMCC no kernel 7.2 patchado |
-| IR (HM1092) | **PESQUISADA, NÃO RESOLVIDA** | Sensor confirmado Hynix HM1092, ACPI VEN_QCOM&DEV_0C99, binding Asus Purwa = QRD_Pw, AVDD pm8010 LDO7_M @ 2.91V, DOVDD pm8010 LDO4_M @ 1.82V, MCLK0 GPIO 96, reset GPIO 109, AosShareResource=0. pm8010 ausente no SPMI scan mas Windows usa essas LDOs. Checkpoint A = YELLOW. I2C bus ainda TBD. Ver `2026-04-11-ir-camera-discovery.md` |
+| IR (HM1092) | **FUNCIONANDO** (2026-08-24) | Streaming real pelo camss: 560×360 Y10 (`V4L2_PIX_FMT_Y10P`), ~29,7 fps, caminho `hm1092 → csiphy0 → csid0 → vfe0_rdi0 → /dev/video0`. Driver próprio `modules/vivobook-ir-cam-1.0` (`himax,hm1092`). Sensor em i2c-9 (CCI0 bus 0), addr 0x24, model ID `0x1091`. Sem iluminador IR — só fontes de IR aparecem. Captura: `tools/ir-camera-capture.sh` |
 
 ## Módulo DKMS: `vivobook-cam-fix` v2.0
 
@@ -91,7 +91,101 @@ Phase 2: CCI0 status="okay" + CCI1 status="okay"
   libcamera dirigir `HFLIP`/`VFLIP` do OV02C10; com `<0>` a imagem sai de ponta
   cabeça.
 
-### Câmera IR — BLOQUEADA
+### Câmera IR — FUNCIONANDO (2026-08-24)
+
+Streaming real, 560×360 Y10 a ~29,7 fps. O bloqueio de abril era **software**,
+não ausência de hardware.
+
+#### As cinco coisas que faltavam
+
+**1. Tensão do AVDD fora da grade do RPMh.** O teste de abril pediu
+2.900.000 µV para o pm8010 LDO7, valor tirado do `CAMI_RES_MTP.bin` (referência
+genérica). O binário que o Windows de fábrica desta máquina carrega é o
+`CAMI_RES_QRD.bin` — o INF `qccamauxsensor_extension8380.inf` liga
+`SUBSYS_13041043&REV_0001` a `QRD_Pw` — e ele pede **2.912.000 µV**. O
+`pmic5_pldo` anda de 8 em 8 mV: 2.912.000 cai num seletor exato, 2.900.000 não.
+Com `min == max` fora da grade o core não aplica a constraint,
+`regulator_register()` falha e derruba o bloco inteiro. Foi isso que virou
+"`-ENOTRECOVERABLE`, pm8010 não existe fisicamente". O pm8010 sempre esteve lá:
+`vreg_l3m_1p8` e `vreg_l4m_1p8` já registravam antes.
+
+**2. O sensor não auto-incrementa o ponteiro de registrador.** Ler 2 bytes de
+0x0000 devolve `0x10,0xff` em vez de `0x10,0x91`. Nada de `CCI_REG16`: todo
+registrador de 16 bits vira duas metades de 8, escritas byte baixo primeiro,
+como na sequência de fábrica.
+
+**3. Região do CSIPHY0 mapeada pela metade.** O overlay dava `0x1000` para
+csiphy0/1/2, mas o passo entre as bases é `0x2000` e `csiphy_reset()` escreve em
+`base+0x1000` — Oops de paging no primeiro stream. O csiphy4 da RGB nunca sofreu
+porque já tinha `0x4000`.
+
+**4. O Purwa não tem IFE1 nem CSID1.** `cam_cc_ife_1_gdsc status stuck at 'off'`.
+Confirmado pelo dump: o `IRP3.bin` (variante Purwa do pacote `qccamisp_ext8380`)
+lista só `IFE0`, `IFELITE0`, `IFE_CSID0`, `IFELITE_CSID0`; o `IRS3.bin` genérico
+tem IFE1, CSID1 e SFE. O caminho é obrigatoriamente csid0 → vfe0_rdi0 — o mesmo
+que a RGB usa, então as duas câmeras disputam o CSID0.
+
+**5. É 1 lane, não 2.** A PLL do init dá `24 MHz ÷ 0x030D(12) × 0x030F(90) =
+180 MHz`; 180 MHz DDR = 360 Mbps, que a 10 bpp são exatamente os 36 Mpix/s do
+modo. Com 2 lanes sobrava o dobro de banda e não chegava frame nenhum. O CSIPHY
+certo é o 0: o `C1PG.bin`, ligado ao `CameraMipiCsi_Device_Pw`, declara só
+CSIPHY0 e CSIPHY4.
+
+#### Configuração final
+
+| Peça | Valor |
+|------|-------|
+| I2C | i2c-9 (CCI0 bus 0, GPIO 101/102), addr 0x24, reg 16 bits / dado 8 bits |
+| Model ID | `0x1091` em 0x0000/0x0001 (lidos separados) |
+| AVDD | `vreg_l7m_2p9` — pm8010 LDO7, **2.912.000 µV**, bloco `regulators-10` |
+| DOVDD | `vreg_l4m_1p8` — pm8010 LDO4, 1.8 V |
+| MCLK | MCLK0 @ 24 MHz, GPIO 96 |
+| Reset | GPIO 109, active-low |
+| CSI-2 | 1 lane, link frequency 180 MHz, DT 0x2B (RAW10) |
+| Modo | 560×360, `MEDIA_BUS_FMT_Y10_1X10`, HTS 1616, VTS 750, ~29,7 fps |
+| Pipeline | `hm1092 → csiphy0 → csid0 → vfe0_rdi0 → /dev/video0` (`Y10P`) |
+
+#### Sequência de init
+
+185 escritas, todas 16 bits de endereço e 8 bits de dado, sem delays, extraídas
+de `com.qti.sensormodule.hm1092.bin` (formato "QTI Chromatix Header /
+Parameter Parser V3.4.0": tabela de 56 bytes por entrada a partir de 0xCC, seção
+de dados em 0x9A5C; cada escrita é um registro de 10 u32 —
+`slaveAddr, regAddr, registerData, addrType, dataType, op, delayUs`). Tabela em
+`modules/vivobook-ir-cam-1.0/hm1092_regs.h`, conferida byte a byte.
+
+#### Controles medidos
+
+- **Exposição** (0x0202/0x0203, em linhas): escala monotônico. Com a cena fixa,
+  190 → 400 → 700 leva o máximo do frame de 18 → 24 → 35.
+- **Ganho digital** (0x020E/0x020F, formato 8.8): campo de **10 bits**. De
+  `0x100` (1×) até `0x3ff` (~4×) o brilho sobe; a partir de `0x400` o sensor
+  emite frame constante no nível de preto. Exposto como `V4L2_CID_ANALOGUE_GAIN`
+  porque o libcamera trata esse ID como obrigatório e descarta o sensor inteiro
+  sem ele — não há ganho analógico separado para pôr no lugar.
+- **Ganho analógico SMIA (0x0204/0x0205) não existe** — lê `0xff` nas duas
+  metades, como qualquer registrador não implementado.
+- Toda escrita de controle vai dentro de grouped parameter hold (0x0104 = 1 … 0).
+
+#### O que ainda falta
+
+- **Iluminador IR.** É o motivo de a imagem ser escura: sem ele só fontes de IR
+  (lâmpadas) aparecem. Não é GPIO — o INF `qccamflash_ext8380` traz
+  `IrLedCurrentMilliampere = 700`, ou seja um flash LED de PMIC. O kernel tem
+  `leds-qcom-flash.ko`, mas não existe nó de flash no DTB e falta descobrir qual
+  PMIC e qual base de registrador. Projeto à parte.
+- **libcamera.** A IR **aparece** no `cam -l` (`camera 1`,
+  `/base/soc@0/cci@ac15000/i2c-bus@0/camera@24`) desde que o driver exponha
+  `V4L2_CID_ANALOGUE_GAIN` — sem ele o libcamera descarta o sensor. Mas capturar
+  por ele ainda não funciona: o soft-ISP responde `Unsupported input format
+  R10_CSI2P`, porque o debayer não lida com RAW10 monocromático. A captura útil
+  é via `v4l2-ctl` no nó do camss (`tools/ir-camera-capture.sh`). O erro do
+  debayer aparece no log mesmo ao usar a RGB — é da enumeração da IR e é inócuo.
+- **Convivência com a RGB.** As duas disputam CSID0/VFE0_RDI0, e o script de
+  captura solta o link da RGB antes de montar o da IR. Streaming simultâneo não
+  foi testado e provavelmente exige RDI diferentes no mesmo VFE.
+
+### Câmera IR — histórico do bloqueio (superado)
 - **DSDT HID:** QCOM0C99 = "Qualcomm Spectra 695 ISP Camera Auxiliary Sensor Device" (WOA-Project BOM)
 - **Modelo sensor:** Hynix HM1092, confirmado pelo pacote Qualcomm/ASUS; QCOM0C99 é o device ISP auxiliar, não o identificador direto do sensor
 - **AeoB (CAMI_RES_MTP.bin):** MCLK0 24MHz (GPIO 96), reset GPIO 109, LDO4_M (1.8V DOVDD), LDO7_M (2.9V AVDD)

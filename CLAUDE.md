@@ -4,7 +4,7 @@
 
 Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com Snapdragon X. A maior parte roda em runtime — 7 módulos DKMS, 1 patch `qcom-camss` histórico não instalado pelo setup, 1 fix Vulkan (LD_PRELOAD + ICD Turnip), 1 extensão GNOME, 1 fix UCM2 áudio, 1 fix suspend/lid, 1 fix cpufreq, 1 fix CDSP/NPU (FastRPC + runtime QNN) e 1 fix charge control; o sistema estável atual usa kernel custom 7.2.
 
-## Conquistas (18 itens)
+## Conquistas (19 itens)
 
 1. **Boot** — Custom ISO + Zenbook A14 DTB (mesmo die Qualcomm "Purwa")
 2. **WiFi** — `pwrseq_qcom_wcn` nativo + `wlanfw20.mbn` como `amss.bin` + board data `NFA765a_AS_SA_X14QA` (corrige MHI `-110` no Linux 7.2)
@@ -24,6 +24,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 16. **Charge control** — udev rule seta limite 80% via `charge_control_end_threshold` — firmware aceita escrita, start auto 50%
 17. **Câmera RGB** — DKMS `vivobook_cam_fix` (DT overlay two-phase), `system_heap` e tuning OV02C10 — autostart gráfico tardio, libcamera/Snapshot, still 1080p e vídeo 720p30
 18. **Display color control** — DKMS `vivobook_color_ctrl` (CTM via DRM atomic commit do kernel) — msm_dpu expõe CTM/PCC mas não GAMMA_LUT, wl-gammarelay-rs e zwlr_gamma_control falham, módulo kernel bypassa restrição de DRM master
+19. **Câmera IR (HM1092)** — driver próprio `hm1092` + nó no overlay; streaming 560×360 Y10 a ~29,7 fps por `csiphy0 → csid0 → vfe0_rdi0`. AVDD do pm8010 em **2.912 V** (valor do `CAMI_RES_QRD.bin`, o único que cai na grade de 8 mV do RPMh), 1 lane @ 180 MHz, sequência de init de 185 registradores extraída do dump Windows
 
 ## Regras — SEMPRE fazer
 
@@ -56,6 +57,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 | Vulkan fix | LD_PRELOAD em `/usr/local/lib64/` + `VK_DRIVER_FILES` via `~/.config/environment.d/` — MR 37622 corrige device select mas LVP ainda carrega sem o override, degradando rendering |
 | FastRPC | Expor somente `/dev/fastrpc-cdsp` não seguro ao grupo `render`; nunca relaxar permissões dos nós secure/ADSP |
 | Runtime NPU | `libcdsprpc.so` do [qualcomm/fastrpc](https://github.com/qualcomm/fastrpc) em `/usr/local/lib` + `/etc/ld.so.conf.d/fastrpc.conf`; binários Hexagon em `/usr/share/qcom/x1p42100/Qualcomm/Purwa-IoT-EVK/dsp/cdsp/` + YAML de mapa em `/usr/share/qcom/conf.d/`; SoC ID 635→555 via LD_PRELOAD escopado em `tools/npu-run` |
+| Câmera IR | Driver `hm1092` em `modules/vivobook-ir-cam-1.0/`; registrador de 16 bits **sem auto-incremento** — nada de `CCI_REG16`, cada metade é uma escrita de 8 bits com o byte baixo primeiro; regiões `csiphy0/1/2` precisam de `0x2000` no overlay, não `0x1000` |
 | Câmera | `vivobook-camera.service` habilitado em `graphical.target`, após módulos core e display manager; carrega `system_heap`; instala `/usr/share/libcamera/ipa/simple/ov02c10.yaml`; nunca adicionar em `modules-load.d` nem usar `rmmod` |
 | Extensão GNOME | `~/.local/share/gnome-shell/extensions/<uuid>/`, ESM modules, GNOME 50 |
 | GRUB instalado | BLS + `custom.cfg` com `clk_ignore_unused mem_sleep_default=s2idle`; sem `pd_ignore_unused` |
@@ -81,7 +83,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 
 ## TODO
 
-- **Câmera IR (HM1092)** — sensor e binding Asus Purwa confirmados via pacote Qualcomm; AVDD/DOVDD dependem do pm8010, ausente no SPMI e sem resposta física aos testes RPMH. Continua bloqueada; não habilitar ou testar durante o trabalho da RGB. Findings em `docs/research/2026-04-11-ir-camera-discovery.md` e `docs/research/CAMERA_STATUS.md`.
+- **Câmera IR (HM1092)** — RESOLVIDO em 2026-08-24. A conclusão antiga de que o pm8010 não existia estava errada: o LDO7 falhava porque 2.900.000 µV (do `CAMI_RES_MTP.bin` genérico) não cai na grade de 8 mV do `pmic5_pldo`; o `CAMI_RES_QRD.bin`, que é o que o Windows de fábrica carrega, pede 2.912.000 µV e registra. Falta o **iluminador IR** (flash LED de PMIC a 700 mA, sem nó no DTB) e a integração com libcamera. Detalhes em `docs/research/CAMERA_STATUS.md`. Capturar com `tools/ir-camera-capture.sh`.
 - **NPU QNN/HTP** — RESOLVIDO em 2026-08-24; o README antigo errava ao chamar de bloqueio do runtime Qualcomm. Faltavam três peças: `libcdsprpc.so` (`NEEDED` do `libQnnHtpV73Stub.so`, ausente no Fedora), os binários Hexagon do CDSP e o SoC ID 635 fora da tabela do `libQnnHtp.so` (aborta em `logCreate` antes de tocar o DSP; 555 = X1E80100 funciona). Verificar com `dsp_check`, `fastrpc_test -d 3 -U 1` e `tools/npu-run tools/verify-qnn-npu.py` (`NPU devices: 1` + `[[1.0000001 2.0000002 3.5000002 4.2500005]]` para `abs([[-1,2,-3.5,4.25]])`; a diferença de ~4.7e-07 é precisão normal do HTP, comparar com tolerância e não com igualdade exata). Override de SoC ID escopado por processo via LD_PRELOAD é OK; spoof global e persistente na máquina, não.
 - **Calibração de cor da câmera RGB** — a câmera roda **sem CCM nenhuma**: o `ov02c10.yaml` é o `uncalibrated.yaml` genérico do libcamera. O tuning oficial da Qualcomm para o OV02C10 está no dump Windows (`qccamfrontsensor_extension8380`), não é comprimido e tem `mod_cc13`/`mod_bls12` nomeados, mas os valores estão em ponto fixo numa seção de dados ainda não mapeada — varredura por float32 deu zero. Teto realista: o IPA `simple` só consome `Ccm` e `BlackLevel`. Caminho empírico (ColorChecker + `utils/tuning`) é mais curto que a engenharia reversa. Plano completo em `docs/research/2026-08-24-camera-color-calibration.md`.
 - **Firmware ADSP mais novo disponível** — o dump tem `ADSP.HT.5.9-00831-HAMOA-1` contra o `-00810` instalado, assinado pela própria ASUS (deve carregar, diferente do CDSP Hamoa que o PAS rejeita com `-22`). **Não trocar sem um bug alvo**: ADSP é áudio + bateria, ambos funcionando. Teste é reversível pelo sysfs do `remoteproc`.
