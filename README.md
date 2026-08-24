@@ -170,25 +170,41 @@ Two states that look like failures but are not: `enu1u4u1` showed `NO-CARRIER`
 because no network cable was attached to the dock, and the battery read
 `Not charging` because the 80% charge limit was holding it.
 
-**Video works too**, retested with a portable Type-C monitor on the same port 0:
-`card0-DP-1` came up `connected`/`enabled` and drove a real mode on `crtc-1`, so
-DP alt-mode engages through the dock. Two things worth knowing:
+**Video works too** — verified with a picture on screen, using a portable Type-C
+monitor on the same port 0. DP alt-mode engages through the dock. But it does
+**not** work out of the box, and the failure is worth knowing because everything
+the OS reports looks healthy while the screen stays black.
+
+On plug the monitor showed **No Signal**, while the whole DRM pipeline claimed
+success: `card0-DP-1` `connected`, DPMS `On`, EDID read fine, mode set, and
+gnome-shell actively scanning a framebuffer out of `crtc-1` — with zero `msm_dp`
+errors in the log. The cause is mode selection. The monitor's EDID declares
+**960x640** as its native/preferred mode (base-block DTD 1, which EDID 1.4
+defines as the native pixel format), the kernel and GNOME both honour that, and
+the panel cannot actually lock the timing.
+
+Selecting any sane mode fixes it instantly — `1920x1080@60` produced a picture
+immediately. GNOME persists the choice in `~/.config/monitors.xml` keyed by the
+monitor's serial, so it reapplies by itself on the next plug.
+
+This is a defect in the monitor's EDID, not a kernel bug — there is nothing to
+fix on the Linux side. That EDID contradicts itself in several ways: the base
+block describes a 293x165 mm panel while every extension DTD claims 160x90 mm,
+and the CTA block offers `2560x1600@60` that the base block never hints at.
+Ordinary for a cheap Type-C portable panel whose product name is literally
+`TYPE-C` (vendor `DRS`, model `9557`).
+
+Three diagnostic traps this cost time on, worth remembering for any USB-C display:
 
 - `port0-partner/number_of_alternate_modes` stays `0` even while DP is running,
   because `pmic_glink_altmode` drives DP out of band rather than through UCSI. An
-  empty partner alt-mode list is **not** evidence that DP failed — check the DRM
+  empty partner alt-mode list is **not** evidence that DP failed — read the DRM
   connector instead.
-- the connector has no `mst_path`, so the dock passes DP through on a direct lane
-  rather than through its VMM8431 MST hub.
-
-The monitor lands at 960x640 even though `2560x1600@60` is offered, and that is
-the monitor's EDID rather than a driver bug: base-block DTD 1 *is* 960x640, and
-EDID 1.4 marks the first detailed timing as the native/preferred mode, so the
-kernel and GNOME both honour it. That EDID is self-inconsistent — the base block
-claims a 293x165 mm panel while every extension DTD claims 160x90 mm — which is
-ordinary for cheap Type-C portable panels (vendor `DRS`, model `9557`, product
-name literally `TYPE-C`). `2560x1600@60` needs 268.63 MHz, under the EDID's own
-280 MHz max dotclock, so selecting it by hand in Settings → Displays is fine.
+- the `edid` sysfs attribute `stat`s as **0 bytes** while reading back a full 256,
+  so a size check reports "no EDID" on a link that has a perfectly good one.
+- a fully configured DRM pipeline proves the *kernel* is happy, not that photons
+  reach the panel. "No Signal" with `connected` + a live framebuffer means the
+  mode, not the link.
 
 Practical conclusion:
 

@@ -345,17 +345,28 @@ Duas armadilhas de diagnóstico que valem registro:
 - o conector não tem `mst_path`: o dock entrega o DP numa lane direta, não pelo
   MST hub VMM8431 dele.
 
-### O monitor sobe em 960x640 — é o EDID dele, não o driver
+### O monitor não dá imagem em 960x640 — é o EDID dele, não o driver
 
-O painel oferece `2560x1600@60` na lista, mas o modo escolhido é `960x640`:
+**Sintoma:** no plug o monitor mostra **"No Signal"**, enquanto o lado do OS
+reporta sucesso completo:
 
 ```
-crtc-1  mode: "960x640": 60 49160 ...
+card0-DP-1: connected, dpms=On, EDID lido (256 bytes)
+crtc-1      mode: "960x640": 60 49160 ...   active=1
+plane-1     fb=119  960x640  allocated by = gnome-shell
 ```
 
-Causa: o **DTD 1 do bloco base é 960x640**, e o EDID 1.4 define o primeiro
-detailed timing como o modo nativo/preferido. Kernel e GNOME estão honrando o que
-o monitor declara — os dois marcam `960x640` como `is-preferred`.
+Zero erro de `msm_dp` no dmesg. Pipeline DRM inteiro montado e varrendo
+framebuffer — e tela preta.
+
+**Causa:** o **DTD 1 do bloco base é 960x640**, e o EDID 1.4 define o primeiro
+detailed timing como o modo nativo/preferido. Kernel e GNOME honram o que o
+monitor declara (ambos marcam `960x640` como `is-preferred`) — só que o painel
+não consegue travar esse timing.
+
+**Fix:** escolher qualquer modo são. `1920x1080@60` deu imagem na hora. O GNOME
+persiste em `~/.config/monitors.xml` chaveado pelo serial do monitor, então
+reaplica sozinho no próximo plug.
 
 O EDID é auto-contraditório, como é comum em painel Type-C barato:
 
@@ -364,13 +375,25 @@ O EDID é auto-contraditório, como é comum em painel Type-C barato:
 | Fabricante / modelo | `DRS` / `9557`, nome do produto literalmente `TYPE-C` |
 | Tamanho no bloco base | 29 cm x 17 cm; DTD 1 diz 293 x 165 mm |
 | Tamanho nas DTD da extensão | 160 x 90 mm em **todas** |
-| DTD 1 (nativo declarado) | 960x640 @ 60 |
+| DTD 1 (nativo declarado) | 960x640 @ 60 — **não produz imagem** |
 | DTD 2 (bloco CTA) | 2560x1600 @ 60, 268.63 MHz |
 | Max dotclock declarado | 280 MHz |
 
-`2560x1600@60` pede 268.63 MHz, abaixo do teto de 280 MHz que o próprio EDID
-declara — então dá para selecionar na mão em Ajustes → Telas sem problema.
-Não há fix de kernel a fazer aqui: o driver está correto, o EDID é que mente.
+Não há fix de kernel a fazer: o driver está correto, o EDID é que mente.
+
+### Três armadilhas de diagnóstico
+
+Valem para qualquer display USB-C nesta máquina:
+
+1. `port0-partner/number_of_alternate_modes` fica **`0` mesmo com o DP rodando** —
+   quem dirige o DP é o `pmic_glink_altmode`, fora da banda do UCSI. Lista de
+   altmode do partner vazia **não** é prova de que o DP falhou; olhar o conector
+   DRM, não o UCSI.
+2. O atributo `edid` do sysfs faz `stat` como **0 bytes** mas lê 256 de verdade.
+   Checar tamanho com `[ -s ... ]` reporta "sem EDID" num link que tem EDID bom.
+3. Pipeline DRM montado prova que o **kernel** está satisfeito, não que chega luz
+   no painel. `connected` + framebuffer vivo + "No Signal" = problema de modo,
+   não de link.
 
 Conclusão: um dock USB-C que não dependa de túnel entrega hub 10 Gbps + 2.5GbE +
 carga + saída de vídeo hoje, sem kernel custom e sem driver faltando. O Elgato TB3 continua sem
