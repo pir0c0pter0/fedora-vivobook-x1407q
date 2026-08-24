@@ -5,7 +5,8 @@
 The **ASUS Vivobook 14 X1407QA** with **Qualcomm Snapdragon X (X1-26-100)**
 is usable as a Linux daily driver on **Fedora 44 aarch64** with the custom
 `7.2.0-x1407qa` kernel, DKMS/runtime overlays, initramfs firmware injection and
-userspace fixes. GPU/Vulkan and the core desktop hardware work; RGB camera
+userspace fixes. Boot is validated at 7.301s total with the graphical target
+reached in 3.278s userspace. GPU/Vulkan and the core desktop hardware work; RGB camera
 captures still/video with known non-fatal warnings. IR camera, USB4/TB3
 tunneling and QNN/HTP NPU inference remain blocked and are documented below.
 
@@ -42,7 +43,7 @@ entry. Model-specific differences still need runtime fixes.
 
 ```text
 live/recovery:    clk_ignore_unused pd_ignore_unused
-installed stable: clk_ignore_unused mem_sleep_default=s2idle
+installed stable: clk_ignore_unused mem_sleep_default=s2idle systemd.zram=0 plymouth.enable=0
 ```
 
 The live image still carries both guards. On the installed 7.2 system,
@@ -181,24 +182,32 @@ Must load **before** `vivobook_kbd_fix` so the HID driver is registered when the
 
 ---
 
-### 8. Boot time 1min 47s → 8s — phantom TPM timeout
+### 8. Boot time 1min 47s → 7.301s — fixed
 
 **Problem:** System takes almost 2 minutes to boot despite NVMe storage.
 
-**Root cause:** The INSYDE firmware advertises TPM devices (`/dev/tpm0`, `/dev/tpmrm0`) that don't exist. The kernel itself detects this: `ima: No TPM chip found, activating TPM-bypass!`. But systemd waits for the device nodes — **twice**: once in initrd (~45s timeout) and again in userspace (~45s timeout). Total: ~90s wasted waiting for hardware that will never appear.
+**Root cause:** The INSYDE firmware advertises TPM devices (`/dev/tpm0`, `/dev/tpmrm0`) that don't exist. A later regression also came from Fedora's zram generator waiting 45s for `/dev/zram0`, although the custom kernel has no zram module. Plymouth and two artificial camera waits added another ~9s.
 
 **How it was fixed:**
 1. Mask TPM devices in userspace: `systemctl mask dev-tpm0.device dev-tpmrm0.device`
 2. Mask in initrd via kernel cmdline: `rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device`
 3. Remove TPM/NFS dracut modules (unnecessary on laptop): `omit_dracutmodules+=" tpm2-tss systemd-pcrphase nfs "`
+4. Add `systemd.zram=0 plymouth.enable=0` only to installed-system boot entries; live entries retain `rd.live.ram`.
+5. Remove the camera service's global `udevadm settle`, arbitrary three-second sleep and pre-login WirePlumber restart; synchronous camera initialization now completes in 112ms.
 
 | Metric | Before | After |
 |--------|--------|-------|
-| Total boot | 1min 47s | **7.8s** |
-| initrd | 46s | 2.3s |
-| userspace | 60s | 5s |
+| Total boot | 1min 47s | **7.301s** |
+| kernel | — | 733ms |
+| initrd | 46s | 3.242s |
+| userspace | 60s | 3.325s |
+| graphical target | — | **3.278s** |
 
-**What Fedora could do:** Detect phantom TPM on Snapdragon X platforms (INSYDE firmware) and skip the wait. This affects multiple vendors, not just ASUS.
+The roughly three-second target is desktop/userspace readiness. Kernel +
+initrd already take 3.975s, so the validated total is 7.301s rather than an
+unattainable three-second total.
+
+**What Fedora could do:** Detect phantom TPM and avoid generating zram units when the running kernel cannot provide zram. This affects multiple vendors, not just ASUS.
 
 ---
 
@@ -435,7 +444,7 @@ lockup. IR camera remains blocked.
 
 ### Medium impact
 
-5. **Mask phantom TPM** on INSYDE Snapdragon X — fixes #8, saves 90s boot time.
+5. **Skip phantom TPM and unsupported zram** on INSYDE Snapdragon X — fixes #8 and keeps userspace boot near 3s.
 6. **Keep deep suspend disabled on Snapdragon X** — s2idle is working on this
    machine (~0.80W measured), but deep still crashes.
 7. **GTK4 Vulkan pool size** — fixes #9, upstream GTK4/Mesa issue.

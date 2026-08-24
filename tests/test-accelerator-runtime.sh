@@ -9,6 +9,38 @@ export VIVOBOOK_SETUP_LIBRARY_ONLY=1
 # shellcheck source=../setup-vivobook.sh
 source "$repo/setup-vivobook.sh"
 
+boot_root="$test_root/boot-root"
+mkdir -p "$boot_root/etc/default" "$boot_root/etc/kernel" "$boot_root/boot/grub2"
+printf 'GRUB_CMDLINE_LINUX="quiet rd.live.ram pd_ignore_unused pd_ignore_unused mem_sleep_default=deep mem_sleep_default=deep systemd.zram=1 systemd.zram=2 plymouth.enable=1 plymouth.enable=2"\n' \
+    > "$boot_root/etc/default/grub"
+printf 'root=UUID=test ro rd.live.ram pd_ignore_unused mem_sleep_default=deep systemd.zram=1 plymouth.enable=1\n' \
+    > "$boot_root/etc/kernel/cmdline"
+printf '  linux /vmlinuz root=UUID=test ro rd.live.ram pd_ignore_unused mem_sleep_default=deep systemd.zram=1 plymouth.enable=1\n' \
+    > "$boot_root/boot/grub2/custom.cfg"
+write_installed_boot_params "$boot_root"
+required_boot_params='clk_ignore_unused mem_sleep_default=s2idle systemd.zram=0 plymouth.enable=0 systemd.tpm2_wait=0 rd.driver.pre=pwrseq_qcom_wcn rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device'
+for config in "$boot_root/etc/default/grub" "$boot_root/etc/kernel/cmdline" \
+    "$boot_root/boot/grub2/custom.cfg"; do
+    grep -qF "$required_boot_params" "$config" || {
+        echo "Installed boot policy was not persisted in $config" >&2
+        exit 1
+    }
+    if grep -Eq 'rd\.live\.ram|pd_ignore_unused|mem_sleep_default=deep|systemd.zram=1|plymouth.enable=1' "$config"; then
+        echo "Obsolete installed boot policy remains in $config" >&2
+        exit 1
+    fi
+done
+
+readonly_root="$test_root/readonly-root"
+mkdir -p "$readonly_root/etc/default"
+printf 'GRUB_CMDLINE_LINUX="quiet"\n' > "$readonly_root/etc/default/grub"
+chmod 0555 "$readonly_root/etc/default"
+if write_installed_boot_params "$readonly_root" 2>/dev/null; then
+    echo 'Installed boot policy writer hid a configuration write failure' >&2
+    exit 1
+fi
+chmod 0755 "$readonly_root/etc/default"
+
 REAL_USER=$(id -un)
 export REAL_USER
 REAL_HOME="$test_root/home"
@@ -68,5 +100,9 @@ systemctl --root="$camera_systemd_root" enable vivobook-camera.service
     echo 'Camera service is not enabled for graphical boot' >&2
     exit 1
 }
+if grep -Eq 'udevadm settle|ExecStartPost=/bin/sleep|wireplumber' "$camera_unit"; then
+    echo 'Camera service still blocks graphical boot after the sensor is ready' >&2
+    exit 1
+fi
 
 echo 'PASS: accelerator runtime files are installed with the safe hardware contract'

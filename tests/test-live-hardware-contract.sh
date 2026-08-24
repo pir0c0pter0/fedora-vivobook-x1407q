@@ -88,7 +88,7 @@ setup="$repo/setup-vivobook.sh"
 require_file "$setup"
 for token in 'snd_soc_wcd938x' 'HandleLidSwitch=suspend' 'vivobook-battery-freq-cap' \
     '99-battery-freq-cap.rules' '2380800' 'mem_sleep_default=s2idle' \
-    '--remove-args="pd_ignore_unused mem_sleep_default"'; do
+    '--remove-args="rd.live.ram pd_ignore_unused mem_sleep_default systemd.zram plymouth.enable"'; do
     require_token "$setup" "$token"
 done
 setup_grubby=$(grep -F 'grubby --update-kernel=ALL' "$setup")
@@ -96,10 +96,21 @@ setup_grubby=$(grep -F 'grubby --update-kernel=ALL' "$setup")
     echo 'FAIL: installed-system setup does not preserve the required clock guard and s2idle' >&2
     exit 1
 }
-
+[[ $setup_grubby == *'systemd.zram=0'* ]] || {
+    echo 'FAIL: installed-system setup still enables unsupported zram' >&2
+    exit 1
+}
+[[ $setup_grubby == *'plymouth.enable=0'* ]] || {
+    echo 'FAIL: installed-system setup still enables the boot splash' >&2
+    exit 1
+}
 update_manager="$repo/vivobook-update.sh"
 require_file "$update_manager"
-for token in 'mem_sleep_default=s2idle' "! grep -q 'pd_ignore_unused'" \
+for token in 'mem_sleep_default=s2idle' 'systemd.zram=0' 'plymouth.enable=0' \
+    'systemd.tpm2_wait=0' 'rd.driver.pre=pwrseq_qcom_wcn' \
+    'rd.driver.pre=wcn_regulator_fix' 'rd.systemd.mask=dev-tpm0.device' \
+    'rd.systemd.mask=dev-tpmrm0.device' \
+    '/etc/kernel/cmdline' '/boot/grub2/custom.cfg' "! grep -Eq 'pd_ignore_unused|rd\\.live\\.ram'" \
     'for target in sleep.target suspend.target' \
     'for target in hibernate.target hybrid-sleep.target suspend-then-hibernate.target'; do
     require_token "$update_manager" "$token"
@@ -135,6 +146,10 @@ mapfile -t live_linux < <(grep -E '^[[:space:]]+linux .*root=live:' "$iso_builde
 for linux_line in "${live_linux[@]}"; do
     [[ $linux_line == *clk_ignore_unused* && $linux_line == *pd_ignore_unused* ]] || {
         echo 'FAIL: a live boot entry lost the conservative clock/power-domain guards' >&2
+        exit 1
+    }
+    [[ $linux_line != *systemd.zram=0* && $linux_line != *plymouth.enable=0* ]] || {
+        echo 'FAIL: an installed-only boot optimization leaked into a live entry' >&2
         exit 1
     }
 done

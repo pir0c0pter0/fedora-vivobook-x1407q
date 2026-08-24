@@ -57,7 +57,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 5 | **Brightness control** | DKMS module `vivobook_bl_fix` | Direct PMIC PWM register manipulation |
 | 6 | **Fn hotkeys** | DKMS module `vivobook_hotkey_fix` | ASUS vendor HID init + key mapping |
 | 7 | **GPU/Vulkan acceleration** | Firmware in initramfs + hardware-only Freedreno ICD | Adreno X1-45 with Turnip/Mesa hardware rendering, Vulkan 1.4 validated after reboot |
-| 8 | **Boot time: 1min47s -> 8s** | TPM timeout elimination + initrd cleanup | Masked phantom TPM devices, removed unused modules |
+| 8 | **Boot time: 1min47s -> 7.3s** | TPM/zram wait elimination + initrd cleanup | Installed boot skips absent devices and Plymouth; live RAM mode stays intact |
 | 9 | **Terminal flicker fixed** | LD_PRELOAD Vulkan pool fix (`vk_pool_fix.so`) | GTK4/turnip descriptor pool fragmentation → 952 errors eliminated |
 | 10 | **Battery time in panel** | GNOME Shell extension `battery-time@wifiteste` | Hover over battery icon shows time remaining (weighted rolling average) |
 | 11 | **Touchpad right-click** | gsettings `click-method` → `areas` | Clickpad only reports BTN_LEFT; area-based mapping restores right-click |
@@ -81,7 +81,7 @@ instalado com validação física da reconstrução atual.
 | Feature | Status | Notes |
 |---------|--------|-------|
 | **Boot** | :white_check_mark: Working | Fedora 44 via Zenbook A14 DTB |
-| **Boot time** | :warning: Regressed | `systemd-analyze` measured 1min36.997s on the camera-autostart validation boot; the camera itself took 3.415s. The historical 8s result is no longer current (see [Boot Time Fix](#8-boot-time-fix)) |
+| **Boot time** | :white_check_mark: 7.301s | `systemd-analyze`: 733ms kernel + 3.242s initrd + 3.325s userspace; `graphical.target` at 3.278s and camera module commands in 112ms (see [Boot Time Fix](#8-boot-time-fix)) |
 | **Display / GPU** | :white_check_mark: Working | Adreno X1-45, Freedreno/Turnip; Vulkan hardware validated after reboot (see [GPU Firmware Fix](#7-gpu-firmware-fix)) |
 | **WiFi** | :white_check_mark: Working | Native WCN sequencing + `wlanfw20.mbn` as `amss.bin` + X1407QA board data (see [WiFi Fix](#2-wifi-fix)) |
 | **Firewall** | :white_check_mark: Working | nftables + NetBIOS conntrack helper enabled in the custom 7.2 kernel; `firewalld` validated `active/running` after restart on 2026-08-24 |
@@ -271,7 +271,7 @@ BIOS version, USB port used, and a photo of the last visible line in
 3. Reboot into the installed system
 
 > **Important:** At first boot from NVMe, edit GRUB again with
-> `clk_ignore_unused mem_sleep_default=s2idle systemd.tpm2_wait=0` (without the temporary
+> `clk_ignore_unused mem_sleep_default=s2idle systemd.zram=0 plymouth.enable=0 systemd.tpm2_wait=0` (without the temporary
 > `qcom_q6v5_pas` blacklist) — you'll make this permanent in Step 6.
 
 ### Step 6 — Apply firmware + all fixes (Part 2)
@@ -512,16 +512,19 @@ The following scripts have been removed and replaced:
 | `clk_ignore_unused` | Prevents kernel from disabling Qualcomm clocks needed by firmware |
 | `pd_ignore_unused` | Live USB safety guard only; removal from the installed system passed 16/16 hardware checks and saves ~0.1–0.2W |
 | `mem_sleep_default=s2idle` | Installed system: selects the suspend mode validated on this hardware; `deep` crashes |
+| `systemd.zram=0` | Installed system only: prevents a 45s wait for the zram module absent from the custom kernel |
+| `plymouth.enable=0` | Installed system only: skips the unused splash wait; live boot keeps Plymouth |
 | `systemd.tpm2_wait=0` | Skips the two false TPM waits |
 | `modprobe.blacklist=qcom_q6v5_pas` | Live USB only: prevents the ADSP restart from disconnecting USB-C storage |
-| `rd.driver.pre=wcn_regulator_fix` | Loads WiFi regulator fix before PCIe scan |
+| `rd.driver.pre=pwrseq_qcom_wcn` | Loads the native WCN power sequencer before PCIe scan |
+| `rd.driver.pre=wcn_regulator_fix` | Loads the WiFi regulator fix before PCIe scan |
 | `rd.systemd.mask=dev-tpm0.device` | Skips TPM wait in initrd |
 | `rd.systemd.mask=dev-tpmrm0.device` | Skips TPM resource manager wait in initrd |
 
 **Full kernel cmdline used:**
 
 ```
-BOOT_IMAGE=/vmlinuz-7.2.0-x1407qa root=UUID=<your-uuid> ro rootflags=subvol=root quiet rhgb clk_ignore_unused mem_sleep_default=s2idle systemd.tpm2_wait=0 rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device
+BOOT_IMAGE=/vmlinuz-7.2.0-x1407qa root=UUID=<your-uuid> ro rootflags=subvol=root clk_ignore_unused mem_sleep_default=s2idle systemd.zram=0 plymouth.enable=0 systemd.tpm2_wait=0 rd.driver.pre=pwrseq_qcom_wcn rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device
 ```
 
 ### 2. WiFi Fix
@@ -711,7 +714,7 @@ prevents Lavapipe from being loaded alongside Turnip for desktop applications.
 
 ### 8. Boot Time Fix
 
-TPM device masking + initrd cleanup — from 1min47s to **8 seconds**.
+TPM/zram wait removal + initrd cleanup — from 1min47s to **7.301 seconds**.
 
 **Problem:** The system has no TPM chip (`ima: No TPM chip found, activating TPM-bypass!`), but systemd waits for `/dev/tpm0` and `/dev/tpmrm0` — twice:
 
@@ -744,6 +747,20 @@ sudo dracut --force
 | 1min 47s total | **7.8s total** |
 | 46s initrd | 2.3s initrd |
 | 60s userspace | 5s userspace |
+
+**2026-08-24 revalidation:** the later 1min36.997s regression came from Fedora's
+zram generator waiting for `/dev/zram0`, although the custom kernel has no zram
+module. Installed-system entries now use `systemd.zram=0` and
+`plymouth.enable=0`; the live entries remain unchanged, including
+`rd.live.ram` on the main live option. The camera service also stopped waiting
+for the global udev queue and an arbitrary three-second sleep: its synchronous
+module initialization completed in 112ms and libcamera still enumerated the
+OV02C10 after reboot.
+
+The approximately three-second goal refers to userspace/desktop readiness:
+`graphical.target` is reached in 3.278s. A three-second total is not possible
+with this image because kernel + initrd alone take 3.975s; the validated total
+is 7.301s.
 
 ### 9. Terminal Flicker Fix
 
@@ -1264,8 +1281,13 @@ echo "1.15" | sudo tee /sys/kernel/vivobook_color/contrast
 
 ```
 /etc/default/grub
-    GRUB_CMDLINE_LINUX_DEFAULT="quiet rhgb clk_ignore_unused mem_sleep_default=s2idle
-        rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"
+    GRUB_CMDLINE_LINUX="clk_ignore_unused mem_sleep_default=s2idle
+        systemd.zram=0 plymouth.enable=0 rd.systemd.mask=dev-tpm0.device
+        rd.systemd.mask=dev-tpmrm0.device"
+
+/etc/kernel/cmdline and /boot/grub2/custom.cfg
+    Same installed-only zram/Plymouth policy, preserved for future kernels and
+    the direct fallback entry.
 
 /etc/dracut.conf.d/
     wcn-regulator-fix.conf     → force_drivers+=" wcn_regulator_fix "
@@ -1532,7 +1554,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **GPU**: Firmware must be in initramfs for early loading. SELinux may block `.xz` firmware (`setenforce 0` as workaround)
 - **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
 - **Camera RGB**: Late graphical autostart works for 1080p still, 720p30 video and PipeWire. Fedora libcamera still warns about OV02C10 static metadata/helper, and kernel 7.2 emits non-fatal CAMCC clock warnings. `rmmod` is unsafe — reboot to unload (see [Camera Fix](#17-rgb-camera-fix))
-- **Boot-time regression**: the current validation boot took 1min36.997s; `vivobook-camera.service` accounts for 3.415s, so the remaining regression is separate from camera autostart.
+- **~~Boot-time regression~~**: Fixed — installed zram/Plymouth waits removed; current boot is 7.301s total with `graphical.target` at 3.278s userspace, while `rd.live.ram` remains exclusive to the main live entry.
 - **~~Firewall~~**: Fixed — the custom 7.2 config now builds nftables, FIB/reject/NAT expressions, and the NetBIOS conntrack helper required by the FedoraWorkstation zone. `firewalld` is `active/running` and the generated ruleset is loaded.
 - **Camera IR**: pm8010 PMIC physically absent — sensor has no power. No one upstream has IR camera working on Snapdragon X Linux (see [Camera Research](#camera-research))
 - **Suspend**: `deep` (S3) still crashes and stays disabled. `s2idle` validated 2026-08-24 on the installed `7.2.0-x1407qa` — 2 clean cycles, ~0.80W suspended (see [Lid Close Fix](#13-lid-close-fix)). No RTC alarm on pm8xxx — wake by lid/power button only ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))

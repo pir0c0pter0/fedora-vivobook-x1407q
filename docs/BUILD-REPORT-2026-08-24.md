@@ -195,10 +195,14 @@ pelo setup atual e precisa ser reconstruído por kernel.
 
 Conclusão operacional: GPU está concluída e câmera está funcional com warnings
 conhecidos. O reboot físico confirmou teclado/touchpad antes do overlay,
-auditoria 16/16 e ausência de Oops/soft lockup. Nesse mesmo boot,
+auditoria 16/16 e ausência de Oops/soft lockup. Nesse primeiro boot,
 `systemd-analyze` mediu 1min36.997s (3.415s da câmera) e o `firewalld` falhou em
 `3/NOTIMPLEMENTED` porque `nft` retornou `Protocol not supported`; são pendências
-separadas naquele momento. Mais tarde no mesmo dia, o config do kernel recebeu nftables e os
+separadas naquele momento. Mais tarde no mesmo dia, o timeout de zram ausente,
+o wait do Plymouth e os waits artificiais da câmera foram removidos apenas do
+caminho instalado. A revalidação mediu 7.301s total, 3.325s userspace,
+`graphical.target` em 3.278s e comandos do módulo da câmera em 112ms; o live principal
+continua com `rd.live.ram`. O config do kernel também recebeu nftables e os
 helpers conntrack exigidos pela zona FedoraWorkstation; após instalar os
 módulos, `firewalld` foi validado `active/running` com o ruleset carregado. O
 transporte CDSP está

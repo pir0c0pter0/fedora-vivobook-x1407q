@@ -65,7 +65,7 @@ done
 opts="root=$root_spec ro"
 [ -n "$subvol" ] && opts="$opts rootflags=$subvol"
 opts="$opts rd.driver.pre=pwrseq_qcom_wcn rd.driver.pre=wcn_regulator_fix"
-opts="$opts clk_ignore_unused mem_sleep_default=s2idle systemd.tpm2_wait=0"
+opts="$opts clk_ignore_unused mem_sleep_default=s2idle systemd.zram=0 plymouth.enable=0 systemd.tpm2_wait=0"
 opts="$opts rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"
 
 grep -lrZF /root/var/lib/mock /boot/loader/entries 2>/dev/null | xargs -0 -r rm -f --

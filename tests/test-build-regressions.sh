@@ -193,6 +193,10 @@ grep -qF 'mem_sleep_default=s2idle' "$ks" \
     || fail 'anaconda post-script cmdline is missing mem_sleep_default=s2idle'
 grep -qF 'clk_ignore_unused mem_sleep_default=s2idle' "$ks" \
     || fail 'anaconda post-script cmdline does not preserve the required clock guard'
+grep -qF 'systemd.zram=0' "$ks" \
+    || fail 'anaconda post-script still enables unsupported installed-system zram'
+grep -qF 'plymouth.enable=0' "$ks" \
+    || fail 'anaconda post-script still enables the installed-system boot splash'
 if grep -qF 'pd_ignore_unused' "$ks"; then
     fail 'anaconda post-script still disables power-domain cleanup'
 fi
@@ -210,6 +214,10 @@ cmp -s "$rescue" "$tmp/rootfs/usr/local/sbin/rescue-installed-boot" \
 if grep -qF 'pd_ignore_unused' "$tmp/rootfs/usr/local/sbin/rescue-installed-boot"; then
     fail 'embedded rescue tool still disables power-domain cleanup'
 fi
+grep -qF 'systemd.zram=0' "$tmp/rootfs/usr/local/sbin/rescue-installed-boot" \
+    || fail 'embedded rescue tool still enables unsupported installed-system zram'
+grep -qF 'plymouth.enable=0' "$tmp/rootfs/usr/local/sbin/rescue-installed-boot" \
+    || fail 'embedded rescue tool still enables the installed-system boot splash'
 "$installable" "$tmp/rootfs" >/dev/null || fail 'installable helper is not idempotent'
 mkdir -p "$tmp/rootfs-bad/usr" "$tmp/rootfs-bad/boot"
 if "$installable" "$tmp/rootfs-bad" >/dev/null 2>&1; then

@@ -135,9 +135,12 @@
   `stop` não descarrega módulos e o unload seguro é reboot. Permanecem
   avisos não fatais de propriedades/helper no libcamera e de clocks CAMCC no
   kernel 7.2; não houve Oops/soft lockup e as capturas concluíram.
-- **Estado global atual:** auditoria estável 16/16; boot total de 1min36.997s,
-  dos quais 3.415s são da câmera. O kernel 7.2 agora inclui nftables e o helper
-  conntrack NetBIOS; `firewalld` foi validado `active/running` em 2026-08-24.
+- **Estado global atual:** auditoria estável 16/16; boot total de 7.301s
+  (3.325s userspace, `graphical.target` em 3.278s e comandos do módulo da
+  câmera em 112ms). O
+  instalado desativa zram/Plymouth pelo cmdline; o live principal conserva
+  `rd.live.ram`. O kernel 7.2 inclui nftables e o helper conntrack NetBIOS;
+  `firewalld` foi validado `active/running` em 2026-08-24.
 - **Build ARM:** o builder principal e o fallback do setup usam `nproc`,
   aproveitando todos os vCPUs que o WSL2 expõe sem um limite fixo em `-j8`.
 - **CDSP pronto, NPU parcial:** ADSP e CDSP estão `running`; somente

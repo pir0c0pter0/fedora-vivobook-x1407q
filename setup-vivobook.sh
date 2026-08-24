@@ -1076,6 +1076,29 @@ publish_initramfs_candidate() (
     return 1
 )
 
+write_installed_boot_params() {
+    local root=${1%/}
+    local params='clk_ignore_unused mem_sleep_default=s2idle systemd.zram=0 plymouth.enable=0 systemd.tpm2_wait=0 rd.driver.pre=pwrseq_qcom_wcn rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device'
+    local grub=$root/etc/default/grub
+    local kernel_cmdline=$root/etc/kernel/cmdline
+    local custom=$root/boot/grub2/custom.cfg
+    local clean='s/(^|[ "])rd\.live\.ram\>/\1/g; s/(^|[ "])clk_ignore_unused\>/\1/g; s/(^|[ "])pd_ignore_unused\>/\1/g; s/(^|[ "])mem_sleep_default=[^ "]+/\1/g; s/(^|[ "])systemd\.zram=[^ "]+/\1/g; s/(^|[ "])plymouth\.enable=[^ "]+/\1/g; s/(^|[ "])systemd\.tpm2_wait=[^ "]+/\1/g; s/(^|[ "])rd\.driver\.pre=(pwrseq_qcom_wcn|wcn_regulator_fix)\>/\1/g; s/(^|[ "])rd\.systemd\.mask=dev-tpm(0|rm0)\.device\>/\1/g'
+
+    if [[ -f $grub ]]; then
+        if grep -q '^GRUB_CMDLINE_LINUX=' "$grub"; then
+            sed -Ei "/^GRUB_CMDLINE_LINUX=/ { $clean; s/ *\"$/ $params\"/; }" "$grub" || return
+        else
+            printf 'GRUB_CMDLINE_LINUX="%s"\n' "$params" >> "$grub" || return
+        fi
+    fi
+    if [[ -f $kernel_cmdline ]]; then
+        sed -Ei "1 { $clean; s/ *$/ $params/; }" "$kernel_cmdline" || return
+    fi
+    if [[ -f $custom ]]; then
+        sed -Ei "/^[[:space:]]*linux / { $clean; s/ *$/ $params/; }" "$custom" || return
+    fi
+}
+
 if [[ ${VIVOBOOK_SETUP_LIBRARY_ONLY:-0} == 1 ]]; then
     return 0 2>/dev/null || exit 0
 fi
@@ -1146,15 +1169,12 @@ desktop_extension_status=0
 step 1 $TOTAL "Parâmetros de kernel (GRUB)..."
 # O blacklist só protege o boot do Live USB; no NVMe o ADSP é necessário.
 rm -f /etc/modprobe.d/anaconda-denylist.conf
-if [[ -f /etc/default/grub ]]; then
-    sed -Ei 's/ pd_ignore_unused//g; s/ mem_sleep_default=[^ "]+//g' /etc/default/grub
-    if ! grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=.*clk_ignore_unused' /etc/default/grub; then
-        sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT=/ s/"$/ clk_ignore_unused"/' /etc/default/grub
-    fi
-    sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT=/ s/"$/ mem_sleep_default=s2idle"/' /etc/default/grub
-fi
-grubby --update-kernel=ALL --remove-args="pd_ignore_unused mem_sleep_default" 2>/dev/null || true
-grubby --update-kernel=ALL --args="clk_ignore_unused mem_sleep_default=s2idle systemd.tpm2_wait=0 rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device" 2>/dev/null || true
+write_installed_boot_params / || { err "Não foi possível persistir o cmdline instalado"; exit 1; }
+grubby --update-kernel=ALL --remove-args="rd.live.ram pd_ignore_unused mem_sleep_default systemd.zram plymouth.enable" 2>/dev/null \
+    || { err "Não foi possível limpar o cmdline instalado"; exit 1; }
+grubby --update-kernel=ALL --args="clk_ignore_unused mem_sleep_default=s2idle systemd.zram=0 plymouth.enable=0 systemd.tpm2_wait=0 rd.driver.pre=pwrseq_qcom_wcn rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device" 2>/dev/null \
+    || { err "Não foi possível atualizar o cmdline instalado"; exit 1; }
+write_installed_boot_params / || { err "Não foi possível validar o cmdline instalado"; exit 1; }
 log "  GRUB configurado"
 
 # ─── 2. WiFi — DKMS wcn_regulator_fix ───────────────────────────────────────

@@ -566,19 +566,32 @@ check_systemd_compat() {
     fi
 }
 
-installed_boot_params_ok() {
-    local config=/etc/default/grub
+installed_boot_params_file_ok() {
+    local config=$1 param
 
-    [[ -f $config ]] \
-        && grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=.*clk_ignore_unused' "$config" \
-        && grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=.*mem_sleep_default=s2idle' "$config" \
-        && ! grep -q 'pd_ignore_unused' "$config"
+    [[ -f $config ]] || return 1
+    for param in clk_ignore_unused mem_sleep_default=s2idle systemd.zram=0 \
+        plymouth.enable=0 systemd.tpm2_wait=0 \
+        rd.driver.pre=pwrseq_qcom_wcn rd.driver.pre=wcn_regulator_fix \
+        rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device; do
+        grep -qF "$param" "$config" || return 1
+    done
+    ! grep -Eq 'pd_ignore_unused|rd\.live\.ram' "$config"
+}
+
+installed_boot_params_ok() {
+    local config
+
+    for config in /etc/default/grub /etc/kernel/cmdline /boot/grub2/custom.cfg; do
+        installed_boot_params_file_ok "$config" || return 1
+    done
+    grep -q '^GRUB_CMDLINE_LINUX=' /etc/default/grub
 }
 
 check_grub_compat() {
     local changelog="$1"
     if installed_boot_params_ok; then
-        echo -e "  ${GREEN}✅${NC} Kernel params instalados (clk + s2idle, sem guard global de power domains)" | tee -a "$LOG_FILE"
+        echo -e "  ${GREEN}✅${NC} Kernel params instalados (clk + s2idle, sem zram/Plymouth)" | tee -a "$LOG_FILE"
     else
         echo -e "  ${RED}❌${NC} Contrato do cmdline instalado inválido em /etc/default/grub" | tee -a "$LOG_FILE"
     fi
@@ -804,11 +817,18 @@ post_update() {
 
     # GRUB regeneration if kernel changed
     if [[ -n "$updated_kernel" ]]; then
+        local updated_entry
+
         if ! installed_boot_params_ok; then
             warn "Contrato do cmdline instalado inválido em /etc/default/grub"
         fi
         if ! grep -q '^devicetree ' /boot/loader/entries/*"$updated_kernel"*.conf 2>/dev/null; then
             warn "Entrada BLS do kernel $updated_kernel sem devicetree — não selecionar no próximo boot"
+        fi
+        updated_entry=$(find /boot/loader/entries -maxdepth 1 -type f \
+            -name "*$updated_kernel*.conf" -print -quit 2>/dev/null)
+        if [[ -z $updated_entry ]] || ! installed_boot_params_file_ok "$updated_entry"; then
+            warn "Entrada BLS do kernel $updated_kernel sem a política de boot rápido"
         fi
         if ! grep -q 'devicetree ' /boot/grub2/custom.cfg 2>/dev/null; then
             warn "Fallback /boot/grub2/custom.cfg ausente ou sem devicetree"
