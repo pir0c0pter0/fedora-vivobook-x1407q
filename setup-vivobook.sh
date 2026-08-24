@@ -542,8 +542,8 @@ prepare_core_module_build_tree() (
         if ! (
             cd "$prepared_source" || exit 1
             export LOCALVERSION="$kernel_suffix"
-            make -j8 vmlinux
-            make -j8 modules
+            make -j"$(nproc)" vmlinux
+            make -j"$(nproc)" modules
         ); then
             err "Falha ao gerar Module.symvers no build tree verificado"
             return 1
@@ -1246,8 +1246,7 @@ fi
 
 # Wrapper script — forces hardware Vulkan + pool fix
 # VK_DRIVER_FILES needed even on Mesa 25.3.6: MR 37622 fixes device select but
-# LVP still gets loaded without this override, degrading GTK4 rendering and
-# causing terminal flicker during Claude Code reloads
+# LVP still gets loaded without this override, degrading GTK4 rendering.
 cat > /usr/local/bin/ptyxis-fixed << 'WRAPPER'
 #!/bin/sh
 export VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
@@ -1422,8 +1421,8 @@ udevadm control --reload-rules 2>/dev/null || true
 /usr/local/bin/vivobook-battery-freq-cap || true
 log "  Charge limit 80% + freq cap 2.38GHz na bateria"
 
-# ─── 17. Câmera RGB — DKMS + systemd on-demand ──────────────────────────────
-log "Câmera RGB (vivobook_cam_fix — on-demand)..."
+# ─── 17. Câmera RGB — DKMS + systemd no boot gráfico ────────────────────────
+log "Câmera RGB (vivobook_cam_fix — autostart gráfico)..."
 # Camera module is version 2.0
 CAM_SRC="/usr/src/vivobook-cam-fix-2.0"
 if [[ -d "$CAM_SRC" ]]; then
@@ -1439,17 +1438,19 @@ if [[ -d "$CAM_SRC" ]]; then
     fi
 fi
 
-# Install systemd service (on-demand only, never enabled)
+# Install and enable the service for the next graphical boot. Do not start it
+# here: loading once during the next boot preserves the safe no-unload cycle.
 cp "${SCRIPT_DIR}/modules/vivobook-cam-fix-2.0/vivobook-camera.service" /etc/systemd/system/ 2>/dev/null || true
 install_ov02c10_ipa_data || warn "  Tuning OV02C10 não instalado"
 write_camera_dma_heap_rule || warn "  Regra uaccess do DMA heap não instalada"
 udevadm control --reload-rules 2>/dev/null || true
 systemctl daemon-reload 2>/dev/null || true
+systemctl enable vivobook-camera.service 2>/dev/null || warn "  Autostart da câmera não habilitado"
 
 # Install user command
 cp "${SCRIPT_DIR}/modules/vivobook-cam-fix-2.0/vivobook-camera" /usr/local/bin/vivobook-camera 2>/dev/null || true
 chmod +x /usr/local/bin/vivobook-camera 2>/dev/null || true
-log "  vivobook-camera command instalado (use: vivobook-camera start)"
+log "  vivobook-camera habilitada para o próximo boot gráfico"
 
 # ─── Extras ──────────────────────────────────────────────────────────────────
 
@@ -1463,64 +1464,6 @@ if [[ -f "${SCRIPT_DIR}/vivobook-update.sh" ]]; then
     cp "${SCRIPT_DIR}/vivobook-update.sh" /usr/local/bin/vivobook-update
     chmod +x /usr/local/bin/vivobook-update
     log "vivobook-update instalado em /usr/local/bin/"
-fi
-
-# Install sync_render + claude shim (flicker-free Claude Code)
-sync_render_installed=false
-if [[ -f "${SCRIPT_DIR}/sync_render.c" ]] && command -v gcc &>/dev/null; then
-    # Compile to temp path then mv — avoids "Text file busy" if sync_render is running
-    if gcc -O2 -o /tmp/sync_render.new "${SCRIPT_DIR}/sync_render.c" -lutil 2>/dev/null; then
-        mv /tmp/sync_render.new /usr/local/bin/sync_render
-        chmod +x /usr/local/bin/sync_render
-        sync_render_installed=true
-        log "sync_render compilado e instalado"
-    fi
-fi
-if [[ "$sync_render_installed" == false && -f "${SCRIPT_DIR}/sync_render" ]]; then
-    cp "${SCRIPT_DIR}/sync_render" /tmp/sync_render.new
-    mv /tmp/sync_render.new /usr/local/bin/sync_render
-    chmod +x /usr/local/bin/sync_render
-    sync_render_installed=true
-    log "sync_render pre-built copiado"
-fi
-if [[ "$sync_render_installed" == true ]]; then
-    # Configure Ptyxis profile to use sync_render as shell wrapper
-    PTYXIS_UUID=$(sudo -u "${REAL_USER}" dconf read /org/gnome/Ptyxis/default-profile-uuid 2>/dev/null | tr -d "'")
-    if [[ -n "$PTYXIS_UUID" ]]; then
-        sudo -u "${REAL_USER}" dconf write "/org/gnome/Ptyxis/Profiles/${PTYXIS_UUID}/use-custom-command" true
-        sudo -u "${REAL_USER}" dconf write "/org/gnome/Ptyxis/Profiles/${PTYXIS_UUID}/custom-command" "'sync_render /bin/bash --login'"
-        log "Ptyxis profile: sync_render /bin/bash --login"
-    else
-        warn "Ptyxis profile não encontrado — configurar manualmente"
-        info "  dconf write /org/gnome/Ptyxis/Profiles/<UUID>/use-custom-command true"
-        info "  dconf write /org/gnome/Ptyxis/Profiles/<UUID>/custom-command \"'sync_render /bin/bash --login'\""
-    fi
-
-    # Fallback: auto-activate sync_render in bash startup files
-    # Catches tabs opened bypassing the Ptyxis profile custom-command
-    # (e.g. ptyxis-agent session restore, dock icon click edge cases)
-    SYNC_BASHRC_BLOCK='# Flicker-free terminal: re-exec bash inside sync_render PTY proxy
-if [ -z "$SYNC_RENDER_ACTIVE" ] && [ -t 1 ] && [ -x /usr/local/bin/sync_render ]; then
-    export SYNC_RENDER_ACTIVE=1
-    exec /usr/local/bin/sync_render /bin/bash --login
-fi'
-    SYNC_PROFILE_BLOCK='# Auto-activate sync_render for flicker-free terminal rendering
-if [[ -t 1 && -z "$SYNC_RENDER_ACTIVE" ]] && command -v sync_render &>/dev/null; then
-    export SYNC_RENDER_ACTIVE=1
-    exec sync_render /bin/bash --login
-fi'
-    for f in "${REAL_HOME}/.bashrc" "${REAL_HOME}/.bash_profile"; do
-        if [[ -f "$f" ]] && ! grep -q "SYNC_RENDER_ACTIVE" "$f"; then
-            echo "" >> "$f"
-            if [[ "$f" == *bashrc ]]; then
-                echo "$SYNC_BASHRC_BLOCK" >> "$f"
-            else
-                echo "$SYNC_PROFILE_BLOCK" >> "$f"
-            fi
-            log "sync_render fallback adicionado a $f"
-        fi
-    done
-    chown "${REAL_USER}:${REAL_USER}" "${REAL_HOME}/.bashrc" "${REAL_HOME}/.bash_profile" 2>/dev/null || true
 fi
 
 # ─── Rebuild initramfs ──────────────────────────────────────────────────────
@@ -1595,7 +1538,7 @@ echo "    cpufreq:  cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
 echo "    CDSP:     cat /sys/class/remoteproc/remoteproc1/state"
 echo "    Carga:    cat /sys/class/power_supply/qcom-battmgr-bat/charge_control_end_threshold"
 echo "    Suspend:  systemctl suspend  (s2idle; hibernate.target deve seguir masked)"
-echo "    Câmera:   vivobook-camera start  (on-demand, não auto-load)"
+echo "    Câmera:   systemctl status vivobook-camera.service"
 echo ""
 
 if [[ $desktop_extension_status -eq 3 ]]; then
@@ -1605,5 +1548,5 @@ info "Scripts atuais:"
 echo "    build-vivobook-iso.sh  — Criar ISO customizada"
 echo "    setup-vivobook.sh      — Este script (setup pós-install)"
 echo "    vivobook-update        — Updates seguros (sudo vivobook-update)"
-echo "    vivobook-camera        — Ligar câmera RGB sob demanda"
+echo "    vivobook-camera        — Verificar/iniciar câmera RGB"
 echo ""

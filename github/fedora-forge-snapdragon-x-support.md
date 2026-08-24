@@ -399,17 +399,24 @@ SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-bat", ATTR{charge_control_end_t
 
 **How it was fixed:** DKMS module `vivobook_cam_fix` v2.0 with two-phase DT
 overlay, Fedora libcamera with bundled OV02C10 IPA data, `system_heap`, and
-PipeWire integration, loaded on-demand:
+PipeWire integration, loaded automatically after the core modules and display manager:
 ```bash
-vivobook-camera start   # loads module + restarts wireplumber
+systemctl status vivobook-camera.service
+vivobook-camera start   # manual fallback
 vivobook-camera status  # checks if camera is active
 ```
 
-**Why on-demand:** CCI adapters create dynamic I2C buses that shift Geni I2C numbering. Auto-loading at boot breaks keyboard and touchpad. The privacy shutter is purely mechanical (no GPIO/HID event — confirmed by monitoring dmesg during open/close).
+**Why late graphical autostart:** CCI adapters create dynamic I2C buses that
+shift Geni I2C numbering, so the module is never placed in `modules-load.d`.
+The service waits for the core module loader and display manager. A clean boot
+confirmed that touchpad and keyboard registered before the camera overlay. The
+privacy shutter is purely mechanical (no GPIO/HID event — confirmed by
+monitoring dmesg during open/close).
 
 **Result:** OV02C10 RGB camera is functional — 1920×1080 XRGB8888 still,
 1280×720 XRGB8888 video at ~30 fps, GNOME Snapshot and PipeWire apps.
-Revalidated after reboot on 2026-08-24. Fedora libcamera metadata/helper and
+Revalidated after an autostart reboot on 2026-08-24: service enabled/active,
+still 1080p, 60/60 720p30 frames, and PipeWire `Built-in Front Camera`. Fedora libcamera metadata/helper and
 kernel CAMCC clock warnings remain non-fatal on 7.2; there was no Oops or soft
 lockup. IR camera remains blocked.
 

@@ -20,8 +20,8 @@ env -u DISPLAY -u WAYLAND_DISPLAY \
   VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json \
   vulkaninfo --summary
 
-# A câmera é intencionalmente on-demand
-vivobook-camera start
+# A câmera inicia automaticamente após o display manager
+systemctl status vivobook-camera.service
 cam -l
 cam -c 1 --capture=1 --stream role=still,width=1920,height=1080,pixelformat=XRGB8888
 

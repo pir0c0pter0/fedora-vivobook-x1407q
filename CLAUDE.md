@@ -2,9 +2,9 @@
 
 ## O que é este projeto
 
-Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com Snapdragon X. A maior parte roda em runtime — 7 módulos DKMS, 1 patch `qcom-camss` histórico não instalado pelo setup, 1 fix Vulkan (LD_PRELOAD + ICD Turnip), 1 PTY sync proxy, 1 extensão GNOME, 1 fix UCM2 áudio, 1 fix suspend/lid, 1 fix cpufreq, 1 fix CDSP/FastRPC e 1 fix charge control; o sistema estável atual usa kernel custom 7.2.
+Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com Snapdragon X. A maior parte roda em runtime — 7 módulos DKMS, 1 patch `qcom-camss` histórico não instalado pelo setup, 1 fix Vulkan (LD_PRELOAD + ICD Turnip), 1 extensão GNOME, 1 fix UCM2 áudio, 1 fix suspend/lid, 1 fix cpufreq, 1 fix CDSP/FastRPC e 1 fix charge control; o sistema estável atual usa kernel custom 7.2.
 
-## Conquistas (19 itens; NPU parcial)
+## Conquistas (18 itens; NPU parcial)
 
 1. **Boot** — Custom ISO + Zenbook A14 DTB (mesmo die Qualcomm "Purwa")
 2. **WiFi** — `pwrseq_qcom_wcn` nativo + `wlanfw20.mbn` como `amss.bin` + board data `NFA765a_AS_SA_X14QA` (corrige MHI `-110` no Linux 7.2)
@@ -22,9 +22,8 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 14. **cpufreq** — Módulo `scmi_cpufreq` in-tree autoload via `/etc/modules-load.d/` — CPU escala 710MHz–2.96GHz, governor schedutil
 15. **CDSP/FastRPC** — Firmware `qccdsp8380.mbn` no initramfs; CDSP online e nó não seguro em `root:render 0660`. QNN registra a NPU, mas HTP inference está bloqueada no backend Qualcomm para SoC ID 635/X1P42100
 16. **Charge control** — udev rule seta limite 80% via `charge_control_end_threshold` — firmware aceita escrita, start auto 50%
-17. **Câmera RGB** — DKMS `vivobook_cam_fix` (DT overlay two-phase), `system_heap` e tuning OV02C10 — libcamera/Snapshot, still 1080p e vídeo 720p30, on-demand via `vivobook-camera start`
-18. **Claude Code flicker-free** — `sync_render` (PTY proxy com Mode 2026 synchronized output) — coalesce 5ms + render atômico, zero flicker no ARM/Wayland
-19. **Display color control** — DKMS `vivobook_color_ctrl` (CTM via DRM atomic commit do kernel) — msm_dpu expõe CTM/PCC mas não GAMMA_LUT, wl-gammarelay-rs e zwlr_gamma_control falham, módulo kernel bypassa restrição de DRM master
+17. **Câmera RGB** — DKMS `vivobook_cam_fix` (DT overlay two-phase), `system_heap` e tuning OV02C10 — autostart gráfico tardio, libcamera/Snapshot, still 1080p e vídeo 720p30
+18. **Display color control** — DKMS `vivobook_color_ctrl` (CTM via DRM atomic commit do kernel) — msm_dpu expõe CTM/PCC mas não GAMMA_LUT, wl-gammarelay-rs e zwlr_gamma_control falham, módulo kernel bypassa restrição de DRM master
 
 ## Regras — SEMPRE fazer
 
@@ -54,8 +53,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 | Firmware | initramfs via `/etc/dracut.conf.d/`, depois `sudo dracut --force` |
 | Vulkan fix | LD_PRELOAD em `/usr/local/lib64/` + `VK_DRIVER_FILES` via `~/.config/environment.d/` — MR 37622 corrige device select mas LVP ainda carrega sem o override, degradando rendering |
 | FastRPC | Expor somente `/dev/fastrpc-cdsp` não seguro ao grupo `render`; nunca relaxar permissões dos nós secure/ADSP |
-| Câmera | `vivobook-camera.service` on-demand; carrega `system_heap`; instala `/usr/share/libcamera/ipa/simple/ov02c10.yaml`; nunca habilitar no boot nem usar `rmmod` |
-| Terminal sync | `sync_render` PTY proxy em `/usr/local/bin/`, Mode 2026 synchronized output |
+| Câmera | `vivobook-camera.service` habilitado em `graphical.target`, após módulos core e display manager; carrega `system_heap`; instala `/usr/share/libcamera/ipa/simple/ov02c10.yaml`; nunca adicionar em `modules-load.d` nem usar `rmmod` |
 | Extensão GNOME | `~/.local/share/gnome-shell/extensions/<uuid>/`, ESM modules, GNOME 50 |
 | GRUB instalado | BLS + `custom.cfg` com `clk_ignore_unused mem_sleep_default=s2idle`; sem `pd_ignore_unused` |
 | Bateria sysfs | `/sys/class/power_supply/qcom-battmgr-bat/` (energy_now, power_now em µW) |
@@ -83,6 +81,8 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 - **Câmera IR (HM1092)** — sensor e binding Asus Purwa confirmados via pacote Qualcomm; AVDD/DOVDD dependem do pm8010, ausente no SPMI e sem resposta física aos testes RPMH. Continua bloqueada; não habilitar ou testar durante o trabalho da RGB. Findings em `docs/research/2026-04-11-ir-camera-discovery.md` e `docs/research/CAMERA_STATUS.md`.
 - **NPU QNN/HTP** — `onnxruntime-qnn 2.4.0` registra a NPU, mas o backend falha em inicializar no SoC real ID 635/X1P42100 mesmo como root e sem fallback CPU. Revalidar `tools/verify-qnn-npu.py` quando a Qualcomm publicar runtime compatível; não persistir spoof de SoC.
 - **Warnings da câmera no kernel 7.2** — captura funciona, mas Fedora libcamera 0.7.1 ainda avisa sobre static properties/helper do OV02C10 e o kernel emite `cam_cc_slow_ahb_clk_src`, `Lucid PLL latch failed` e `cam_cc_pll8 failed to enable`. O patch `docs/research/qcom-camss-x1e80100-cpas-ahb-fix.patch` só foi provado no 6.19.8 e não é instalado pelo setup; reconstruir por kernel antes de declarar logs limpos.
+- **Validação do autostart da câmera (2026-08-24)** — reboot físico com serviço `enabled/active`; teclado e touchpad registraram antes do overlay, auditoria 16/16, still 1080p, vídeo 60/60 em 720p30 e fonte PipeWire `Built-in Front Camera`; sem Oops/soft lockup.
+- **Estado global observado no mesmo reboot** — `systemd-analyze` = 1min36.997s (câmera = 3.415s, regressão restante separada) e `firewalld` falha porque `nft` retorna `Protocol not supported`; não documentar boot de 8s/firewall funcional como estado atual.
 - **1 device I2C desconhecido** — bus 4: 0x5b respondendo (0x43 e 0x76 não responderam no scan). Pode ser PS8833 (USB retimer) já mapeado no DTB.
 - **UCM2 upstream** — PR para alsa-ucm-conf adicionando Vivobook 14 ao regex
 - **Mesa issue #15106** — Aberto e fechado: device select via MR 37622 funciona no Mesa 25.3.6, mas LVP ainda é carregado sem `VK_DRIVER_FILES`, degradando rendering. `VK_DRIVER_FILES` mantido no setup. https://gitlab.freedesktop.org/mesa/mesa/-/issues/15106

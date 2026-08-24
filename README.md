@@ -46,7 +46,7 @@
 
 ## Achievements
 
-Starting from a laptop that **refused to boot** Linux, every fix was reverse-engineered from scratch — no upstream support, no documentation, no community guides for this model. **19 achievements** and counting.
+Starting from a laptop that **refused to boot** Linux, every fix was reverse-engineered from scratch — no upstream support, no documentation, no community guides for this model. **18 achievements** and counting.
 
 | # | Achievement | Method | Impact |
 |---|------------|--------|--------|
@@ -66,11 +66,10 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 14 | **CPU frequency scaling** | Autoload in-tree `scmi_cpufreq` module | CPU scales 710MHz–2.96GHz, battery savings + thermal protection |
 | 15 | **CDSP online** | CDSP firmware in initramfs + restricted FastRPC access | Hexagon Compute DSP boots at early boot; QNN/HTP inference remains vendor-blocked on X1P42100 |
 | 16 | **Battery charge limit** | udev rule sets 80% threshold | Charge stops at 80%, starts at 50% — extends battery lifespan |
-| 17 | **RGB camera functional** | `vivobook_cam_fix` + OV02C10 IPA data + PipeWire integration | OV02C10 on CCI1 — still 1080p, 720p30 video and Snapshot/PipeWire on demand; known libcamera/clock warnings remain on kernel 7.2 |
-| 18 | **Claude Code flicker-free** | PTY proxy `sync_render` with Mode 2026 synchronized output | Coalesces rapid terminal writes into atomic frames — zero flicker on ARM/Wayland |
-| 19 | **Display color control** | DKMS module `vivobook_color_ctrl` — CTM via DRM atomic commit from kernel space | msm_dpu exposes CTM/PCC but not GAMMA_LUT — wl-gammarelay-rs and zwlr_gamma_control both fail; kernel module bypasses DRM master restriction |
+| 17 | **RGB camera functional** | `vivobook_cam_fix` + OV02C10 IPA data + late graphical autostart | OV02C10 on CCI1 — still 1080p, 720p30 video and Snapshot/PipeWire after every boot; known libcamera/clock warnings remain on kernel 7.2 |
+| 18 | **Display color control** | DKMS module `vivobook_color_ctrl` — CTM via DRM atomic commit from kernel space | msm_dpu exposes CTM/PCC but not GAMMA_LUT — wl-gammarelay-rs and zwlr_gamma_control both fail; kernel module bypasses DRM master restriction |
 
-**7 custom kernel modules**, **1 documented `qcom-camss` patch**, **1 Vulkan driver fix**, **1 PTY sync proxy**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix** — most model-specific fixes run at runtime via DKMS/module overlays/LD_PRELOAD. The installed stable path uses the Zenbook A14 DTB from BLS plus the custom 7.2 kernel for early-boot fixes.
+**7 custom kernel modules**, **1 documented `qcom-camss` patch**, **1 Vulkan driver fix**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix** — most model-specific fixes run at runtime via DKMS/module overlays/LD_PRELOAD. The installed stable path uses the Zenbook A14 DTB from BLS plus the custom 7.2 kernel for early-boot fixes.
 
 ## Current Status
 
@@ -82,9 +81,10 @@ instalado com validação física da reconstrução atual.
 | Feature | Status | Notes |
 |---------|--------|-------|
 | **Boot** | :white_check_mark: Working | Fedora 44 via Zenbook A14 DTB |
-| **Boot time** | :white_check_mark: 8s | Was ~2min (see [Boot Time Fix](#8-boot-time-fix)) |
+| **Boot time** | :warning: Regressed | `systemd-analyze` measured 1min36.997s on the camera-autostart validation boot; the camera itself took 3.415s. The historical 8s result is no longer current (see [Boot Time Fix](#8-boot-time-fix)) |
 | **Display / GPU** | :white_check_mark: Working | Adreno X1-45, Freedreno/Turnip; Vulkan hardware validated after reboot (see [GPU Firmware Fix](#7-gpu-firmware-fix)) |
 | **WiFi** | :white_check_mark: Working | Native WCN sequencing + `wlanfw20.mbn` as `amss.bin` + X1407QA board data (see [WiFi Fix](#2-wifi-fix)) |
+| **Firewall** | :x: Not working | `firewalld` exits `3/NOTIMPLEMENTED`; `nft` reports `Protocol not supported` on the current custom 7.2 kernel |
 | **Bluetooth** | :white_check_mark: Working | FastConnect 6900 UART — out-of-the-box |
 | **Keyboard** | :white_check_mark: Working | DKMS module (see [Keyboard Fix](#3-keyboard-fix)) |
 | **Touchpad** | :white_check_mark: Working | Clickpad — `click-method: areas` for right-click (see [Touchpad Fix](#11-touchpad-right-click-fix)) |
@@ -101,22 +101,27 @@ instalado com validação física da reconstrução atual.
 | **Charge control** | :white_check_mark: Working | Charge limit 80% via udev rule (see [Charge Control Fix](#16-battery-charge-control-fix)) |
 | **USB-C DP alt-mode** | :white_check_mark: Working | Both ports, tested DP-2 up to 2560×1600. Device link errors at boot are cosmetic ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
 | **USB4 / TB3 tunneling** | :x: Not working | DP alt-mode works, but Thunderbolt tunneling is blocked by missing Qualcomm x1e80100 host/router support in current kernels. See [USB4/TB3 Status](#usb4tb3-status-mar-2026) |
-| **Camera RGB** | :warning: Working with warnings | OV02C10 via DKMS overlay; still/video and PipeWire work on demand. Fedora libcamera metadata warnings and non-fatal CAMCC clock warnings remain on kernel 7.2 (see [Camera Fix](#17-rgb-camera-fix)) |
+| **Camera RGB** | :warning: Working with warnings | Late graphical autostart validated after reboot; still/video and PipeWire work. Fedora libcamera metadata warnings and non-fatal CAMCC clock warnings remain on kernel 7.2 (see [Camera Fix](#17-rgb-camera-fix)) |
 | **Camera IR** | :x: Not working | pm8010 PMIC physically absent — sensor has no power (see [Camera Research](#camera-research)) |
-| **Display color control** | :white_check_mark: Working | CTM saturation + contrast via DKMS module (see [Display Color Control Fix](#19-display-color-control-fix)) |
+| **Display color control** | :white_check_mark: Working | CTM saturation + contrast via DKMS module (see [Display Color Control Fix](#18-display-color-control-fix)) |
 
 ### Accelerator validation snapshot — 2026-08-24
 
 | Component | Result after clean reboot | Evidence |
 |-----------|---------------------------|----------|
 | Vulkan GPU | **Working** | Vulkan 1.4.341, Mesa 26.0.3, `turnip Mesa driver`, Adreno X1-45 |
-| RGB camera | **Working on demand, warnings remain** | 1920×1080 XRGB8888 still; 60/60 frames at 1280×720, ~30 fps; no Oops/soft lockup |
+| RGB camera | **Autostart working, warnings remain** | Service enabled/active after clean reboot; 1920×1080 XRGB8888 still; 60/60 frames at 1280×720, ~30 fps; PipeWire source published; no Oops/soft lockup |
 | CDSP transport | **Working** | CDSP and ADSP `remoteproc` running; non-secure `/dev/fastrpc-cdsp` exposed only to group `render` |
 | NPU inference | **Blocked in vendor runtime** | QNN EP sees an NPU, but HTP backend initialization fails for real SoC ID `635`; the same failure occurs as root, so it is not a Unix permission problem |
 
 The setup does not expose `fastrpc-cdsp-secure` or ADSP nodes to regular users.
 The diagnostic verifier deliberately disables CPU fallback so a CPU execution
 cannot be mistaken for NPU acceleration.
+
+The hardware audit passed 16/16 after the autostart reboot. The status table
+still marks the independently observed boot-time regression, missing nftables
+support, NPU backend, USB4/TB3, IR camera, and known RGB camera warnings rather
+than presenting them as solved.
 
 ---
 
@@ -306,9 +311,9 @@ sudo bash setup-vivobook.sh
 ```
 
 This applies all fixes: DKMS modules, firmware initramfs configs, GRUB params,
-suspend/lid, UCM2 audio, Vulkan hardware ICD, `sync_render`, GNOME extension,
+suspend/lid, UCM2 audio, Vulkan hardware ICD, GNOME extension,
 charge control, cpufreq, restricted FastRPC access, OV02C10 libcamera data,
-PipeWire camera support, on-demand camera, and cleanup of old scripts.
+PipeWire camera support, late graphical camera autostart, and cleanup of old scripts.
 When run from the bundled payload it also auto-stages `modules/` → `/usr/src`
 and bundled `firmware/` → `/usr/lib/firmware` first, so it is self-contained.
 
@@ -373,7 +378,7 @@ and stops the runner.
 Camera IR, experimental USB4/TB3, and suspend/hibernate enablement are outside
 this workflow. Sleep targets remain masked. The runner does not load the RGB
 camera or display color-control modules; it leaves their existing activation
-state unchanged, and the RGB camera remains on demand. It also does not perform
+state unchanged. It also does not perform
 a general package update.
 
 Historical safety note: an earlier DKMS hook rewrote only the old
@@ -414,8 +419,8 @@ env -u DISPLAY -u WAYLAND_DISPLAY \
 cat /sys/class/remoteproc/remoteproc1/{name,state}
 stat -c '%A %U:%G %n' /dev/fastrpc-cdsp
 
-# RGB camera (on demand)
-vivobook-camera start
+# RGB camera (automatic after graphical input initialization)
+systemctl status vivobook-camera.service
 cam -l
 cam -c 1 --capture=1 --stream role=still,width=1920,height=1080,pixelformat=XRGB8888
 
@@ -454,8 +459,8 @@ sudo bash setup-vivobook.sh
 
 Run **after** installing Fedora and (if needed) extracting the firmware. Applies
 every hardware fix on the running system: DKMS modules, firmware initramfs,
-GRUB params, suspend/lid, UCM2 audio, Vulkan fix, `sync_render`, GNOME
-extension, charge control, cpufreq, dconf defaults, on-demand camera. Auto-stages
+GRUB params, suspend/lid, UCM2 audio, Vulkan fix, GNOME
+extension, charge control, cpufreq, dconf defaults, graphical camera autostart. Auto-stages
 bundled modules/firmware and cleans up deprecated scripts.
 
 ### Windows firmware dump
@@ -1145,11 +1150,11 @@ overlay, the OV02C10 sensor has no I2C bus, clocks, ISP pipeline, or power.
 2. Fedora `libcamera` + the bundled `ov02c10.yaml` IPA data — usable software ISP controls without a custom userspace build
 3. in-tree `qcom_camss` on kernel 7.2 — capture works, with known non-fatal CAMCC warnings; the historical patch must be rebuilt per kernel before it can suppress them
 
-Loaded on-demand:
+Loaded automatically after the core modules and display manager:
 
 ```bash
-# Load camera (creates /dev/video0, /dev/media0, etc.)
-vivobook-camera start
+# Verify automatic load (creates /dev/video0, /dev/media0, etc.)
+systemctl status vivobook-camera.service
 
 # Or manually:
 sudo systemctl start vivobook-camera
@@ -1158,7 +1163,12 @@ sudo systemctl start vivobook-camera
 vivobook-camera status
 ```
 
-**Why on-demand (not auto-load):** CCI adapters create dynamic I2C buses that shift Geni I2C bus numbering. Auto-loading at boot could break keyboard and touchpad modules. The privacy shutter is purely mechanical (no GPIO/HID event), so software detection of open/close is not possible.
+**Why late graphical autostart:** CCI adapters create dynamic I2C buses that
+shift Geni I2C bus numbering, so the camera is not placed in
+`modules-load.d`. The systemd unit waits for `systemd-modules-load.service` and
+`display-manager.service`; the validation boot registered touchpad and keyboard
+before loading the camera overlay. The privacy shutter is purely mechanical
+(no GPIO/HID event), so software detection of open/close is not possible.
 
 **What works:**
 - `cam -l` (enumerates the internal camera; metadata/helper warnings are expected)
@@ -1171,12 +1181,14 @@ vivobook-camera status
 - `rmmod vivobook_cam_fix` — CAMCC GDSC corruption on re-probe, kernel crash. Unload only via reboot
 - IR camera — pm8010 PMIC physically absent, sensor has no power (see [Camera Research](#camera-research))
 
-**Validated again after clean reboot (2026-08-24, Fedora libcamera 0.7.1):**
+**Validated again after clean reboot with autostart (2026-08-24, Fedora libcamera 0.7.1):**
 
-- service starts and creates the camera nodes
+- service is `enabled` and `active`; keyboard/touchpad initialized before the camera overlay
+- OV02C10 bound at `12-0036`, with `/dev/media0` and `/dev/video*` created
 - `cam -l` enumerates the camera while reporting missing static properties/helper from Fedora libcamera
 - 1920×1080 XRGB8888 still frame works
 - 60/60 1280×720 XRGB8888 video frames work at ~30 fps
+- WirePlumber publishes `Built-in Front Camera` for PipeWire applications
 - `system_heap` is loaded by the service and its DMA heap is available through uaccess
 - current kernel log still reports `cam_cc_slow_ahb_clk_src`, `Lucid PLL latch
   failed` and `cam_cc_pll8 failed to enable` during the test, but capture
@@ -1197,69 +1209,10 @@ Kernel-side `qcom_camss` diff used for the final warning fix: [docs/research/qco
 | **DKMS module** | `vivobook-cam-fix` v2.0 in `/usr/src/vivobook-cam-fix-2.0/` |
 | **Kernel CAMSS** | In-tree on 7.2; historical warning-suppression patch is documented but not installed by setup |
 | **libcamera state** | Fedora 0.7.1 + bundled `ov02c10.yaml`; functional with static-property/helper warnings |
-| **Service** | `vivobook-camera.service` (oneshot, on-demand, never enabled) |
+| **Service** | `vivobook-camera.service` (oneshot, enabled at `graphical.target` after core modules and display manager) |
 | **Command** | `vivobook-camera start\|status` |
 
-### 18. Claude Code Flicker Fix
-
-PTY proxy that eliminates terminal flicker from Claude Code on ARM/Wayland.
-
-**Problem:** Claude Code does erase+rewrite on every streamed token. On ARM/Wayland (Adreno GPU, Ptyxis/VTE), the redraw gap between erase and rewrite is visible — causing constant flicker during long conversations, especially during full conversation reloads/compaction. The Vulkan pool fix (#9) eliminates GPU-level fragmentation, but the terminal-level erase+rewrite pattern still produces flicker under sustained streaming.
-
-**Root cause (two-layer):**
-
-1. Each token from Claude Code (Ink.js) triggers cursor movement + erase + write, arriving as separate write syscalls at streaming speed.
-2. **Critical:** Claude Code already wraps every individual write with Mode 2026 markers (`\e[?2026h...\e[?2026l`). When sync_render adds an outer Mode 2026 pair, VTE receives nested pairs and doesn't reference-count them — it renders after each inner `\e[?2026l`, causing ~200 renders during a conversation reload instead of one per coalescing window.
-
-**Fix:** `sync_render` — a PTY proxy that:
-1. Coalesces rapid writes within a 5ms window (catches all erase+rewrite pairs, typically <1ms apart)
-2. **Strips inner `\e[?2026h`/`\e[?2026l` markers** from the coalesced buffer before wrapping
-3. Wraps the entire batch with a single outer Mode 2026 pair — VTE renders once per 5ms window
-
-```bash
-# Build
-gcc -o sync_render sync_render.c -lutil
-
-# Use
-./sync_render claude
-./sync_render -- claude -p "hello"
-
-# Install system-wide (optional)
-sudo cp sync_render /usr/local/bin/
-```
-
-**Result:** Zero flicker. Terminal renders each update atomically instead of showing intermediate erase states.
-
-The terminal profile runs every shell inside `sync_render` — so **all apps** launched from the terminal (claude, vim, any CLI) are automatically covered, with no per-app wrappers needed:
-
-```bash
-# Build and install sync_render
-gcc -o sync_render sync_render.c -lutil
-sudo cp sync_render /usr/local/bin/sync_render
-
-# Configure Ptyxis profile to use sync_render as shell wrapper
-UUID=$(dconf read /org/gnome/Ptyxis/default-profile-uuid | tr -d "'")
-dconf write /org/gnome/Ptyxis/Profiles/${UUID}/use-custom-command true
-dconf write /org/gnome/Ptyxis/Profiles/${UUID}/custom-command "'sync_render /bin/bash --login'"
-```
-
-Every new terminal tab starts `bash` running inside `sync_render`'s PTY proxy. Any app launched from that shell writes through the slave PTY, which sync_render intercepts at the master level — coalescing and Mode 2026 markers apply to everything transparently.
-
-| Property | Value |
-|----------|-------|
-| **Affected app** | Claude Code (and any CLI that does rapid erase+rewrite) |
-| **Root cause** | Nested Mode 2026 pairs (Ink.js wraps every write + sync_render outer) — VTE renders after each inner `\e[?2026l` |
-| **Fix** | `sync_render` strips inner markers + coalesces 5ms + wraps with single outer Mode 2026 pair |
-| **Protocol** | [Mode 2026 synchronized output](https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797) |
-| **Terminal support** | GNOME Terminal/VTE, kitty, foot, WezTerm (not alacritty) |
-| **Latency** | 5ms coalescing window — imperceptible |
-| **Activation** | Automatic — Ptyxis profile uses `sync_render /bin/bash --login` as shell |
-
-> **Note**: Mode 2026 is supported by VTE-based terminals (Ptyxis, GNOME Terminal, kgx). Combined with the Vulkan pool fix (#9) and hardware Vulkan (`VK_DRIVER_FILES`), this eliminates both GPU-level and terminal-level flicker on any Wayland compositor.
-
----
-
-### 19. Display Color Control Fix
+### 18. Display Color Control Fix
 
 CTM-based saturation and contrast control for the eDP panel via a kernel module that commits color matrices directly through the DRM atomic API.
 
@@ -1335,18 +1288,17 @@ echo "1.15" | sudo tee /sys/kernel/vivobook_color/contrast
     vivobook-kbd-fix-1.0/      → DKMS module source
     vivobook-bl-fix-1.0/       → DKMS module source
     vivobook-hotkey-fix-1.0/   → DKMS module source
-    vivobook-cam-fix-2.0/      → DKMS camera module (on-demand, NOT auto-loaded)
+    vivobook-cam-fix-2.0/      → DKMS camera module (late graphical autostart)
 
 /etc/systemd/system/
-    vivobook-camera.service    → On-demand camera loader (never enabled)
+    vivobook-camera.service    → Camera loader enabled for graphical.target
 
 /usr/local/lib64/
     vk_pool_fix.so             → Vulkan pool fix library
 
 /usr/local/bin/
     ptyxis-fixed               → Wrapper script with VK_DRIVER_FILES + LD_PRELOAD
-    sync_render                → PTY proxy binary
-    vivobook-camera            → Camera on-demand start/status command
+    vivobook-camera            → Camera fallback start/status command
 
 ~/.local/share/gnome-shell/extensions/battery-time@wifiteste/
     extension.js               → Battery time GNOME extension
@@ -1539,14 +1491,12 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 ```
 .
 ├── build-vivobook-iso.sh          # ISO builder — download, patch, flash
-├── setup-vivobook.sh              # Post-install — apply all 19 fixes
+├── setup-vivobook.sh              # Post-install — apply all fixes
 ├── vivobook-update.sh             # Safe update manager
 ├── extract-qcom-firmware.sh       # Extract firmware from Windows
 ├── install-battery-time-ext.sh    # GNOME battery time extension
 ├── post-install-protect.sh        # Retired legacy guard; exits without changes
 ├── vk_pool_fix.c                  # Vulkan descriptor pool fix (source)
-├── sync_render.c                  # PTY proxy for flicker-free terminal (source)
-├── sync_render                    # PTY proxy binary
 ├── x1p42100-asus-zenbook-a14-wifi-fix.dtb  # Custom DTB with WiFi regulator
 ├── docs/
 │   ├── GUIA-EXTRAIR-FIRMWARE.md   # Firmware extraction guide (PowerShell)
@@ -1581,7 +1531,9 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **Audio**: UCM2 fix modifies system file — will be overwritten by `alsa-ucm-conf` updates (needs upstream PR)
 - **GPU**: Firmware must be in initramfs for early loading. SELinux may block `.xz` firmware (`setenforce 0` as workaround)
 - **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
-- **Camera RGB**: Working on-demand (`vivobook-camera start`) for 1080p still, 720p30 video and PipeWire. Fedora libcamera still warns about OV02C10 static metadata/helper, and kernel 7.2 emits non-fatal CAMCC clock warnings. Not auto-loaded at boot; `rmmod` is unsafe — reboot to unload (see [Camera Fix](#17-rgb-camera-fix))
+- **Camera RGB**: Late graphical autostart works for 1080p still, 720p30 video and PipeWire. Fedora libcamera still warns about OV02C10 static metadata/helper, and kernel 7.2 emits non-fatal CAMCC clock warnings. `rmmod` is unsafe — reboot to unload (see [Camera Fix](#17-rgb-camera-fix))
+- **Boot-time regression**: the current validation boot took 1min36.997s; `vivobook-camera.service` accounts for 3.415s, so the remaining regression is separate from camera autostart.
+- **Firewall**: `firewalld.service` fails with `3/NOTIMPLEMENTED`, and `nft` reports `Protocol not supported`; the current custom 7.2 kernel needs its nftables configuration audited.
 - **Camera IR**: pm8010 PMIC physically absent — sensor has no power. No one upstream has IR camera working on Snapdragon X Linux (see [Camera Research](#camera-research))
 - **Suspend**: `deep` (S3) still crashes and stays disabled. `s2idle` validated 2026-08-24 on the installed `7.2.0-x1407qa` — 2 clean cycles, ~0.80W suspended (see [Lid Close Fix](#13-lid-close-fix)). No RTC alarm on pm8xxx — wake by lid/power button only ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
 - **USB4 / Thunderbolt 3**: Plain DP alt-mode works, but TB3 dock tunneling is blocked. `data_role` may initialize wrong, UCSI exposes no `ALT_MODE_OVERRIDE`, the normal firmware path never delivers `USBC_NOTIFY`, and current kernels still lack Qualcomm `x1e80100` host/router support. See [USB4/TB3 Status](#usb4tb3-status-mar-2026)

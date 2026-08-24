@@ -59,4 +59,14 @@ for algorithm in BlackLevel Awb Adjust Agc; do
     }
 done
 
+camera_systemd_root="$test_root/systemd-root"
+camera_unit="$camera_systemd_root/etc/systemd/system/vivobook-camera.service"
+install -Dm0644 \
+    "$repo/modules/vivobook-cam-fix-2.0/vivobook-camera.service" "$camera_unit"
+systemctl --root="$camera_systemd_root" enable vivobook-camera.service
+[[ -L "$camera_systemd_root/etc/systemd/system/graphical.target.wants/vivobook-camera.service" ]] || {
+    echo 'Camera service is not enabled for graphical boot' >&2
+    exit 1
+}
+
 echo 'PASS: accelerator runtime files are installed with the safe hardware contract'

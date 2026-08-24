@@ -124,14 +124,22 @@
   Vulkan 1.4.341, Mesa 26.0.3, `turnip Mesa driver` e Adreno X1-45. O setup fixa o
   ICD Freedreno em `~/.config/environment.d/vulkan-hardware.conf` para impedir
   que Lavapipe seja carregado junto.
-- **Câmera RGB pronta e on-demand:** o setup instala as ferramentas e plugins
+- **Câmera RGB pronta com autostart gráfico tardio:** o setup instala as
+  ferramentas e plugins
   libcamera/PipeWire, o tuning `ov02c10.yaml`, uma regra uaccess apenas para o
-  DMA heap `system`, e o serviço carrega `system_heap` antes da pilha CAMSS.
+  DMA heap `system`, e habilita o serviço em `graphical.target`, após módulos
+  core e display manager, para carregar `system_heap` antes da pilha CAMSS.
   Após reboot: still XRGB8888 1920×1080 (8.294.400 bytes) e vídeo XRGB8888
-  1280×720 com 60/60 frames a ~30 fps. O serviço é `static`, sem vínculo de
-  boot; `stop` não descarrega módulos e o unload seguro é reboot. Permanecem
+  1280×720 com 60/60 frames a ~30 fps; o serviço ficou `enabled/active`, a
+  fonte PipeWire foi publicada e teclado/touchpad registraram antes do overlay.
+  `stop` não descarrega módulos e o unload seguro é reboot. Permanecem
   avisos não fatais de propriedades/helper no libcamera e de clocks CAMCC no
   kernel 7.2; não houve Oops/soft lockup e as capturas concluíram.
+- **Estado global no mesmo reboot:** auditoria estável 16/16; boot total de
+  1min36.997s, dos quais 3.415s são da câmera. `firewalld` falha em
+  `3/NOTIMPLEMENTED` porque `nft` retorna `Protocol not supported`.
+- **Build ARM:** o builder principal e o fallback do setup usam `nproc`,
+  aproveitando todos os vCPUs que o WSL2 expõe sem um limite fixo em `-j8`.
 - **CDSP pronto, NPU parcial:** ADSP e CDSP estão `running`; somente
   `/dev/fastrpc-cdsp` não seguro é exposto em `root:render 0660`. Os nós secure
   e ADSP permanecem `root:root 0600`. `onnxruntime-qnn 2.4.0` registra o
@@ -178,15 +186,13 @@ zstd --long=31 -t windows-drivers/X1407QA_DRV-full-2026-08-19.tar.zst
 
 ## Pendente
 
-- **Handoff da câmera para a próxima sessão:** nenhuma mudança de auto-start foi
-  aplicada. `vivobook-camera.service` continua `static`/on-demand e
-  `ExecStop=/bin/true`. Isso é deliberado: `systemctl stop` só muda o estado da
-  unit para `inactive`; `vivobook_cam_fix`, `qcom_camss`, `ov02c10`, CAMCC e os
-  device nodes continuam carregados. **Não testar `rmmod`**: tentativas
-  anteriores corromperam o estado GDSC do CAMCC, causaram crash/soft-lockup e
-  travaram shutdown. O único unload conhecido como seguro é reboot. Antes de
-  decidir auto-start no boot, investigar e provar uma sequência segura de
-  teardown; não substituir o no-op de `ExecStop` por `modprobe -r`.
+- **Ciclo de vida da câmera:** `vivobook-camera.service` está habilitado para
+  `graphical.target` e mantém `ExecStop=/bin/true`. `systemctl stop` só muda o
+  estado da unit para `inactive`; `vivobook_cam_fix`, `qcom_camss`, `ov02c10`,
+  CAMCC e os device nodes continuam carregados. **Não testar `rmmod`**:
+  tentativas anteriores corromperam o estado GDSC do CAMCC, causaram
+  crash/soft-lockup e travaram shutdown. O único unload conhecido como seguro
+  é reboot; não substituir o no-op de `ExecStop` por `modprobe -r`.
 - Remover `x1407qa-fallback-fase2.conf` do notebook somente depois de soak
   suficiente da entry principal sem `pd_ignore_unused`.
 - Substituir o post-script morto do Anaconda pelo hook de `kernel-install`

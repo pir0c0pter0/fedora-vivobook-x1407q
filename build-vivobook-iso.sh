@@ -474,7 +474,7 @@ bundle_payload() {
     local dest="${ROOTFS}/opt/vivobook-fixes"
     sudo mkdir -p "$dest"
 
-    # Parte 2 + auxiliares (.c são compilados na Parte 2; sync_render pode vir pre-built)
+    # Parte 2 + auxiliares (.c são compilados na Parte 2)
     local payload=(
         setup-vivobook.sh
         extract-qcom-firmware.sh
@@ -482,15 +482,13 @@ bundle_payload() {
         vivobook-update.sh
         post-install-protect.sh
         vk_pool_fix.c
-        sync_render.c
-        sync_render
     )
     local copied=0 missing=()
     local f
     for f in "${payload[@]}"; do
         if [[ -f "${SCRIPT_DIR}/${f}" ]]; then
             sudo cp "${SCRIPT_DIR}/${f}" "$dest/"
-            [[ "$f" == *.sh || "$f" == sync_render ]] && sudo chmod +x "$dest/${f}"
+            [[ "$f" == *.sh ]] && sudo chmod +x "$dest/${f}"
             ((copied++))
         else
             missing+=("$f")
@@ -751,10 +749,10 @@ show_instructions() {
     info "  + GPU (Adreno X1-45)"
     info "  + Audio (UCM2 regex fix)"
     info "  + Terminal (vk_pool_fix.so)"
-    info "  + Claude Code flicker-free (sync_render)"
     info "  + CPU scaling (scmi_cpufreq)"
-    info "  + CDSP/NPU (firmware initramfs)"
-    info "  - Camera (patches upstream ~6.21/6.22)"
+    info "  + CDSP/FastRPC (firmware initramfs)"
+    info "  + Câmera RGB (autostart gráfico; warnings conhecidos)"
+    info "  - NPU QNN/HTP e câmera IR"
 }
 
 # ─── Build complete ISO ──────────────────────────────────────────────────────

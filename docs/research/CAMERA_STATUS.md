@@ -19,7 +19,7 @@
 | `Makefile` | CPP+DTC para 2 overlays → .dtbo → xxd → .h → kbuild .ko |
 | `dkms.conf` | DKMS config com PRE_BUILD para ambos overlays |
 | `ov02c10.yaml` | Tuning IPA simple compatível com libcamera 0.7.1 |
-| `vivobook-camera.service` | Loader on-demand; carrega `system_heap` e nunca deve ser habilitado no boot |
+| `vivobook-camera.service` | Loader habilitado em `graphical.target`, após módulos core e display manager; carrega `system_heap` |
 | `vivobook-camera` | Comando seguro `start\|status` |
 
 **Cópia no repo:** `modules/vivobook-cam-fix-2.0/`
@@ -69,10 +69,11 @@ Phase 2: CCI0 status="okay" + CCI1 status="okay"
 
 ## Operação segura e pendências
 
-### RGB concluída, sempre on-demand
+### RGB concluída, com autostart gráfico tardio
 
 - `cam -l`, captura libcamera, vídeo 720p30 e PipeWire/Snapshot funcionam.
-- O serviço carrega `system_heap`, reinicia WirePlumber e mantém CAMCC/CAMSS/CCI
+- O serviço inicia em `graphical.target`, depois de módulos core e display
+  manager, carrega `system_heap`, reinicia WirePlumber e mantém CAMCC/CAMSS/CCI
   ativos antes do primeiro stream.
 - A regra udev concede uaccess apenas ao DMA heap `system`; não altera outros
   heaps.
@@ -179,11 +180,11 @@ GPIO 237 — RGB camera reset  — active-low, output ✓
 ## Como Testar
 
 ```bash
-# Após boot limpo, confirmar que continua on-demand
-systemctl is-enabled vivobook-camera.service  # static
-systemctl is-active vivobook-camera.service   # inactive
+# Após boot limpo, confirmar o autostart tardio
+systemctl is-enabled vivobook-camera.service  # enabled
+systemctl is-active vivobook-camera.service   # active
 
-# Carregar a pilha pelo wrapper
+# Fallback manual, se necessário
 vivobook-camera start
 
 # Verificar probe
@@ -208,11 +209,11 @@ snapshot
 
 ### Validação física pós-reboot — 2026-08-24
 
-- service inicialmente `inactive` e módulo ausente, preservando o contrato
-  on-demand;
-- `vivobook-camera start` concluiu sem erro;
+- service `enabled/active` e módulo carregado automaticamente após o display
+  manager; teclado e touchpad registraram antes do overlay;
 - still XRGB8888 1920×1080: 8.294.400 bytes;
 - vídeo XRGB8888 1280×720: 60/60 frames, aproximadamente 30 fps;
+- PipeWire publicou `ov02c10 [libcamera]` e `Built-in Front Camera`;
 - `systemctl stop` manteve o módulo carregado, como projetado; unload só por
   reboot.
 - o tuning YAML foi usado, mas os avisos de metadata/helper do libcamera e os
@@ -230,15 +231,13 @@ snapshot
 
 ## Handoff — próxima sessão
 
-- Nenhum auto-start foi aplicado; o serviço permanece `static` e on-demand.
-- O app GNOME Snapshot deixou de encontrar a câmera porque uma captura `cam`
-  direta disputou `/dev/media0` enquanto o WirePlumber reconstruía o grafo
-  (`Failed to setup link ... Device or resource busy`). Reiniciar apenas
-  `wireplumber.service` publicou novamente `ov02c10 [libcamera]` e
-  `Built-in Front Camera`; não foi necessário recarregar módulos.
-- Próximo objetivo: estudar teardown seguro antes de alterar o ciclo de vida no
-  boot. Até lá, iniciar com `vivobook-camera start` e descarregar somente por
-  reboot.
+- O autostart gráfico tardio foi validado após reboot físico: serviço
+  `enabled/active`, auditoria 16/16, still/vídeo e fonte PipeWire funcionais,
+  sem Oops ou soft lockup.
+- Uma captura `cam` direta pode disputar `/dev/media0` enquanto o WirePlumber
+  reconstrói o grafo. Reiniciar apenas `wireplumber.service` republica a fonte;
+  não é necessário recarregar módulos.
+- Manter `ExecStop=/bin/true`; descarregar somente por reboot.
 
 ## Referências
 

@@ -387,15 +387,21 @@ check_camera_rgb() {
     fi
     enabled=$(systemctl is-enabled vivobook-camera.service 2>&1 || true)
     state=$(systemctl is-active vivobook-camera.service 2>/dev/null || true)
-    if [[ $enabled != disabled && $enabled != static ]]; then
-        fail camera-rgb "on-demand camera service is ${enabled:-not-found}, expected disabled"
+    if [[ $enabled != enabled ]]; then
+        fail camera-rgb "camera service is ${enabled:-not-found}, expected enabled"
         return
     fi
-    if [[ $state == active ]]; then
-        fail camera-rgb 'on-demand camera service is active without an explicit request'
+    if [[ $state != active || ! -d /sys/module/vivobook_cam_fix ]]; then
+        fail camera-rgb "camera autostart is ${state:-unknown} or its module is not loaded"
         return
     fi
-    pass camera-rgb 'RGB camera modules are available and the service remains on demand'
+    if ! compgen -G '/sys/bus/i2c/drivers/ov02c10/*-0036' >/dev/null ||
+       ! compgen -G '/dev/media*' >/dev/null ||
+       ! compgen -G '/dev/video*' >/dev/null; then
+        fail camera-rgb 'OV02C10 is not bound or its media nodes are unavailable'
+        return
+    fi
+    pass camera-rgb 'RGB camera autostart is active and OV02C10 is available'
 }
 
 check_color_control() {

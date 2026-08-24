@@ -1,8 +1,8 @@
 [Unit]
 Description=ASUS Vivobook X1407QA RGB Camera (OV02C10)
-# One-shot: load camera module on demand, never at boot
-# WARNING: Do NOT enable this service — camera overlay shifts I2C numbering
-# Use: sudo systemctl start vivobook-camera
+# Load only after the core modules and graphical input stack are ready, because
+# the camera overlay adds dynamically numbered CCI I2C adapters.
+After=systemd-modules-load.service display-manager.service
 
 [Service]
 Type=oneshot
@@ -27,4 +27,4 @@ ExecStartPost=/bin/sh -c 'loginctl list-sessions --no-legend | while read id res
 ExecStop=/bin/true
 
 [Install]
-# WantedBy intentionally omitted — NEVER auto-start
+WantedBy=graphical.target

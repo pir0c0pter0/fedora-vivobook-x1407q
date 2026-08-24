@@ -173,14 +173,15 @@ específicos produziram:
 | Área | Resultado físico |
 |------|------------------|
 | GPU/Vulkan | Vulkan 1.4.341, Mesa 26.0.3, Turnip/Adreno X1-45; sem Lavapipe |
-| Câmera RGB | still XRGB8888 1920×1080 de 8.294.400 bytes; vídeo XRGB8888 1280×720, 60/60 frames a ~30 fps; warnings não fatais descritos abaixo |
+| Câmera RGB | autostart `enabled/active`; still XRGB8888 1920×1080 de 8.294.400 bytes; vídeo XRGB8888 1280×720, 60/60 frames a ~30 fps; PipeWire publicado; warnings não fatais descritos abaixo |
 | Remoteproc | ADSP e CDSP em `running` |
 | FastRPC | `/dev/fastrpc-cdsp` em `root:render 0660`; nós secure/ADSP preservados em `root:root 0600` |
 | QNN | EP registra uma NPU, mas HTP falha em `QNN_BACKEND_ERROR_CANNOT_INITIALIZE` no SoC ID real `635`, inclusive como root |
 
 O setup agora reproduz os pré-requisitos de runtime: ferramentas Vulkan e
 libcamera/PipeWire, ICD Freedreno por usuário, tuning IPA do OV02C10, uaccess do
-DMA heap `system`, carregamento de `system_heap` no serviço da câmera e acesso
+DMA heap `system`, carregamento de `system_heap` no serviço da câmera habilitado
+em `graphical.target` após módulos core e display manager, e acesso
 restrito ao FastRPC CDSP não seguro. `tests/test-accelerator-runtime.sh` cobre
 esses arquivos e `tools/verify-qnn-npu.py` faz inferência com fallback CPU
 desabilitado para impedir falso positivo.
@@ -193,7 +194,11 @@ concluíram. O patch CAMSS que limpou esses avisos no 6.19.8 não é instalado
 pelo setup atual e precisa ser reconstruído por kernel.
 
 Conclusão operacional: GPU está concluída e câmera está funcional com warnings
-conhecidos. O transporte CDSP está
+conhecidos. O reboot físico confirmou teclado/touchpad antes do overlay,
+auditoria 16/16 e ausência de Oops/soft lockup. Nesse mesmo boot,
+`systemd-analyze` mediu 1min36.997s (3.415s da câmera) e o `firewalld` falhou em
+`3/NOTIMPLEMENTED` porque `nft` retornou `Protocol not supported`; são pendências
+separadas. O transporte CDSP está
 concluído; aceleração NPU via QNN/HTP depende de runtime Qualcomm compatível com
 X1P42100 e não deve ser marcada como funcional apenas porque o remoteproc está
 online.
