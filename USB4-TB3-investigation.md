@@ -33,15 +33,22 @@ O driver `phy-qcom-qmp-combo.ko` JÁ contém `x1e80100_usb43dp_serdes_tbl`
 (tabelas USB4 Gen3+DP), então o gargalo deixou de ser "achar um compatible
 mágico" e passou a ser subir a pilha USB4 completa com DT/graph corretos.
 
-## Thunderbolt no kernel: presente mas inativo
+## Thunderbolt no kernel: ausente no 7.2 (e inútil se ligado)
+
+O bloco abaixo descrevia o Fedora 6.19.8. **No kernel instalado hoje
+(`7.2.0-x1407qa`) o USB4 nem é compilado:**
 
 ```
-CONFIG_USB4=y               ✓ (built-in)
-thunderbolt.ko              ✓ (built-in)
-typec_thunderbolt.ko        ✓ (alias typec:id8087)
-/sys/bus/usb4/              ✗ NÃO EXISTE — sem host/router USB4 funcional para x1e80100
-boltctl → Security Level: unknown
+CONFIG_USB4                 ✗ "is not set" em /boot/config-7.2.0-x1407qa
+/sys/bus/thunderbolt/       ✗ não existe
+thunderbolt.ko              ✗ não existe em /lib/modules
 ```
+
+Isso **não é regressão a corrigir**: `CONFIG_USB4` ainda é `depends on PCI` e
+só constrói o NHI da Intel (`nhi.c`, dispositivo PCI). O host router da
+Qualcomm é MMIO e não aparece no barramento PCI, então ligar `CONFIG_USB4=y`
+no 7.2 não cria domínio nenhum — foi o que já acontecia no 6.19.8, onde
+`CONFIG_USB4=y` convivia com `/sys/bus/usb4/` inexistente.
 
 `typec_thunderbolt.ko` nunca carrega porque o altmode TB3 nunca é negociado.
 
@@ -234,17 +241,121 @@ para "carregar a pilha USB4 correta dentro do kernel".
 **ETA:** Desconhecido. Mesmo a árvore de desenvolvimento atual não expõe ainda
 um driver host/router Qualcomm pronto para teste imediato.
 
-**Próximo passo aprovado:**
-- Partir para kernel custom com patch stack USB4/TB3
-- Tratar `modules/vivobook-usb4-fix-1.0/` como apoio de diagnóstico, não como fix final
-- Usar o fluxo RPM Fedora já aplicado na investigação de `s2idle`
-- Plano de execução: `docs/research/2026-03-24-usb4-custom-kernel-plan.md`
-- Checklist exata do patch stack: `docs/research/2026-03-24-usb4-upstream-patch-checklist.md`
+## Reverificação 2026-08-24 — dump Windows + upstream
 
-**Alternativas enquanto o patch stack não chega:**
-- Hub USB-A ou dock USB4 passivo (sem requisito TB3)
-- Testar RFC patches do Konrad Dybcio via kernel custom
-- Acompanhar: https://lkml.org (buscar "Qualcomm USB4 Host Router")
+Feita depois de extrair `windows-drivers/X1407QA_DRV-full-2026-08-19.tar.zst`,
+para testar a hipótese de que os arquivos do Windows destravariam o caso.
+**Não destravam.** O bloqueio é um só: o driver não existe em lugar nenhum.
+
+### Upstream: três árvores, nenhuma tem o driver
+
+`drivers/thunderbolt/Makefile` é byte a byte o mesmo nas três, sem qcom:
+
+| Árvore | Resultado |
+|--------|-----------|
+| `torvalds/linux` master (pós-7.2) | sem qcom; `USB4 depends on PCI` |
+| `linux-next` | idêntico ao master |
+| `westeri/thunderbolt.git` branch `next` (árvore do mantenedor) | idêntico ao master |
+
+Ou seja: quase um ano depois da RFC de bindings (Set/2025), o `qcom_usb4.c`
+continua fora até da árvore onde ele entraria primeiro. Segue sem ETA.
+
+### O hardware, confirmado pelos INFs do dump
+
+O dump não traz driver aproveitável (é `.sys` ARM64/PE), mas fecha a
+identidade e a arquitetura do bloco:
+
+| Item | Valor | Origem |
+|------|-------|--------|
+| Bus enumerador | `ACPI\QCOM0C6D` — "Qualcomm(R) USB4(TM) Host Router Bus" | `QcUsb4Bus8380.inf` |
+| Host router | `USB4\QCOM0CD10001` | `QcUsb4Filter8380.inf` |
+| Driver do router | genérico da Microsoft, ligado a `ACPI\ACPI0015` | `usb4hostrouter.inf` |
+| Papel da Qualcomm | só um **lower filter** + o bus | ambos INFs |
+| Firmware do router | residente, versionado, build `Nov 24 2024`; só atualizável via CFU | strings de `QcUsb4Filter8380.sys` |
+
+Dois pontos que importam para o port Linux:
+
+1. **Não é PCI.** O router é MMIO e o Windows usa `ACPI0015` (host interface
+   padrão do spec USB4). Confere com a RFC: "Because it's not a PCIe device,
+   all the places where the code assumes it can freehand dereference
+   `nhi->pdev` are altered to instead consume a `struct device *`". É por isso
+   que o `nhi.c` da Intel não serve.
+2. **O router roda firmware num MCU.** A string
+   `Starting USB4 FW ver: %x.%x.%x (%s boot)` confirma; a RFC descreve o driver
+   Linux carregando esse firmware com `memcpy_toio()` e acordando o MCU.
+
+### O firmware NÃO está no dump
+
+Verificado, não presumido:
+
+- Os pacotes `qcusb4bus8380` e `qcusb4filter8380` têm exatamente **3 arquivos
+  cada** (`.cat`, `.inf`, `.sys`) — declarado nos `.ini` do DriverStore
+- Nenhum `.mbn` de USB4 no dump inteiro (5421 arquivos): só ADSP, CDSP, GPU,
+  WLAN, vídeo, câmera, HDCP, WPSS, AV1E, VSS
+- `QcUsb4Filter8380.sys` não tem blob embutido: as 8 seções PE são de driver
+  normal, e as strings de link training (`Lanes bonded successfully`,
+  `Phase 5. Preset %x`, `PHY ack lane %x`) ficam em `.data` — é o **catálogo de
+  trace** que o driver usa para decodificar eventos do MCU, não a imagem
+
+Coerente com o INF, que só declara `ComponentFirmwareUpdate` (atualização),
+nunca carga inicial: quem carrega o firmware do router é a cadeia UEFI/XBL.
+
+### Conclusão
+
+Faltam **duas** peças, e o dump não entrega nenhuma: o driver (Qualcomm-interno)
+e o firmware do MCU em formato carregável pelo Linux. O que o dump entrega é
+identidade e arquitetura — útil para revisar a série quando ela sair, inútil
+para fazer o dock funcionar hoje.
+
+Não há o que ligar, aplicar ou configurar. Reabrir só quando o `qcom_usb4.c`
+aparecer publicamente.
+
+## Dock USB-C sem túnel: validado 2026-08-24
+
+Contraprova prática de que o bloqueio é só o túnel, não a porta Type-C.
+**Dell Pro Smart Dock SD25** plugado na porta 0 (`a600000.usb`) enumerou
+inteiro por USB3 puro, sem host router nenhum envolvido.
+
+| Peça | Resultado |
+|------|-----------|
+| Hubs USB3 | Realtek `0bda:0480` / `0485` / `0481` — **USB 3.2 Gen 2, 10 Gbps** |
+| Hubs USB2 | Realtek `0bda:5480` / `5485` / `5481` |
+| Ethernet | RTL8156 2.5GbE (`0bda:8156`) → `r8152` → `enu1u4u1` a 5000M |
+| HIDs Dell | `413c:b0a2` (SD25), `b0a5` (VMM8431), `b06e` (K2 DOCK HID), `b0a1`/`b0a3`/`b0a4` |
+| Carga | contrato PD ativo (`power_operation_mode = usb_power_delivery`) |
+
+Dois estados que **parecem** falha e não são:
+
+- `enu1u4u1` em `NO-CARRIER` / `Link detected: no` — não havia cabo de rede no dock
+- bateria em `Not charging` — é o limite de 80% (`charge_control_end_threshold`)
+  segurando; comportamento normal da conquista #16
+
+**Vídeo: não testado.** Não havia monitor ligado ao dock durante o teste.
+`card0-DP-1` e `card0-DP-2` ficaram `disconnected`, e o plug do dock (t=1357s)
+não gerou nenhum evento de DP, altmode ou HPD — só enumeração USB. Sem display
+atado ao dock isso é o esperado, porque o VMM8431 (o MST hub de vídeo do dock)
+só pede entrada em DP alt mode quando tem HPD. **Não conta como bug**; refazer o
+teste com monitor plugado antes de concluir qualquer coisa sobre esse caminho.
+
+Conclusão: um dock USB-C que não dependa de túnel entrega hub 10 Gbps + 2.5GbE +
+carga hoje, sem kernel custom e sem driver faltando. O Elgato TB3 continua sem
+solução porque roteia *tudo* por dentro do túnel Thunderbolt.
+
+**Próximo passo aprovado (Mar/2026) — SUPERSEDIDO pela reverificação acima.**
+
+O plano de "kernel custom com patch stack USB4/TB3" pressupunha que existisse um
+patch stack para aplicar. Em 2026-08-24 foi confirmado que não existe: nem no
+master, nem no linux-next, nem na árvore do mantenedor. Buildar kernel custom
+hoje não muda nada — não há patch para colocar nele.
+
+`docs/research/2026-03-24-usb4-custom-kernel-plan.md` e
+`docs/research/2026-03-24-usb4-upstream-patch-checklist.md` continuam válidos
+como *procedimento*, para o dia em que a série sair. Não são acionáveis agora.
+
+**O que dá para fazer enquanto isso:**
+- Hub USB-A, ou dock USB-C que não dependa de túnel (USB3 + DP alt mode funcionam)
+- Acompanhar `westeri/thunderbolt.git` — é onde o `qcom_usb4.c` aparece primeiro
+- Gatilho para reabrir: `drivers/thunderbolt/Makefile` ganhar objeto qcom
 
 ## Artefatos iniciados no repositório
 
