@@ -976,7 +976,7 @@ cat /sys/devices/system/cpu/cpufreq/policy0/scaling_available_frequencies
 | **Default governor** | `schedutil` (frequency follows CPU utilization) |
 | **Firmware bug** | Duplicate OPP 2956800 for NCC1 — cosmetic, `EEXIST` logged but non-fatal |
 | **Config file** | `/etc/modules-load.d/scmi-cpufreq.conf` |
-| **Battery cap** | `scaling_max_freq` 2380800 on battery, 2956800 on AC/USB — udev rule `99-battery-freq-cap.rules` runs `/usr/local/bin/vivobook-battery-freq-cap` on `qcom-battmgr-ac`/`-usb` events and at boot coldplug |
+| **Battery cap** | `scaling_max_freq` 2380800 on battery, 2956800 on AC/USB — udev rule `99-battery-freq-cap.rules` runs `/usr/local/bin/vivobook-battery-freq-cap` on `qcom-battmgr-*` power_supply events and at boot coldplug (only the battery object emits change uevents on plug/unplug; the ac/usb objects stay silent) |
 
 ---
 

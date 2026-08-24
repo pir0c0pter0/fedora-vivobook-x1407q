@@ -1373,7 +1373,7 @@ for p in /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq; do
 done
 EOF
 chmod 755 /usr/local/bin/vivobook-battery-freq-cap
-echo 'SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-ac|qcom-battmgr-usb", RUN+="/usr/local/bin/vivobook-battery-freq-cap"' > /etc/udev/rules.d/99-battery-freq-cap.rules
+echo 'SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-*", RUN+="/usr/local/bin/vivobook-battery-freq-cap"' > /etc/udev/rules.d/99-battery-freq-cap.rules
 udevadm control --reload-rules 2>/dev/null || true
 /usr/local/bin/vivobook-battery-freq-cap || true
 log "  Charge limit 80% + freq cap 2.38GHz na bateria"

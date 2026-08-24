@@ -87,11 +87,14 @@ Esses flags são dreno constante desde o boot. Teste controlado:
 ## Fase 3 — cpufreq na bateria ✅ APLICADA (2026-08-24)
 
 - Cap aplicado: `/usr/local/bin/vivobook-battery-freq-cap` +
-  `/etc/udev/rules.d/99-battery-freq-cap.rules` (eventos de
-  `qcom-battmgr-ac`/`-usb` + coldplug no boot). Na bateria
-  `scaling_max_freq=2380800` (maior OPP ≤2.4GHz), no AC/USB 2956800.
-  Validado no hardware: cap ativo nas 2 policies em Discharging e re-aplicado
-  via `udevadm trigger`. Restore no AC valida no próximo plug do carregador.
+  `/etc/udev/rules.d/99-battery-freq-cap.rules` (match `qcom-battmgr-*` +
+  coldplug no boot). Na bateria `scaling_max_freq=2380800` (maior OPP
+  ≤2.4GHz), no AC/USB 2956800. **Validado com ciclo real desplug/replug**:
+  desplug → 2380800 automático, plug (USB-C, `qcom-battmgr-usb` online) →
+  2956800 automático. Detalhe descoberto no teste: só o objeto
+  `qcom-battmgr-bat` emite uevent de change no plug/desplug — os objetos
+  ac/usb ficam mudos, por isso o match estreito `ac|usb` da primeira versão
+  nunca disparava.
 - Idle governor `menu` → `teo` (`cpuidle.governor=teo`): **não aplicado** —
   marginal, medir antes de manter.
 
