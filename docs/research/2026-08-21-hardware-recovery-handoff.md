@@ -29,9 +29,12 @@ Do not continue this work on `main`. Continue in the worktree above.
   `kernel/verify-linux-usb-config-preservation.sh`. In particular,
   `CONFIG_USB_NET_RNDIS_HOST=m` and the `rndis_host.ko` artifact are mandatory.
   A candidate with any USB/Type-C config drift must not be installed or booted.
-  The trusted reference SHA-256 is
+  The original recovery baseline SHA-256 is
   `35763b73052b88433a942b93555a1ce931d81abc67f9e465821c10683ac26199`;
-  a transferred or overridden reference must match it exactly.
+  it remains accepted only as a migration source. The corrected current
+  baseline, with nftables support, is
+  `3e700f840552ec3ed8ad13afee21167bdcd002cca8ffd10185f00daeb95dba70`.
+  A transferred or overridden reference must match one of those two hashes.
 - Do not enable or test the IR camera.
 - Do not enable or test USB4/TB3.
 - Do not enable suspend or hibernate.

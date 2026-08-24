@@ -3,7 +3,8 @@ set -euo pipefail
 
 REFERENCE_CONFIG=${1:?usage: verify-linux-usb-config-preservation.sh REFERENCE_CONFIG CANDIDATE_CONFIG}
 CANDIDATE_CONFIG=${2:?usage: verify-linux-usb-config-preservation.sh REFERENCE_CONFIG CANDIDATE_CONFIG}
-readonly EXPECTED_REFERENCE_SHA256=35763b73052b88433a942b93555a1ce931d81abc67f9e465821c10683ac26199
+readonly EXPECTED_REFERENCE_SHA256=3e700f840552ec3ed8ad13afee21167bdcd002cca8ffd10185f00daeb95dba70
+readonly MIGRATION_REFERENCE_SHA256=35763b73052b88433a942b93555a1ce931d81abc67f9e465821c10683ac26199
 
 for config_file in "$REFERENCE_CONFIG" "$CANDIDATE_CONFIG"; do
     [[ -f $config_file && ! -L $config_file && -r $config_file ]] || {
@@ -13,12 +14,15 @@ for config_file in "$REFERENCE_CONFIG" "$CANDIDATE_CONFIG"; do
 done
 
 reference_sha256=$(sha256sum -- "$REFERENCE_CONFIG" | awk '{print $1}')
-[[ $reference_sha256 == "$EXPECTED_REFERENCE_SHA256" ]] || {
-    echo 'ERROR: reference config does not match the trusted 7.2.0-x1407qa baseline' >&2
-    echo "expected: $EXPECTED_REFERENCE_SHA256" >&2
-    echo "actual:   $reference_sha256" >&2
-    exit 1
-}
+case "$reference_sha256" in
+    "$EXPECTED_REFERENCE_SHA256"|"$MIGRATION_REFERENCE_SHA256") ;;
+    *)
+        echo 'ERROR: reference config does not match a trusted 7.2.0-x1407qa baseline' >&2
+        echo "expected: $EXPECTED_REFERENCE_SHA256 or $MIGRATION_REFERENCE_SHA256" >&2
+        echo "actual:   $reference_sha256" >&2
+        exit 1
+        ;;
+esac
 
 grep -qxF 'CONFIG_USB_NET_RNDIS_HOST=m' "$REFERENCE_CONFIG" || {
     echo 'ERROR: stable reference lacks CONFIG_USB_NET_RNDIS_HOST=m' >&2

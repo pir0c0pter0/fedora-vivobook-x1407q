@@ -13,7 +13,7 @@
 > rejeitados se alterarem qualquer opção USB/Type-C/UCSI ou perderem
 > `CONFIG_USB_NET_RNDIS_HOST=m`. A referência confiável é
 > `/boot/config-7.2.0-x1407qa` com SHA-256
-> `35763b73052b88433a942b93555a1ce931d81abc67f9e465821c10683ac26199`.
+> `3e700f840552ec3ed8ad13afee21167bdcd002cca8ffd10185f00daeb95dba70`.
 > Experimentos de Wi-Fi nunca devem resetar,
 > descarregar, reconfigurar ou colocar USB em risco.
 
@@ -84,7 +84,7 @@ instalado com validação física da reconstrução atual.
 | **Boot time** | :warning: Regressed | `systemd-analyze` measured 1min36.997s on the camera-autostart validation boot; the camera itself took 3.415s. The historical 8s result is no longer current (see [Boot Time Fix](#8-boot-time-fix)) |
 | **Display / GPU** | :white_check_mark: Working | Adreno X1-45, Freedreno/Turnip; Vulkan hardware validated after reboot (see [GPU Firmware Fix](#7-gpu-firmware-fix)) |
 | **WiFi** | :white_check_mark: Working | Native WCN sequencing + `wlanfw20.mbn` as `amss.bin` + X1407QA board data (see [WiFi Fix](#2-wifi-fix)) |
-| **Firewall** | :x: Not working | `firewalld` exits `3/NOTIMPLEMENTED`; `nft` reports `Protocol not supported` on the current custom 7.2 kernel |
+| **Firewall** | :white_check_mark: Working | nftables + NetBIOS conntrack helper enabled in the custom 7.2 kernel; `firewalld` validated `active/running` after restart on 2026-08-24 |
 | **Bluetooth** | :white_check_mark: Working | FastConnect 6900 UART — out-of-the-box |
 | **Keyboard** | :white_check_mark: Working | DKMS module (see [Keyboard Fix](#3-keyboard-fix)) |
 | **Touchpad** | :white_check_mark: Working | Clickpad — `click-method: areas` for right-click (see [Touchpad Fix](#11-touchpad-right-click-fix)) |
@@ -119,8 +119,8 @@ The diagnostic verifier deliberately disables CPU fallback so a CPU execution
 cannot be mistaken for NPU acceleration.
 
 The hardware audit passed 16/16 after the autostart reboot. The status table
-still marks the independently observed boot-time regression, missing nftables
-support, NPU backend, USB4/TB3, IR camera, and known RGB camera warnings rather
+still marks the independently observed boot-time regression, NPU backend,
+USB4/TB3, IR camera, and known RGB camera warnings rather
 than presenting them as solved.
 
 ---
@@ -1533,7 +1533,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
 - **Camera RGB**: Late graphical autostart works for 1080p still, 720p30 video and PipeWire. Fedora libcamera still warns about OV02C10 static metadata/helper, and kernel 7.2 emits non-fatal CAMCC clock warnings. `rmmod` is unsafe — reboot to unload (see [Camera Fix](#17-rgb-camera-fix))
 - **Boot-time regression**: the current validation boot took 1min36.997s; `vivobook-camera.service` accounts for 3.415s, so the remaining regression is separate from camera autostart.
-- **Firewall**: `firewalld.service` fails with `3/NOTIMPLEMENTED`, and `nft` reports `Protocol not supported`; the current custom 7.2 kernel needs its nftables configuration audited.
+- **~~Firewall~~**: Fixed — the custom 7.2 config now builds nftables, FIB/reject/NAT expressions, and the NetBIOS conntrack helper required by the FedoraWorkstation zone. `firewalld` is `active/running` and the generated ruleset is loaded.
 - **Camera IR**: pm8010 PMIC physically absent — sensor has no power. No one upstream has IR camera working on Snapdragon X Linux (see [Camera Research](#camera-research))
 - **Suspend**: `deep` (S3) still crashes and stays disabled. `s2idle` validated 2026-08-24 on the installed `7.2.0-x1407qa` — 2 clean cycles, ~0.80W suspended (see [Lid Close Fix](#13-lid-close-fix)). No RTC alarm on pm8xxx — wake by lid/power button only ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
 - **USB4 / Thunderbolt 3**: Plain DP alt-mode works, but TB3 dock tunneling is blocked. `data_role` may initialize wrong, UCSI exposes no `ALT_MODE_OVERRIDE`, the normal firmware path never delivers `USBC_NOTIFY`, and current kernels still lack Qualcomm `x1e80100` host/router support. See [USB4/TB3 Status](#usb4tb3-status-mar-2026)

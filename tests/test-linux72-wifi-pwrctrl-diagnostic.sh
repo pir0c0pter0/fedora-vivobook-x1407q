@@ -169,6 +169,7 @@ verify_version=7.2.0-x1407qa-wifi-pwrctrl-diag
 reference_config=$test_root/stable-reference.config
 mkdir -p \
     "$verify_fixture/boot/dtb/qcom" \
+    "$verify_fixture/lib/modules/$verify_version/extra" \
     "$verify_fixture/lib/modules/$verify_version/kernel/drivers/net/usb" \
     "$test_root/bin"
 printf 'ARM64 image\nLinux version %s test\n%s\n' \
@@ -184,6 +185,7 @@ printf '%s\n' \
     'CONFIG_USB=y' \
     'CONFIG_USB_USBNET=m' \
     'CONFIG_USB_NET_CDCETHER=m' \
+    'CONFIG_USB_NET_CDC_NCM=m' \
     'CONFIG_USB_NET_RNDIS_HOST=m' \
     'CONFIG_TYPEC=m' \
     'CONFIG_TYPEC_UCSI=m' \
@@ -202,10 +204,36 @@ printf '%s\n' \
     'CONFIG_EROFS_FS=y' \
     'CONFIG_EROFS_FS_ZIP=y' \
     'CONFIG_DM_SNAPSHOT=m' \
+    'CONFIG_FW_LOADER_COMPRESS=y' \
+    'CONFIG_FW_LOADER_COMPRESS_XZ=y' \
+    'CONFIG_HID=y' \
+    'CONFIG_I2C_HID_CORE=y' \
+    'CONFIG_BACKLIGHT_CLASS_DEVICE=y' \
+    'CONFIG_REGULATOR=y' \
+    'CONFIG_SPMI=y' \
+    'CONFIG_MFD_SPMI_PMIC=y' \
+    'CONFIG_REGMAP_SPMI=y' \
+    'CONFIG_I2C_QCOM_GENI=m' \
+    'CONFIG_ATH11K=m' \
+    'CONFIG_ATH11K_PCI=m' \
     'CONFIG_QCOM_Q6V5_PAS=m' \
     'CONFIG_QCOM_Q6V5_ADSP=m' \
     'CONFIG_QCOM_PMIC_GLINK=m' \
     'CONFIG_BATTERY_QCOM_BATTMGR=m' \
+    'CONFIG_USB_NET_CDC_NCM=m' \
+    'CONFIG_BT_BNEP=m' \
+    'CONFIG_POWER_SEQUENCING_QCOM_WCN=m' \
+    'CONFIG_NF_TABLES=m' \
+    'CONFIG_NF_CONNTRACK_BROADCAST=m' \
+    'CONFIG_NF_CONNTRACK_NETBIOS_NS=m' \
+    'CONFIG_NF_TABLES_INET=y' \
+    'CONFIG_NFT_CT=m' \
+    'CONFIG_NFT_NAT=m' \
+    'CONFIG_NFT_REJECT=m' \
+    'CONFIG_NFT_REJECT_INET=m' \
+    'CONFIG_NFT_FIB_IPV4=m' \
+    'CONFIG_NFT_FIB_IPV6=m' \
+    'CONFIG_NFT_FIB_INET=m' \
     > "$verify_fixture/boot/config-$verify_version"
 (cd "$verify_fixture" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 cat > "$test_root/bin/file" <<'EOF'
@@ -222,14 +250,27 @@ module=$3
 case "$field" in
     name) sed -n 's/^name=//p' "$module" | grep -m1 . ;;
     vermagic) sed -n 's/^vermagic=//p' "$module" | grep -m1 . ;;
+    softdep) sed -n 's/^softdep=//p' "$module" ;;
     *) exit 2 ;;
 esac
 EOF
 chmod +x "$test_root/bin/modinfo"
+cat > "$test_root/bin/modprobe" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$test_root/bin/modprobe"
 
 printf 'name=rndis_host\nvermagic=%s SMP preempt mod_unload aarch64\n' \
     "$verify_version" > \
     "$verify_fixture/lib/modules/$verify_version/kernel/drivers/net/usb/rndis_host.ko"
+for module in wcn_regulator_fix vivobook_hotkey_fix vivobook_kbd_fix vivobook_bl_fix; do
+    printf 'name=%s\nvermagic=%s SMP preempt mod_unload aarch64\n' \
+        "$module" "$verify_version" > \
+        "$verify_fixture/lib/modules/$verify_version/extra/$module.ko"
+done
+printf 'softdep=pre: pwrseq_qcom_wcn\n' >> \
+    "$verify_fixture/lib/modules/$verify_version/extra/wcn_regulator_fix.ko"
 (cd "$verify_fixture" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 
 verify_test_repo=$test_root/verify-repo

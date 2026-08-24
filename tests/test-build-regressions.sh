@@ -52,6 +52,17 @@ CONFIG_QCOM_Q6V5_PAS=m
 CONFIG_QCOM_Q6V5_ADSP=m
 CONFIG_QCOM_PMIC_GLINK=m
 CONFIG_BATTERY_QCOM_BATTMGR=m
+CONFIG_NF_TABLES=m
+CONFIG_NF_CONNTRACK_BROADCAST=m
+CONFIG_NF_CONNTRACK_NETBIOS_NS=m
+CONFIG_NF_TABLES_INET=y
+CONFIG_NFT_CT=m
+CONFIG_NFT_NAT=m
+CONFIG_NFT_REJECT=m
+CONFIG_NFT_REJECT_INET=m
+CONFIG_NFT_FIB_IPV4=m
+CONFIG_NFT_FIB_IPV6=m
+CONFIG_NFT_FIB_INET=m
 EOF
 cat > "$tmp/bin/file" <<'EOF'
 #!/usr/bin/env bash
@@ -76,7 +87,7 @@ real_sha256sum=$(command -v sha256sum)
 cat > "$tmp/bin/sha256sum" <<EOF
 #!/usr/bin/env bash
 if [[ \${1:-} == -- && \${2:-} == '$tmp/reference-config' ]]; then
-    echo '35763b73052b88433a942b93555a1ce931d81abc67f9e465821c10683ac26199  $tmp/reference-config'
+    echo '3e700f840552ec3ed8ad13afee21167bdcd002cca8ffd10185f00daeb95dba70  $tmp/reference-config'
     exit 0
 fi
 exec '$real_sha256sum' "\$@"
@@ -110,6 +121,30 @@ fi
 MOCK_SOFTDEP='pre: pwrseq_qcom_wcn' X1407QA_REFERENCE_CONFIG="$tmp/reference-config" \
     PATH="$tmp/bin:$PATH" \
     "$repo/kernel/verify-linux-7.2-x1407qa.sh" "$tmp/artifacts" >/dev/null
+
+kernel_config=$tmp/artifacts/boot/config-7.2.0-x1407qa
+cp "$kernel_config" "$tmp/firewall-config"
+for required_config in \
+    CONFIG_NF_TABLES=m CONFIG_NF_CONNTRACK_BROADCAST=m \
+    CONFIG_NF_CONNTRACK_NETBIOS_NS=m CONFIG_NF_TABLES_INET=y \
+    CONFIG_NFT_CT=m CONFIG_NFT_NAT=m CONFIG_NFT_REJECT=m \
+    CONFIG_NFT_REJECT_INET=m CONFIG_NFT_FIB_IPV4=m \
+    CONFIG_NFT_FIB_IPV6=m CONFIG_NFT_FIB_INET=m; do
+    cp "$tmp/firewall-config" "$kernel_config"
+    sed -i "/^${required_config%=*}=/d" "$kernel_config"
+    write_sums
+    firewall_output=$tmp/firewall-verifier.output
+    if MOCK_SOFTDEP='pre: pwrseq_qcom_wcn' \
+        X1407QA_REFERENCE_CONFIG="$tmp/reference-config" PATH="$tmp/bin:$PATH" \
+        "$repo/kernel/verify-linux-7.2-x1407qa.sh" "$tmp/artifacts" \
+        >"$firewall_output" 2>&1; then
+        fail "kernel verifier accepted artifacts without $required_config"
+    fi
+    grep -qF "kernel config missing $required_config" "$firewall_output" || \
+        fail "kernel verifier did not identify missing $required_config"
+done
+cp "$tmp/firewall-config" "$kernel_config"
+write_sums
 
 root_verifier=$repo/tools/verify-live-root.sh
 [[ -x $root_verifier ]] || fail 'live-root verifier is missing'

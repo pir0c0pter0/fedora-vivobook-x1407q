@@ -198,7 +198,10 @@ conhecidos. O reboot físico confirmou teclado/touchpad antes do overlay,
 auditoria 16/16 e ausência de Oops/soft lockup. Nesse mesmo boot,
 `systemd-analyze` mediu 1min36.997s (3.415s da câmera) e o `firewalld` falhou em
 `3/NOTIMPLEMENTED` porque `nft` retornou `Protocol not supported`; são pendências
-separadas. O transporte CDSP está
+separadas naquele momento. Mais tarde no mesmo dia, o config do kernel recebeu nftables e os
+helpers conntrack exigidos pela zona FedoraWorkstation; após instalar os
+módulos, `firewalld` foi validado `active/running` com o ruleset carregado. O
+transporte CDSP está
 concluído; aceleração NPU via QNN/HTP depende de runtime Qualcomm compatível com
 X1P42100 e não deve ser marcada como funcional apenas porque o remoteproc está
 online.

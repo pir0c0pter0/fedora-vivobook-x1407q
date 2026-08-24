@@ -52,9 +52,35 @@ CONFIG_EROFS_FS=y
 CONFIG_EROFS_FS_ZIP=y
 CONFIG_DM_SNAPSHOT=m
 CONFIG_UNRELATED_REFERENCE=y
+# CONFIG_NF_TABLES is not set
+# CONFIG_NF_CONNTRACK_BROADCAST is not set
+# CONFIG_NF_CONNTRACK_NETBIOS_NS is not set
+# CONFIG_NF_TABLES_INET is not set
+# CONFIG_NFT_CT is not set
+# CONFIG_NFT_NAT is not set
+# CONFIG_NFT_REJECT is not set
+# CONFIG_NFT_REJECT_INET is not set
+# CONFIG_NFT_FIB_IPV4 is not set
+# CONFIG_NFT_FIB_IPV6 is not set
+# CONFIG_NFT_FIB_INET is not set
 EOF
 
 reference_hash=$(sha256sum "$reference" | awk '{print $1}')
+old_reference_hash=35763b73052b88433a942b93555a1ce931d81abc67f9e465821c10683ac26199
+fake_hash_bin=$test_root/hash-bin
+real_sha256sum=$(command -v sha256sum)
+mkdir -p "$fake_hash_bin"
+cat > "$fake_hash_bin/sha256sum" <<EOF
+#!/usr/bin/env bash
+if [[ \${1:-} == -- && \${2:-} == '$reference' ]]; then
+    echo '$old_reference_hash  $reference'
+    exit 0
+fi
+exec '$real_sha256sum' "\$@"
+EOF
+chmod +x "$fake_hash_bin/sha256sum"
+PATH="$fake_hash_bin:$PATH" "$guard" "$reference" "$reference" >/dev/null
+
 test_guard=$test_root/verify-linux-usb-config-preservation.sh
 sed "s/^readonly EXPECTED_REFERENCE_SHA256=.*/readonly EXPECTED_REFERENCE_SHA256=$reference_hash/" \
     "$guard" > "$test_guard"
@@ -124,19 +150,28 @@ mkdir -p "$source_root/scripts" "$build_root" "$fake_bin"
 cat > "$source_root/scripts/config" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ $1 == --file && $3 == --enable && $# == 4 ]]
+[[ $1 == --file && $# == 4 ]]
 config_file=$2
 symbol=CONFIG_$4
 case "$symbol" in
-    CONFIG_PHY_QCOM_QMP_COMBO|CONFIG_USB_DWC3_QCOM|CONFIG_TYPEC_UCSI|CONFIG_UCSI_PMIC_GLINK) ;;
+    CONFIG_NF_TABLES|CONFIG_NF_CONNTRACK_BROADCAST|\
+    CONFIG_NF_CONNTRACK_NETBIOS_NS|CONFIG_NF_TABLES_INET|\
+    CONFIG_NFT_CT|CONFIG_NFT_NAT|\
+    CONFIG_NFT_REJECT|CONFIG_NFT_REJECT_INET|CONFIG_NFT_FIB_IPV4|\
+    CONFIG_NFT_FIB_IPV6|CONFIG_NFT_FIB_INET) ;;
     *) exit 0 ;;
 esac
+case "$3" in
+    --enable) value=y ;;
+    --module) value=m ;;
+    *) exit 1 ;;
+esac
 if grep -q "^$symbol=" "$config_file"; then
-    sed -i "s/^$symbol=.*/$symbol=y/" "$config_file"
+    sed -i "s/^$symbol=.*/$symbol=$value/" "$config_file"
 elif grep -q "^# $symbol is not set$" "$config_file"; then
-    sed -i "s/^# $symbol is not set$/$symbol=y/" "$config_file"
+    sed -i "s/^# $symbol is not set$/$symbol=$value/" "$config_file"
 else
-    printf '%s=y\n' "$symbol" >> "$config_file"
+    printf '%s=%s\n' "$symbol" "$value" >> "$config_file"
 fi
 EOF
 cat > "$fake_bin/make" <<'EOF'
@@ -158,7 +193,18 @@ chmod +x "$source_root/scripts/config" "$fake_bin/make"
 
 PATH="$fake_bin:$PATH" \
     "$test_prepare" "$source_root" "$build_root" "$reference" >/dev/null
-cmp "$reference" "$build_root/.config"
+"$test_guard" "$reference" "$build_root/.config" >/dev/null
+for required_config in \
+    CONFIG_NF_TABLES=m CONFIG_NF_CONNTRACK_BROADCAST=m \
+    CONFIG_NF_CONNTRACK_NETBIOS_NS=m \
+    CONFIG_NF_TABLES_INET=y CONFIG_NFT_CT=m \
+    CONFIG_NFT_NAT=m CONFIG_NFT_REJECT=m CONFIG_NFT_REJECT_INET=m \
+    CONFIG_NFT_FIB_IPV4=m CONFIG_NFT_FIB_IPV6=m CONFIG_NFT_FIB_INET=m; do
+    grep -qxF "$required_config" "$build_root/.config" || {
+        echo "config preparation omitted firewalld dependency $required_config" >&2
+        exit 1
+    }
+done
 
 drift_build=$test_root/drift-build
 mkdir -p "$drift_build"
