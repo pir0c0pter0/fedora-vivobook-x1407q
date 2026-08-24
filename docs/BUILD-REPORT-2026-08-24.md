@@ -162,3 +162,38 @@ Editado com verificação separada (workflows editar→verificar):
   probe real (`gnome-extensions list`), mesmo estilo do `pactl info` do
   áudio. Revalidado 16/16 no notebook.
 - Percentual de bateria no live segue pendência separada.
+
+## 8. Segunda validação pós-reboot — aceleradores e câmera
+
+O notebook foi reiniciado novamente antes da publicação destas mudanças. No
+segundo reboot limpo desta etapa, a versão atual da auditoria estável passou
+16/16 e os testes
+específicos produziram:
+
+| Área | Resultado físico |
+|------|------------------|
+| GPU/Vulkan | Vulkan 1.4.341, Mesa 26.0.3, Turnip/Adreno X1-45; sem Lavapipe |
+| Câmera RGB | still XRGB8888 1920×1080 de 8.294.400 bytes; vídeo XRGB8888 1280×720, 60/60 frames a ~30 fps; warnings não fatais descritos abaixo |
+| Remoteproc | ADSP e CDSP em `running` |
+| FastRPC | `/dev/fastrpc-cdsp` em `root:render 0660`; nós secure/ADSP preservados em `root:root 0600` |
+| QNN | EP registra uma NPU, mas HTP falha em `QNN_BACKEND_ERROR_CANNOT_INITIALIZE` no SoC ID real `635`, inclusive como root |
+
+O setup agora reproduz os pré-requisitos de runtime: ferramentas Vulkan e
+libcamera/PipeWire, ICD Freedreno por usuário, tuning IPA do OV02C10, uaccess do
+DMA heap `system`, carregamento de `system_heap` no serviço da câmera e acesso
+restrito ao FastRPC CDSP não seguro. `tests/test-accelerator-runtime.sh` cobre
+esses arquivos e `tools/verify-qnn-npu.py` faz inferência com fallback CPU
+desabilitado para impedir falso positivo.
+
+O `ov02c10.yaml` foi carregado, mas Fedora libcamera 0.7.1 ainda avisou sobre
+static properties e sensor helper ausentes. O kernel 7.2 registrou
+`cam_cc_slow_ahb_clk_src`, `Lucid PLL latch failed` e
+`cam_cc_pll8 failed to enable`; não houve Oops/soft lockup e still/vídeo
+concluíram. O patch CAMSS que limpou esses avisos no 6.19.8 não é instalado
+pelo setup atual e precisa ser reconstruído por kernel.
+
+Conclusão operacional: GPU está concluída e câmera está funcional com warnings
+conhecidos. O transporte CDSP está
+concluído; aceleração NPU via QNN/HTP depende de runtime Qualcomm compatível com
+X1P42100 e não deve ser marcada como funcional apenas porque o remoteproc está
+online.

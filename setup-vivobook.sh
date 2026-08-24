@@ -24,6 +24,9 @@ REAL_HOME=$(eval echo "~${REAL_USER}")
 FIRMWARE_ROOT="${FIRMWARE_ROOT:-/usr/lib/firmware}"
 DRACUT_CONFIG_DIR="${DRACUT_CONFIG_DIR:-/etc/dracut.conf.d}"
 KERNEL_MODULES_ROOT="${KERNEL_MODULES_ROOT:-/usr/lib/modules}"
+VULKAN_CONFIG_DIR="${VULKAN_CONFIG_DIR:-${REAL_HOME}/.config/environment.d}"
+UDEV_RULES_DIR="${UDEV_RULES_DIR:-/etc/udev/rules.d}"
+LIBCAMERA_IPA_SIMPLE_DIR="${LIBCAMERA_IPA_SIMPLE_DIR:-/usr/share/libcamera/ipa/simple}"
 REAL_USER_UID=$(id -u "$REAL_USER" 2>/dev/null || true)
 REAL_RUNTIME_DIR="/run/user/${REAL_USER_UID}"
 # Test-only override: production always derives /run/user/<uid> above.
@@ -79,7 +82,10 @@ install_exact_dependencies() {
     local -a build_packages=(gcc make dkms perl elfutils-libelf-devel openssl-devel flex bison bc)
     local -a runtime_packages=(curl tar xz dracut kmod util-linux)
     if [[ $scope == setup ]]; then
-        runtime_packages+=(grubby)
+        runtime_packages+=(
+            grubby libcamera-gstreamer libcamera-tools pipewire-plugin-libcamera
+            python3-pip vulkan-tools
+        )
     elif [[ $scope != recovery ]]; then
         err "Escopo de dependências desconhecido: $scope"
         return 1
@@ -846,6 +852,42 @@ atomic_write_config() (
     sync -f "$target_dir"
 )
 
+write_vulkan_hardware_config() {
+    local target="${VULKAN_CONFIG_DIR}/vulkan-hardware.conf"
+
+    mkdir -p "$VULKAN_CONFIG_DIR" || return 1
+    atomic_write_config "$target" 0644 \
+        $'VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json\n' || return 1
+    chown "$REAL_USER:$REAL_USER" "$target" 2>/dev/null || true
+}
+
+write_fastrpc_access_rule() {
+    local target="${UDEV_RULES_DIR}/99-x1407qa-fastrpc.rules"
+
+    mkdir -p "$UDEV_RULES_DIR" || return 1
+    atomic_write_config "$target" 0644 \
+        $'SUBSYSTEM=="misc", KERNEL=="fastrpc-cdsp", GROUP="render", MODE="0660"\n'
+}
+
+write_camera_dma_heap_rule() {
+    local target="${UDEV_RULES_DIR}/71-vivobook-camera-dma-heap.rules"
+
+    mkdir -p "$UDEV_RULES_DIR" || return 1
+    atomic_write_config "$target" 0644 \
+        $'SUBSYSTEM=="dma_heap", KERNEL=="system", TAG+="uaccess"\n'
+}
+
+install_ov02c10_ipa_data() {
+    local source="${SCRIPT_DIR}/modules/vivobook-cam-fix-2.0/ov02c10.yaml"
+    local target="${LIBCAMERA_IPA_SIMPLE_DIR}/ov02c10.yaml"
+    local content
+
+    [[ -f $source && ! -L $source ]] || return 1
+    content=$(<"$source") || return 1
+    mkdir -p "$LIBCAMERA_IPA_SIMPLE_DIR" || return 1
+    atomic_write_config "$target" 0644 "${content}"$'\n'
+}
+
 preflight_recovery_config_paths() {
     local modules_load_dir=${MODULES_LOAD_CONFIG_DIR:-/etc/modules-load.d}
     local target
@@ -1215,14 +1257,7 @@ WRAPPER
 chmod +x /usr/local/bin/ptyxis-fixed
 
 # Global hardware Vulkan for ALL apps (environment.d)
-mkdir -p "${REAL_HOME}/.config/environment.d"
-cat > "${REAL_HOME}/.config/environment.d/vulkan-hardware.conf" << 'ENVD'
-# Force hardware Vulkan only (freedreno/turnip on Adreno GPU)
-# Prevents LVP from loading — MR 37622 fixes device select but LVP still
-# gets loaded without this, degrading GTK4 rendering performance
-VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json
-ENVD
-chown -R "${REAL_USER}:${REAL_USER}" "${REAL_HOME}/.config/environment.d"
+write_vulkan_hardware_config || warn "  Não foi possível fixar o ICD Freedreno"
 
 # D-Bus service override (Ptyxis usa D-Bus activation)
 mkdir -p "${REAL_HOME}/.local/share/dbus-1/services"
@@ -1354,7 +1389,11 @@ log "  cpufreq autoload"
 
 # ─── 15. CDSP/NPU — contrato early boot já configurado ──────────────────────
 step 15 $TOTAL "CDSP/NPU (firmware early boot)..."
-log "  firmware CDSP incluído em qcom-remoteproc.conf"
+write_fastrpc_access_rule || warn "  Não foi possível configurar acesso ao FastRPC CDSP"
+usermod -aG render "$REAL_USER" 2>/dev/null || true
+udevadm control --reload-rules 2>/dev/null || true
+udevadm trigger --action=change /sys/class/misc/fastrpc-cdsp 2>/dev/null || true
+log "  firmware CDSP + acesso ao FastRPC não seguro configurados"
 
 # ─── 16. Charge control — udev rule 80% + freq cap na bateria ───────────────
 step 16 $TOTAL "Charge control (limite 80%)..."
@@ -1402,6 +1441,9 @@ fi
 
 # Install systemd service (on-demand only, never enabled)
 cp "${SCRIPT_DIR}/modules/vivobook-cam-fix-2.0/vivobook-camera.service" /etc/systemd/system/ 2>/dev/null || true
+install_ov02c10_ipa_data || warn "  Tuning OV02C10 não instalado"
+write_camera_dma_heap_rule || warn "  Regra uaccess do DMA heap não instalada"
+udevadm control --reload-rules 2>/dev/null || true
 systemctl daemon-reload 2>/dev/null || true
 
 # Install user command

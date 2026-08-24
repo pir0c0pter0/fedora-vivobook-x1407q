@@ -9,6 +9,7 @@ Type=oneshot
 RemainAfterExit=yes
 
 # Load dependencies + camera module
+ExecStart=/sbin/modprobe system_heap
 ExecStart=/sbin/modprobe camcc_x1e80100
 ExecStart=/sbin/modprobe i2c_qcom_cci
 ExecStart=/sbin/modprobe qcom_camss

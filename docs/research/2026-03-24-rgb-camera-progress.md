@@ -474,3 +474,27 @@ Final assessment:
 - `libcamera` userspace warnings are gone
 - kernel camera warnings previously tied to `cam_cc_slow_ahb_clk_src` are gone
 - IR remains disabled/untouched
+
+## Runtime Revalidation: 2026-08-24
+
+This historical bring-up was revalidated on the installed Fedora 44 system
+with kernel `7.2.0-x1407qa` and Fedora libcamera 0.7.1.
+
+- clean boot started with `vivobook-camera.service` inactive and the camera
+  stack unloaded, preserving the on-demand contract;
+- the service loaded `system_heap` before CAMSS and the OV02C10 overlay;
+- the repository-provided `ov02c10.yaml` removed the need for a locally patched
+  libcamera build;
+- still capture: XRGB8888 1920×1080, 8,294,400 bytes;
+- video capture: XRGB8888 1280×720, 60/60 frames at approximately 30 fps;
+- `systemctl stop` remained a safe no-op and did not unload the kernel stack;
+  reboot remains the only supported unload path.
+- Fedora libcamera 0.7.1 loaded `ov02c10.yaml` but still warned about missing
+  static properties, crop ioctls, and the OV02C10 sensor helper;
+- kernel 7.2 again logged `cam_cc_slow_ahb_clk_src`, `Lucid PLL latch failed`,
+  and `cam_cc_pll8 failed to enable`. Capture completed without an Oops or soft
+  lockup. The warning-suppression patch proven on 6.19.8 is not installed by
+  the current setup and must be rebuilt per kernel.
+
+The older clean-log result above remains valid for the patched 6.19.8 boot, but
+does not describe the current 7.2 kernel.

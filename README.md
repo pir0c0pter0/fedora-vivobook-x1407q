@@ -1,11 +1,11 @@
 # Linux on ASUS Vivobook 14 X1407QA (Snapdragon X)
 
-> Full Linux support for the ASUS Vivobook 14 X1407QA with Qualcomm Snapdragon X (X1-26-100) on Fedora 44 aarch64 — from zero to daily driver.
+> Daily-driver Linux support for the ASUS Vivobook 14 X1407QA with Qualcomm Snapdragon X (X1-26-100) on Fedora 44 aarch64 — from zero to a documented, reproducible hardware stack.
 
 **Author:** Pir0c0pter0 — pir0c0pter0000@gmail.com
 
-> **Build reproduzível de 2026-08-20:** consulte o
-> [relatório completo do Fedora 44 com Linux 7.2](docs/BUILD-REPORT-2026-08-20.md)
+> **Build reproduzível e validado em 2026-08-24:** consulte o
+> [relatório completo do Fedora 44 com Linux 7.2](docs/BUILD-REPORT-2026-08-24.md)
 > e o [estado final da construção](BUILD-STATE.md).
 
 > **Regra de recuperação:** USB e USB tethering são infraestrutura crítica.
@@ -56,7 +56,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 4 | **Battery reporting** | ADSP firmware injected into initramfs | `qcom-battmgr` was failing at early boot |
 | 5 | **Brightness control** | DKMS module `vivobook_bl_fix` | Direct PMIC PWM register manipulation |
 | 6 | **Fn hotkeys** | DKMS module `vivobook_hotkey_fix` | ASUS vendor HID init + key mapping |
-| 7 | **GPU acceleration** | Firmware in initramfs (3 files: `sqe.fw`, `gmu.bin`, device-specific ZAP shader) | Adreno X1-45 with full 3D |
+| 7 | **GPU/Vulkan acceleration** | Firmware in initramfs + hardware-only Freedreno ICD | Adreno X1-45 with Turnip/Mesa hardware rendering, Vulkan 1.4 validated after reboot |
 | 8 | **Boot time: 1min47s -> 8s** | TPM timeout elimination + initrd cleanup | Masked phantom TPM devices, removed unused modules |
 | 9 | **Terminal flicker fixed** | LD_PRELOAD Vulkan pool fix (`vk_pool_fix.so`) | GTK4/turnip descriptor pool fragmentation → 952 errors eliminated |
 | 10 | **Battery time in panel** | GNOME Shell extension `battery-time@wifiteste` | Hover over battery icon shows time remaining (weighted rolling average) |
@@ -64,17 +64,17 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 12 | **Audio working** | ALSA UCM2 regex fix for Vivobook 14 | Speaker, headphones, internal mic, headset mic, HDMI audio |
 | 13 | **Lid close = s2idle suspend** | `mem_sleep_default=s2idle` + logind `HandleLidSwitch=suspend` | deep (S3) still crashes and stays disabled; s2idle validated 2026-08-24 — ~0.80W suspended vs 2.85W idle on |
 | 14 | **CPU frequency scaling** | Autoload in-tree `scmi_cpufreq` module | CPU scales 710MHz–2.96GHz, battery savings + thermal protection |
-| 15 | **CDSP / NPU online** | CDSP firmware in initramfs | Hexagon Compute DSP boots at early boot — fastrpc compute contexts available |
+| 15 | **CDSP online** | CDSP firmware in initramfs + restricted FastRPC access | Hexagon Compute DSP boots at early boot; QNN/HTP inference remains vendor-blocked on X1P42100 |
 | 16 | **Battery charge limit** | udev rule sets 80% threshold | Charge stops at 80%, starts at 50% — extends battery lifespan |
-| 17 | **RGB camera fully working** | `vivobook_cam_fix` + `libcamera` OV02C10 data + `qcom_camss` override | OV02C10 on CCI1 — clean `cam -l`, still frame, 720p30 video, Snapshot/PipeWire, on-demand via `vivobook-camera start` |
+| 17 | **RGB camera functional** | `vivobook_cam_fix` + OV02C10 IPA data + PipeWire integration | OV02C10 on CCI1 — still 1080p, 720p30 video and Snapshot/PipeWire on demand; known libcamera/clock warnings remain on kernel 7.2 |
 | 18 | **Claude Code flicker-free** | PTY proxy `sync_render` with Mode 2026 synchronized output | Coalesces rapid terminal writes into atomic frames — zero flicker on ARM/Wayland |
 | 19 | **Display color control** | DKMS module `vivobook_color_ctrl` — CTM via DRM atomic commit from kernel space | msm_dpu exposes CTM/PCC but not GAMMA_LUT — wl-gammarelay-rs and zwlr_gamma_control both fail; kernel module bypasses DRM master restriction |
 
-**7 custom kernel modules**, **1 in-tree kernel module override** (`qcom-camss`), **1 Vulkan driver fix**, **1 PTY sync proxy**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix** — everything needed for daily-driver use currently runs at runtime via DKMS/module overrides/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides. USB4/TB3 is the first area that still appears to require a real custom-kernel path.
+**7 custom kernel modules**, **1 documented `qcom-camss` patch**, **1 Vulkan driver fix**, **1 PTY sync proxy**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix** — most model-specific fixes run at runtime via DKMS/module overlays/LD_PRELOAD. The installed stable path uses the Zenbook A14 DTB from BLS plus the custom 7.2 kernel for early-boot fixes.
 
 ## Current Status
 
-Esta tabela descreve o sistema Fedora previamente instalado e configurado. O
+Esta tabela descreve o sistema Fedora instalado e validado em 2026-08-24. O
 estado específico da nova ISO live está no aviso acima e em
 [`BUILD-STATE.md`](BUILD-STATE.md); não confunda validação histórica do sistema
 instalado com validação física da reconstrução atual.
@@ -83,7 +83,7 @@ instalado com validação física da reconstrução atual.
 |---------|--------|-------|
 | **Boot** | :white_check_mark: Working | Fedora 44 via Zenbook A14 DTB |
 | **Boot time** | :white_check_mark: 8s | Was ~2min (see [Boot Time Fix](#8-boot-time-fix)) |
-| **Display** | :white_check_mark: Working | GPU firmware in initramfs (see [GPU Firmware Fix](#7-gpu-firmware-fix)) |
+| **Display / GPU** | :white_check_mark: Working | Adreno X1-45, Freedreno/Turnip; Vulkan hardware validated after reboot (see [GPU Firmware Fix](#7-gpu-firmware-fix)) |
 | **WiFi** | :white_check_mark: Working | Native WCN sequencing + `wlanfw20.mbn` as `amss.bin` + X1407QA board data (see [WiFi Fix](#2-wifi-fix)) |
 | **Bluetooth** | :white_check_mark: Working | FastConnect 6900 UART — out-of-the-box |
 | **Keyboard** | :white_check_mark: Working | DKMS module (see [Keyboard Fix](#3-keyboard-fix)) |
@@ -97,13 +97,26 @@ instalado com validação física da reconstrução atual.
 | **Lid close** | :white_check_mark: Working | Lid close = s2idle suspend, ~0.80W (see [Lid Close Fix](#13-lid-close-fix)) |
 | **Suspend (s2idle)** | :white_check_mark: Working | s2idle validated 2026-08-24 on installed `7.2.0-x1407qa` — 2 clean cycles, ~0.80W suspended. deep (S3) still crashes and stays disabled (see [Lid Close Fix](#13-lid-close-fix)) |
 | **cpufreq** | :white_check_mark: Working | SCMI cpufreq via autoload — 710MHz–2.96GHz, schedutil governor (see [CPU Frequency Fix](#14-cpu-frequency-fix)) |
-| **CDSP / NPU** | :white_check_mark: Working | CDSP firmware in initramfs — Hexagon compute online (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
+| **CDSP / NPU** | :warning: Partial | CDSP, FastRPC and QNN EP registration work; QNN HTP inference fails to initialize on SoC ID `635`/X1P42100 with CPU fallback disabled (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
 | **Charge control** | :white_check_mark: Working | Charge limit 80% via udev rule (see [Charge Control Fix](#16-battery-charge-control-fix)) |
 | **USB-C DP alt-mode** | :white_check_mark: Working | Both ports, tested DP-2 up to 2560×1600. Device link errors at boot are cosmetic ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
 | **USB4 / TB3 tunneling** | :x: Not working | DP alt-mode works, but Thunderbolt tunneling is blocked by missing Qualcomm x1e80100 host/router support in current kernels. See [USB4/TB3 Status](#usb4tb3-status-mar-2026) |
-| **Camera RGB** | :white_check_mark: Working | OV02C10 via DKMS overlay + `qcom_camss` override, clean still/video and clean kernel log on-demand `vivobook-camera start` (see [Camera Fix](#17-rgb-camera-fix)) |
+| **Camera RGB** | :warning: Working with warnings | OV02C10 via DKMS overlay; still/video and PipeWire work on demand. Fedora libcamera metadata warnings and non-fatal CAMCC clock warnings remain on kernel 7.2 (see [Camera Fix](#17-rgb-camera-fix)) |
 | **Camera IR** | :x: Not working | pm8010 PMIC physically absent — sensor has no power (see [Camera Research](#camera-research)) |
 | **Display color control** | :white_check_mark: Working | CTM saturation + contrast via DKMS module (see [Display Color Control Fix](#19-display-color-control-fix)) |
+
+### Accelerator validation snapshot — 2026-08-24
+
+| Component | Result after clean reboot | Evidence |
+|-----------|---------------------------|----------|
+| Vulkan GPU | **Working** | Vulkan 1.4.341, Mesa 26.0.3, `turnip Mesa driver`, Adreno X1-45 |
+| RGB camera | **Working on demand, warnings remain** | 1920×1080 XRGB8888 still; 60/60 frames at 1280×720, ~30 fps; no Oops/soft lockup |
+| CDSP transport | **Working** | CDSP and ADSP `remoteproc` running; non-secure `/dev/fastrpc-cdsp` exposed only to group `render` |
+| NPU inference | **Blocked in vendor runtime** | QNN EP sees an NPU, but HTP backend initialization fails for real SoC ID `635`; the same failure occurs as root, so it is not a Unix permission problem |
+
+The setup does not expose `fastrpc-cdsp-secure` or ADSP nodes to regular users.
+The diagnostic verifier deliberately disables CPU fallback so a CPU execution
+cannot be mistaken for NPU acceleration.
 
 ---
 
@@ -293,8 +306,9 @@ sudo bash setup-vivobook.sh
 ```
 
 This applies all fixes: DKMS modules, firmware initramfs configs, GRUB params,
-suspend/lid, UCM2 audio, Vulkan fix, `sync_render`, GNOME extension, charge
-control, cpufreq, dconf defaults, on-demand camera, and cleans up old scripts.
+suspend/lid, UCM2 audio, Vulkan hardware ICD, `sync_render`, GNOME extension,
+charge control, cpufreq, restricted FastRPC access, OV02C10 libcamera data,
+PipeWire camera support, on-demand camera, and cleanup of old scripts.
 When run from the bundled payload it also auto-stages `modules/` → `/usr/src`
 and bundled `firmware/` → `/usr/lib/firmware` first, so it is self-contained.
 
@@ -392,7 +406,18 @@ cat /sys/class/power_supply/qcom-battmgr-bat/capacity
 cat /sys/class/backlight/vivobook-backlight/brightness
 
 # GPU
-glxinfo | grep "OpenGL renderer"
+env -u DISPLAY -u WAYLAND_DISPLAY \
+  VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json \
+  vulkaninfo --summary
+
+# CDSP transport (online does not by itself prove NPU inference)
+cat /sys/class/remoteproc/remoteproc1/{name,state}
+stat -c '%A %U:%G %n' /dev/fastrpc-cdsp
+
+# RGB camera (on demand)
+vivobook-camera start
+cam -l
+cam -c 1 --capture=1 --stream role=still,width=1920,height=1080,pixelformat=XRGB8888
 
 # Hotkeys (press Fn+F5/F6)
 dmesg | grep vivobook_hotkey
@@ -658,6 +683,10 @@ echo 'install_items+=" /usr/lib/firmware/qcom/gen71500_sqe.fw.xz /usr/lib/firmwa
 sudo dracut --force
 ```
 
+`setup-vivobook.sh` also writes
+`~/.config/environment.d/vulkan-hardware.conf` with the Freedreno ICD. This
+prevents Lavapipe from being loaded alongside Turnip for desktop applications.
+
 | Firmware | Path | Purpose |
 |----------|------|---------|
 | `gen71500_sqe.fw.xz` | `qcom/` | Shader Queue Engine (package `qcom-firmware`) |
@@ -669,6 +698,9 @@ sudo dracut --force
 | **GPU** | Adreno X1-45 (freedreno / Mesa) |
 | **Driver** | `msm_dpu` (display), `adreno` (GPU) |
 | **Panel** | Samsung ATANA33XC20, eDP, 1920x1200@60Hz, 10-bit (XR30) |
+
+**Validated after the second reboot on 2026-08-24:** Vulkan 1.4.341, Mesa 26.0.3,
+`turnip Mesa driver`, Adreno X1-45. This is real GPU rendering, not Lavapipe.
 
 > **WARNING**: The `qcdxkmsucpurwa.mbn` ZAP shader is critical. Without it the MDT loader fails immediately with `gpu hw init failed: -2` and the GPU has no 3D acceleration.
 
@@ -1006,7 +1038,16 @@ sudo dracut --force
 ```bash
 cat /sys/class/remoteproc/remoteproc1/state    # → running
 cat /sys/class/remoteproc/remoteproc1/name     # → cdsp
+stat -c '%A %U:%G %n' /dev/fastrpc-cdsp       # → root:render, 0660
 ```
+
+The setup grants the regular user access only to the non-secure CDSP node:
+
+```udev
+SUBSYSTEM=="misc", KERNEL=="fastrpc-cdsp", GROUP="render", MODE="0660"
+```
+
+Secure CDSP and ADSP nodes remain `root:root` mode `0600`.
 
 | Property | Value |
 |----------|-------|
@@ -1016,6 +1057,33 @@ cat /sys/class/remoteproc/remoteproc1/name     # → cdsp
 | **FastRPC contexts** | 13 compute callback contexts (cb@1 through cb@13) |
 | **IOMMU groups** | Groups 15–26 |
 | **Config file** | `/etc/dracut.conf.d/qcom-cdsp-firmware.conf` |
+
+#### NPU inference status
+
+CDSP transport is online, but that is not the same as a working NPU execution
+provider. A clean Python environment with `onnxruntime-qnn 2.4.0` and
+`onnxruntime 1.26.0` registers `QNNExecutionProvider` as an NPU device, then
+fails a minimal HTP-only inference with
+`QNN_BACKEND_ERROR_CANNOT_INITIALIZE: Backend failed to initialize`.
+
+The same test fails as root. Diagnostic SoC overrides can move the failure to
+QNN device creation, but none produced inference and none were persisted. The
+real `/sys/devices/soc0/soc_id` is `635` (X1P42100), which the tested Qualcomm
+runtime does not initialize safely. Current status: kernel/CDSP **working**;
+QNN/HTP inference **blocked by vendor runtime support**.
+
+To re-test after a future QNN release:
+
+```bash
+python3 -m venv ~/.local/share/vivobook-qnn
+~/.local/share/vivobook-qnn/bin/pip install \
+  onnx numpy 'onnxruntime==1.26.0' 'onnxruntime-qnn==2.4.0'
+~/.local/share/vivobook-qnn/bin/python tools/verify-qnn-npu.py
+```
+
+The verifier disables CPU fallback. A PASS therefore means real HTP/NPU
+execution; the current expected result on this model is the backend error
+described above.
 
 ---
 
@@ -1056,7 +1124,9 @@ cat /sys/class/power_supply/qcom-battmgr-bat/charge_control_start_threshold  # �
 
 ### 17. RGB Camera Fix
 
-**Problem:** The Zenbook A14 DTB has no CAMSS, CAMCC, CCI, or CSIPHY device tree nodes. INSYDE firmware blocks all DTB override methods. Without these subsystems, the OV02C10 camera sensor has no I2C bus, no clocks, no ISP pipeline, and no power.
+**Problem:** The Zenbook A14 base DTB used by this laptop has no CAMSS, CAMCC,
+CCI, or CSIPHY nodes, and there is no upstream Vivobook DTB. Without a runtime
+overlay, the OV02C10 sensor has no I2C bus, clocks, ISP pipeline, or power.
 
 **Root cause:** 8 problems solved iteratively:
 
@@ -1067,13 +1137,13 @@ cat /sys/class/power_supply/qcom-battmgr-bat/charge_control_start_threshold  # �
 5. **pm8010 absent** — camera PMIC doesn't exist physically. Power topology from AeoB firmware: AVDD/DVDD via `vreg_l7b_2p8` (PM8550B), DOVDD via `vreg_l3m_1p8` (RPMH fire-and-forget)
 6. **`cam_cc_pll8 failed to enable!`** — runtime PM suspends CAMCC after probe, MMCX powers off, all PLL registers lost (L=0). Fix: `pm_runtime_get_sync(camcc_dev)` holds CAMCC awake
 7. **Image upside down** — added `rotation = <180>` to sensor DT node
-8. **`cam_cc_slow_ahb_clk_src` WARN on every `streamon`** — `qcom_camss` votes a `cpas_ahb` rate on `x1e80100` and trips `clk-rcg2.c:update_config()`. Fix: patched `qcom_camss` override skips the explicit `cpas_ahb` rate vote on `qcom,x1e80100-camss`
+8. **`cam_cc_slow_ahb_clk_src` WARN on `streamon`** — `qcom_camss` votes a `cpas_ahb` rate on `x1e80100` and trips `clk-rcg2.c:update_config()`. A patch removed it on kernel 6.19.8, but it is not part of the reproducible 7.2 setup and the non-fatal warning is present again.
 
 **Solution:** final RGB stack is three layers:
 
 1. `vivobook_cam_fix` v2.0 — two-phase DT overlay + runtime PM holds for CAMCC/CAMSS/CCI
-2. patched `libcamera` v0.7.0 — `ov02c10` static properties/YAML so `cam -l` is clean
-3. patched `qcom_camss` override in `/lib/modules/$(uname -r)/updates/qcom-camss.ko` — removes the residual `cpas_ahb` rate vote that caused `cam_cc_slow_ahb_clk_src` warnings
+2. Fedora `libcamera` + the bundled `ov02c10.yaml` IPA data — usable software ISP controls without a custom userspace build
+3. in-tree `qcom_camss` on kernel 7.2 — capture works, with known non-fatal CAMCC warnings; the historical patch must be rebuilt per kernel before it can suppress them
 
 Loaded on-demand:
 
@@ -1091,8 +1161,8 @@ vivobook-camera status
 **Why on-demand (not auto-load):** CCI adapters create dynamic I2C buses that shift Geni I2C bus numbering. Auto-loading at boot could break keyboard and touchpad modules. The privacy shutter is purely mechanical (no GPIO/HID event), so software detection of open/close is not possible.
 
 **What works:**
-- `cam -l` (clean enumeration)
-- `cam --capture=1` (libcamera direct)
+- `cam -l` (enumerates the internal camera; metadata/helper warnings are expected)
+- 1920×1080 XRGB8888 still capture (8,294,400 bytes)
 - `cam -c 1 --capture=10 --stream role=video,width=1280,height=720` (~30 fps)
 - GNOME Snapshot app (via PipeWire/WirePlumber)
 - Any V4L2/libcamera/PipeWire app
@@ -1101,18 +1171,16 @@ vivobook-camera status
 - `rmmod vivobook_cam_fix` — CAMCC GDSC corruption on re-probe, kernel crash. Unload only via reboot
 - IR camera — pm8010 PMIC physically absent, sensor has no power (see [Camera Research](#camera-research))
 
-**Validated on clean boot (2026-03-24):**
+**Validated again after clean reboot (2026-08-24, Fedora libcamera 0.7.1):**
 
-- service starts cleanly
-- `cam -l` clean
-- still frame capture works
-- 720p video stream works at ~30 fps
-- `journalctl -k -b` stays clean for:
-  - `cam_cc_slow_ahb_clk_src`
-  - `Lucid PLL latch failed`
-  - `cam_cc_pll8`
-  - `clock enable failed`
-  - `Oops` / `soft lockup`
+- service starts and creates the camera nodes
+- `cam -l` enumerates the camera while reporting missing static properties/helper from Fedora libcamera
+- 1920×1080 XRGB8888 still frame works
+- 60/60 1280×720 XRGB8888 video frames work at ~30 fps
+- `system_heap` is loaded by the service and its DMA heap is available through uaccess
+- current kernel log still reports `cam_cc_slow_ahb_clk_src`, `Lucid PLL latch
+  failed` and `cam_cc_pll8 failed to enable` during the test, but capture
+  completes and there is no `Oops` or `soft lockup`
 
 Detailed bring-up log and timestamps: [docs/research/2026-03-24-rgb-camera-progress.md](docs/research/2026-03-24-rgb-camera-progress.md)
 Kernel-side `qcom_camss` diff used for the final warning fix: [docs/research/qcom-camss-x1e80100-cpas-ahb-fix.patch](docs/research/qcom-camss-x1e80100-cpas-ahb-fix.patch)
@@ -1127,8 +1195,8 @@ Kernel-side `qcom_camss` diff used for the final warning fix: [docs/research/qco
 | **Privacy LED** | GPIO 110 |
 | **Privacy shutter** | Mechanical slide — no electronic event |
 | **DKMS module** | `vivobook-cam-fix` v2.0 in `/usr/src/vivobook-cam-fix-2.0/` |
-| **Kernel override** | `qcom-camss.ko` in `/lib/modules/$(uname -r)/updates/` |
-| **libcamera state** | `ov02c10` properties + YAML installed, clean `cam -l` |
+| **Kernel CAMSS** | In-tree on 7.2; historical warning-suppression patch is documented but not installed by setup |
+| **libcamera state** | Fedora 0.7.1 + bundled `ov02c10.yaml`; functional with static-property/helper warnings |
 | **Service** | `vivobook-camera.service` (oneshot, on-demand, never enabled) |
 | **Command** | `vivobook-camera start\|status` |
 
@@ -1495,6 +1563,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 │   │   ├── vivobook_cam_fix.c
 │   │   ├── vivobook_cam_phase1.dts
 │   │   ├── vivobook_cam_phase2.dts
+│   │   ├── ov02c10.yaml
 │   │   ├── vivobook-camera.service
 │   │   ├── vivobook-camera
 │   │   ├── Makefile
@@ -1508,16 +1577,16 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 
 ## Known Issues
 
-- **DTB override impossible** on INSYDE firmware — all hardware fixes must use kernel modules
+- **No native Vivobook DTB** — the installed system loads the Zenbook A14 DTB through BLS successfully, while model-specific differences still require runtime modules/overlays
 - **Audio**: UCM2 fix modifies system file — will be overwritten by `alsa-ucm-conf` updates (needs upstream PR)
 - **GPU**: Firmware must be in initramfs for early loading. SELinux may block `.xz` firmware (`setenforce 0` as workaround)
 - **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
-- **Camera RGB**: Working on-demand (`vivobook-camera start`) with clean `libcamera`, still frame, and 720p30 video. Not auto-loaded at boot to avoid I2C bus renumbering. `rmmod` causes CAMCC GDSC corruption — reboot to unload (see [Camera Fix](#17-rgb-camera-fix))
+- **Camera RGB**: Working on-demand (`vivobook-camera start`) for 1080p still, 720p30 video and PipeWire. Fedora libcamera still warns about OV02C10 static metadata/helper, and kernel 7.2 emits non-fatal CAMCC clock warnings. Not auto-loaded at boot; `rmmod` is unsafe — reboot to unload (see [Camera Fix](#17-rgb-camera-fix))
 - **Camera IR**: pm8010 PMIC physically absent — sensor has no power. No one upstream has IR camera working on Snapdragon X Linux (see [Camera Research](#camera-research))
 - **Suspend**: `deep` (S3) still crashes and stays disabled. `s2idle` validated 2026-08-24 on the installed `7.2.0-x1407qa` — 2 clean cycles, ~0.80W suspended (see [Lid Close Fix](#13-lid-close-fix)). No RTC alarm on pm8xxx — wake by lid/power button only ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
 - **USB4 / Thunderbolt 3**: Plain DP alt-mode works, but TB3 dock tunneling is blocked. `data_role` may initialize wrong, UCSI exposes no `ALT_MODE_OVERRIDE`, the normal firmware path never delivers `USBC_NOTIFY`, and current kernels still lack Qualcomm `x1e80100` host/router support. See [USB4/TB3 Status](#usb4tb3-status-mar-2026)
 - **~~cpufreq~~**: Fixed — `scmi_cpufreq` autoload via `/etc/modules-load.d/` ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
-- **~~CDSP/NPU offline~~**: Fixed — firmware in initramfs (see [CDSP/NPU Fix](#15-cdspnpu-fix)). Nota: Qualcomm **fechou a issue** sobre open-source dos headers DSP Snapdragon X (abr 2026) — não vão liberar. Proposta de driver alternativo QDA no kernel, mas incompatível com stack fastrpc existente.
+- **CDSP online; NPU inference blocked**: firmware/initramfs and restricted FastRPC access work, and QNN registers the NPU. HTP inference still fails at vendor backend initialization for X1P42100 SoC ID `635`, including as root; do not count CDSP `running` as proof of acceleration (see [CDSP/NPU Fix](#15-cdspnpu-fix)).
 - **~~Battery charge control~~**: Fixed — udev rule sets 80% charge limit (see [Charge Control Fix](#16-battery-charge-control-fix))
 - **~~USB-C device links~~**: Cosmetic — `pmic_glink` logs `Failed to create device link (0x180)` for PS8833 retimers at boot. All functionality works ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6))
 - **1 unknown I2C device** on bus 4: address `0x5b` (may be camera sensor on CCI, not regular I2C)

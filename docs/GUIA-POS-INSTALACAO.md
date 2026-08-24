@@ -12,6 +12,30 @@ Use:
 - `tools/audit-stable-hardware.sh --post-reboot` depois de cada mudança de
   kernel ou boot.
 
+## Verificação dos aceleradores
+
+```bash
+# Vulkan deve mostrar Turnip/Adreno, nunca Lavapipe
+env -u DISPLAY -u WAYLAND_DISPLAY \
+  VK_DRIVER_FILES=/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json \
+  vulkaninfo --summary
+
+# A câmera é intencionalmente on-demand
+vivobook-camera start
+cam -l
+cam -c 1 --capture=1 --stream role=still,width=1920,height=1080,pixelformat=XRGB8888
+
+# CDSP online não prova inferência NPU
+cat /sys/class/remoteproc/remoteproc1/{name,state}
+stat -c '%A %U:%G %n' /dev/fastrpc-cdsp
+~/.local/share/vivobook-qnn/bin/python tools/verify-qnn-npu.py
+```
+
+Em 2026-08-24, GPU Vulkan e câmera RGB passaram após reboot. O último comando
+registra a NPU, mas falha na inicialização do backend HTP para o SoC ID
+`635`/X1P42100, inclusive como root. Esse é o resultado esperado até existir um
+runtime Qualcomm compatível; o verificador desabilita fallback CPU.
+
 Atualizações automáticas de kernel continuam desabilitadas. Um kernel novo só
 deve ser mantido depois de validar fisicamente boot, Wi-Fi, áudio, teclado,
 brilho e s2idle. O hook definitivo de `kernel-install` ainda é uma pendência

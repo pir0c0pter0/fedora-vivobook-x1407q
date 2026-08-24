@@ -1,8 +1,13 @@
-# [RFE] Improve Snapdragon X (X1P) support in Fedora — ASUS Vivobook X1407QA fully working with runtime fixes
+# [RFE] Improve Snapdragon X (X1P) support in Fedora — ASUS Vivobook X1407QA daily-driver status
 
 ## Summary
 
-The **ASUS Vivobook 14 X1407QA** with **Qualcomm Snapdragon X (X1-26-100)** is now fully functional as a Linux daily driver on **Fedora 44 aarch64** — **17 out of 17 hardware features working** (IR camera blocked by absent PMIC hardware). Every fix was reverse-engineered from scratch with **zero kernel patches** — all done via DKMS modules, initramfs firmware injection, and userspace fixes.
+The **ASUS Vivobook 14 X1407QA** with **Qualcomm Snapdragon X (X1-26-100)**
+is usable as a Linux daily driver on **Fedora 44 aarch64** with the custom
+`7.2.0-x1407qa` kernel, DKMS/runtime overlays, initramfs firmware injection and
+userspace fixes. GPU/Vulkan and the core desktop hardware work; RGB camera
+captures still/video with known non-fatal warnings. IR camera, USB4/TB3
+tunneling and QNN/HTP NPU inference remain blocked and are documented below.
 
 This issue documents what works, what needed fixing, and what Fedora could integrate to make Snapdragon X laptops work out-of-the-box.
 
@@ -28,17 +33,25 @@ This issue documents what works, what needed fixing, and what Fedora could integ
 
 ### 1. Boot — no DTB for this laptop in the kernel
 
-**Problem:** Fedora 44 aarch64 doesn't boot — there is no Device Tree Blob for the Vivobook X1407QA in kernel 6.19. The INSYDE UEFI firmware provides its own DTB and **blocks all override attempts** (7 methods tested: GRUB `devicetree`, BLS, `dtbloader.efi`, EFI stub — all fail on INSYDE aarch64).
+**Problem:** Fedora 44 aarch64 has no native Device Tree Blob for the Vivobook
+X1407QA. Early experiments with several EFI/GRUB paths failed; the installed
+7.2 system now boots reliably with the Zenbook A14 DTB referenced by the BLS
+entry. Model-specific differences still need runtime fixes.
 
 **How it was fixed:** Boot using the **Zenbook A14 DTB** (`x1p42100-asus-zenbook-a14.dtb`) — same Qualcomm "Purwa" die (x1p42100). All hardware differences between the two laptops are corrected at runtime via DKMS kernel modules. Required kernel parameters:
 
-```
-clk_ignore_unused pd_ignore_unused
+```text
+live/recovery:    clk_ignore_unused pd_ignore_unused
+installed stable: clk_ignore_unused mem_sleep_default=s2idle
 ```
 
-Without these, the kernel disables Qualcomm clocks and power domains it thinks are unused, crashing the system immediately.
+The live image still carries both guards. On the installed 7.2 system,
+`clk_ignore_unused` remains required while `pd_ignore_unused` was removed after
+physical validation.
 
-**What Fedora could do:** Add `clk_ignore_unused pd_ignore_unused` to default kernel cmdline on Qualcomm aarch64 platforms. Submit a proper DTB for the Vivobook X1407QA upstream.
+**What Fedora could do:** submit a proper Vivobook X1407QA DTB and preserve the
+required clocks/power domains in DT/drivers so broad ignore flags are no longer
+needed.
 
 ---
 
@@ -343,7 +356,15 @@ install_items+=" /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qccdsp8380.
   /usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/cdspr.jsn "
 ```
 
-**Result:** `remoteproc1` state = `running`, 13 FastRPC compute callback contexts available (cb@1 through cb@13).
+**Result:** `remoteproc1` state = `running`, 13 FastRPC compute callback
+contexts available (cb@1 through cb@13). The non-secure
+`/dev/fastrpc-cdsp` node is available to group `render`; secure and ADSP nodes
+remain root-only.
+
+This does **not** yet mean NPU inference works. `onnxruntime-qnn 2.4.0`
+registers a QNN NPU device, but HTP-only inference fails during backend
+initialization for the real X1P42100 SoC ID `635`, including as root. CPU
+fallback was disabled during the test.
 
 ---
 
@@ -376,7 +397,9 @@ SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-bat", ATTR{charge_control_end_t
 6. PLL8 enable timeout → `pm_runtime_get_sync(camcc_dev)` holds CAMCC awake (prevents MMCX power-off)
 7. Image upside down → `rotation = <180>` in DT node
 
-**How it was fixed:** DKMS module `vivobook_cam_fix` v2.0 with two-phase DT overlay, loaded on-demand:
+**How it was fixed:** DKMS module `vivobook_cam_fix` v2.0 with two-phase DT
+overlay, Fedora libcamera with bundled OV02C10 IPA data, `system_heap`, and
+PipeWire integration, loaded on-demand:
 ```bash
 vivobook-camera start   # loads module + restarts wireplumber
 vivobook-camera status  # checks if camera is active
@@ -384,7 +407,11 @@ vivobook-camera status  # checks if camera is active
 
 **Why on-demand:** CCI adapters create dynamic I2C buses that shift Geni I2C numbering. Auto-loading at boot breaks keyboard and touchpad. The privacy shutter is purely mechanical (no GPIO/HID event — confirmed by monitoring dmesg during open/close).
 
-**Result:** OV02C10 RGB camera fully working — libcamera, GNOME Snapshot, any PipeWire camera app. IR camera blocked (pm8010 absent, no one upstream has IR working on Snapdragon X Linux).
+**Result:** OV02C10 RGB camera is functional — 1920×1080 XRGB8888 still,
+1280×720 XRGB8888 video at ~30 fps, GNOME Snapshot and PipeWire apps.
+Revalidated after reboot on 2026-08-24. Fedora libcamera metadata/helper and
+kernel CAMCC clock warnings remain non-fatal on 7.2; there was no Oops or soft
+lockup. IR camera remains blocked.
 
 **What Fedora could do:** Upstream CAMSS patches (Bryan O'Donoghue, Linaro) would eliminate the overlay approach. A proper Vivobook DTB with camera nodes would make this work at boot.
 
@@ -402,7 +429,8 @@ vivobook-camera status  # checks if camera is active
 ### Medium impact
 
 5. **Mask phantom TPM** on INSYDE Snapdragon X — fixes #8, saves 90s boot time.
-6. **Disable suspend on Snapdragon X** — fixes #13, prevents data-loss crash (s2idle also broken until PDC patches merge).
+6. **Keep deep suspend disabled on Snapdragon X** — s2idle is working on this
+   machine (~0.80W measured), but deep still crashes.
 7. **GTK4 Vulkan pool size** — fixes #9, upstream GTK4/Mesa issue.
 
 ### Model-specific
@@ -412,28 +440,34 @@ vivobook-camera status  # checks if camera is active
 
 ## Full documentation and code
 
-All fixes, 6 DKMS module source code, setup scripts, and detailed reverse-engineering notes:
+All fixes, 7 DKMS module sources, setup scripts, and detailed reverse-engineering notes:
 
 **https://github.com/pir0c0pter0/fedora-vivobook-x1407q**
 
-- `setup-vivobook.sh` — one-command setup applying all 17 fixes
+- `setup-vivobook.sh` — one-command setup applying all hardware fixes
 - `build-vivobook-iso.sh` — builds pre-patched ISO with everything baked in
 
 ## System info
 
 ```
 Fedora release 44 (Forty Four)
-Kernel: 6.19.6-300.fc44.aarch64
+Kernel: 7.2.0-x1407qa
 GNOME: 50
-Mesa: 25.3.6
+Mesa: 26.0.3
 ```
 
 ## Related upstream work
 
-- **Camera RGB:** Working via DKMS two-phase DT overlay. IR camera blocked (pm8010 absent).
+- **Camera RGB:** Functional via DKMS two-phase DT overlay; Fedora libcamera
+  metadata/helper and kernel 7.2 CAMCC clock warnings remain non-fatal. IR
+  camera is blocked.
 - **Camera (upstream):** Bryan O'Donoghue (Linaro) v9 patches (7 patches, reduzido de v8's 18) in LKML review (Feb 2026). Expected merge ~6.21/6.22. **Note:** patches only cover x1e80100 (Hamoa) — not Purwa/x1p42100. Our DKMS overlay remains the only working path for this SoC.
-- **Suspend (s2idle):** Both S3 and s2idle crash — PDC wakeup disabled in kernel. Qualcomm 5-patch series (Maulik Shah, March 2026) in LKML review. Custom kernel with fix prepared but not built yet.
+- **Suspend:** s2idle is physically validated on `7.2.0-x1407qa` at ~0.80W;
+  deep/S3 still crashes and remains disabled.
 - **USB4 / Thunderbolt 3:** USB-C DP alt-mode works, but TB3 tunneling is still blocked. UCSI exposes no `ALT_MODE_OVERRIDE`, the firmware never sends `USBC_NOTIFY` for the dock path, and current kernels still lack Qualcomm `x1e80100` USB4 host/router support. This is the first feature on this machine that looks likely to require a real custom-kernel path.
 - **PCIe race condition:** Upstream fix expected ~6.21, would eliminate WiFi DKMS module.
-- **CDSP/NPU headers:** Qualcomm closed the GitHub issue requesting open-source of Snapdragon X DSP headers (Apr 2026) — officially not releasing them. Proposed alternative: new QDA (DSP Accelerator) kernel driver with FastRPC via RPMsg, but incompatible with existing fastrpc stack. CDSP remains functional via firmware-only approach.
+- **CDSP/NPU:** CDSP/FastRPC transport works. QNN registers an NPU but its HTP
+  backend does not initialize for X1P42100 SoC ID `635`; acceleration remains
+  blocked pending compatible Qualcomm userspace. The proposed QDA driver uses a
+  different interface from the current FastRPC stack.
 - **DTB:** Vivobook X1407QA DTB not yet submitted — depends on camera/sensor patches.

@@ -71,6 +71,18 @@ Impacto: o `qccdsp8380.mbn` que já colocamos no initramfs continua sendo o
 necessário para manter o CDSP online. Não há caminho claro para usar o CDSP
 como acelerador de propósito geral no Linux por ora.
 
+### Validação local posterior — 2026-08-24
+
+O transporte progrediu além do estado descrito originalmente: CDSP e ADSP
+estão `running`, `/dev/fastrpc-cdsp` não seguro funciona com grupo `render`, e
+`onnxruntime-qnn 2.4.0` registra `QNNExecutionProvider` como NPU. Porém uma
+inferência mínima HTP, com fallback CPU desabilitado, falha em
+`QNN_BACKEND_ERROR_CANNOT_INITIALIZE` no SoC real ID `635`/X1P42100. O mesmo
+ocorre como root, descartando permissão Unix como causa. Overrides diagnósticos
+de SoC apenas mudaram o ponto da falha para criação do device; nada foi
+persistido. Assim, remoteproc/FastRPC está pronto, mas QNN/HTP continua
+bloqueado pelo runtime Qualcomm testado.
+
 Fontes:
 - [Qualcomm DSP headers — VideoCardz](https://videocardz.com/newz/qualcomm-shuts-door-on-snapdragon-x-dsp-headers-open-sourcing-linux-support-hopes-fade)
 - [Qualcomm QDA driver — Phoronix](https://www.phoronix.com/news/Qualcomm-DSP-Accel-Driver)
@@ -93,6 +105,7 @@ Fontes:
 | CAMSS x1e80100 v9 | Em review, não merged | Nenhum (é Hamoa, não Purwa) |
 | CAMSS Purwa patches | Não existem | Câmera continua via nosso DKMS |
 | Linux 6.16 | x1p42100 habilitado, sem câmera | Positivo (plataforma reconhecida) |
-| CDSP headers | Qualcomm não vai abrir | CDSP continua via firmware only |
+| CDSP/FastRPC | Online e acessível pelo nó não seguro | Transporte pronto; não prova inferência |
+| QNN/HTP no X1P42100 | Backend não inicializa SoC ID 635 | Aguardar runtime Qualcomm compatível |
 | QDA driver | Proposta nova, interface diferente | Não resolve stack atual |
 | Mesa MR 37622 | Provavelmente merged | Já funcionando no setup atual |

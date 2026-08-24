@@ -2,9 +2,9 @@
 
 ## O que é este projeto
 
-Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com Snapdragon X. Tudo feito em runtime — 6 módulos DKMS, 1 fix Vulkan (LD_PRELOAD), 1 PTY sync proxy, 1 extensão GNOME, 1 fix UCM2 áudio, 1 fix suspend/lid, 1 fix cpufreq, 1 fix CDSP/NPU, 1 fix charge control, 0 patches de kernel.
+Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com Snapdragon X. A maior parte roda em runtime — 7 módulos DKMS, 1 patch `qcom-camss` histórico não instalado pelo setup, 1 fix Vulkan (LD_PRELOAD + ICD Turnip), 1 PTY sync proxy, 1 extensão GNOME, 1 fix UCM2 áudio, 1 fix suspend/lid, 1 fix cpufreq, 1 fix CDSP/FastRPC e 1 fix charge control; o sistema estável atual usa kernel custom 7.2.
 
-## Conquistas (19/19)
+## Conquistas (19 itens; NPU parcial)
 
 1. **Boot** — Custom ISO + Zenbook A14 DTB (mesmo die Qualcomm "Purwa")
 2. **WiFi** — `pwrseq_qcom_wcn` nativo + `wlanfw20.mbn` como `amss.bin` + board data `NFA765a_AS_SA_X14QA` (corrige MHI `-110` no Linux 7.2)
@@ -18,17 +18,17 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 10. **Tempo bateria** — Extensão GNOME `battery-time@wifiteste` (média ponderada)
 11. **Touchpad botão direito** — gsettings `click-method: areas` (clickpad só reporta BTN_LEFT)
 12. **Áudio** — UCM2 regex fix (Vivobook 14 não estava no match do alsa-ucm-conf)
-13. **Lid close** — Suspend S3 crasha no Snapdragon X → desabilitado, tampa só desliga tela (logind lock + mask targets)
+13. **Lid close** — tampa suspende via s2idle (~0.80W validado); deep/S3 crasha e continua desabilitado; família hibernate mascarada
 14. **cpufreq** — Módulo `scmi_cpufreq` in-tree autoload via `/etc/modules-load.d/` — CPU escala 710MHz–2.96GHz, governor schedutil
-15. **CDSP/NPU** — Firmware `qccdsp8380.mbn` no initramfs via dracut — Hexagon Compute DSP online, fastrpc contexts disponíveis
+15. **CDSP/FastRPC** — Firmware `qccdsp8380.mbn` no initramfs; CDSP online e nó não seguro em `root:render 0660`. QNN registra a NPU, mas HTP inference está bloqueada no backend Qualcomm para SoC ID 635/X1P42100
 16. **Charge control** — udev rule seta limite 80% via `charge_control_end_threshold` — firmware aceita escrita, start auto 50%
-17. **Câmera RGB** — DKMS `vivobook_cam_fix` (DT overlay two-phase) — OV02C10 no CCI1, libcamera + Snapshot, on-demand via `vivobook-camera start`
+17. **Câmera RGB** — DKMS `vivobook_cam_fix` (DT overlay two-phase), `system_heap` e tuning OV02C10 — libcamera/Snapshot, still 1080p e vídeo 720p30, on-demand via `vivobook-camera start`
 18. **Claude Code flicker-free** — `sync_render` (PTY proxy com Mode 2026 synchronized output) — coalesce 5ms + render atômico, zero flicker no ARM/Wayland
 19. **Display color control** — DKMS `vivobook_color_ctrl` (CTM via DRM atomic commit do kernel) — msm_dpu expõe CTM/PCC mas não GAMMA_LUT, wl-gammarelay-rs e zwlr_gamma_control falham, módulo kernel bypassa restrição de DRM master
 
 ## Regras — SEMPRE fazer
 
-- **DKMS para hardware**: firmware INSYDE impede override de DTB. Todo fix de hardware = módulo kernel DKMS que corrige em runtime
+- **DKMS para diferenças do modelo**: o BLS carrega o DTB base do Zenbook A14, mas não existe DTB upstream do Vivobook; corrigir diferenças específicas em runtime até upstream
 - **initramfs para firmware**: firmware crítico (ADSP, GPU, WiFi) deve estar no initramfs via dracut — rootfs não está montado no early boot
 - **Testar antes de commitar**: rodar o fix, verificar logs (`journalctl -b`), confirmar que funciona
 - **Documentar causa raiz**: cada fix no README tem: Problema → Causa raiz → Solução → Tabela de propriedades
@@ -38,7 +38,7 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 
 ## Regras — NUNCA fazer
 
-- **NÃO tentar override de DTB** — 7 métodos testados (GRUB devicetree, BLS, dtbloader.efi, EFI stub), TODOS falharam no INSYDE
+- **NÃO substituir o caminho BLS/DTB comprovado** — `devicetree` em BLS funciona no instalado 7.2; não repetir os loaders EFI alternativos que falharam nem usar DTB não auditado
 - **NÃO mudar GPIO5 DIG_OUT_SOURCE_CTL para 0x00** — mata a tela, requer reboot forçado
 - **NÃO forçar GPIO5 output LOW** — mesmo efeito, mata a tela
 - **NÃO usar `gpio_to_irq()`** — não funciona no Qualcomm TLMM, usar `irq_create_fwspec_mapping()`
@@ -53,6 +53,8 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 | Módulos kernel | DKMS em `/usr/src/<nome>-1.0/`, auto-load via `/etc/modules-load.d/` |
 | Firmware | initramfs via `/etc/dracut.conf.d/`, depois `sudo dracut --force` |
 | Vulkan fix | LD_PRELOAD em `/usr/local/lib64/` + `VK_DRIVER_FILES` via `~/.config/environment.d/` — MR 37622 corrige device select mas LVP ainda carrega sem o override, degradando rendering |
+| FastRPC | Expor somente `/dev/fastrpc-cdsp` não seguro ao grupo `render`; nunca relaxar permissões dos nós secure/ADSP |
+| Câmera | `vivobook-camera.service` on-demand; carrega `system_heap`; instala `/usr/share/libcamera/ipa/simple/ov02c10.yaml`; nunca habilitar no boot nem usar `rmmod` |
 | Terminal sync | `sync_render` PTY proxy em `/usr/local/bin/`, Mode 2026 synchronized output |
 | Extensão GNOME | `~/.local/share/gnome-shell/extensions/<uuid>/`, ESM modules, GNOME 50 |
 | GRUB instalado | BLS + `custom.cfg` com `clk_ignore_unused mem_sleep_default=s2idle`; sem `pd_ignore_unused` |
@@ -73,13 +75,14 @@ Fixes de hardware para rodar Fedora 44 aarch64 no ASUS Vivobook 14 X1407QA com S
 | Áudio codec | WCD938x (WCD9385) via SoundWire |
 | Áudio speakers | WSA884x × 2 via SoundWire |
 | Áudio DSP | ADSP via Q6APM, LPASS macros (rx, tx, wsa, va) |
-| Câmera RGB | OV02C10 × 2 (OmniVision, 2MP), CCI1, I2C 0x36, CSIPHY4, MCLK4 19.2MHz |
+| Câmera RGB | 1× OV02C10 (OmniVision, 2MP), CCI1, I2C 0x36, CSIPHY4, MCLK4 19.2MHz |
 | Câmera IR | Hynix HM1092 (Windows Hello), ACPI QCOM0C99 (Spectra 695 ISP Aux Sensor), MCLK0 GPIO 96, reset GPIO 109, bus TBD |
 
 ## TODO
 
-- **Câmera IR (HM1092)** — Phase 1 discovery concluída em 2026-04-11 via Qualcomm SOC driver package (não BIOS). Sensor confirmado: Hynix HM1092, binding Asus Purwa = `SUBSYS_13041043&REV_0001` → `CameraAuxSensor_Device_QRD_Pw`, AVDD=pm8010 LDO7_M (2.91V), DOVDD=pm8010 LDO4_M (1.82V), MCLK0 GPIO 96, reset GPIO 109, AosShareResource=0 (sem AOS sharing). Bloqueio: pm8010 ausente no SPMI scan mas Windows usa LDO4_M/LDO7_M → duas hipóteses (pm8010 dormente no DT Zenbook A14 vs fisicamente ausente). Próximo passo = habilitar pm8010 no DT overlay como teste empírico (Checkpoint A = YELLOW). Findings em `docs/research/2026-04-11-ir-camera-discovery.md`.
-- **RGB cpas_ahb patch regrediu no 6.19.10** — kernel bumpou 6.19.8 → 6.19.10 e perdemos o patch `qcom_camss` que suprimia `cam_cc_pll8/Lucid PLL/cam_cc_slow_ahb_clk_src` warnings. Frame capture ainda funciona, só warnings cosmético. Fix = rebuild do patch pra 6.19.10 em `/lib/modules/6.19.10-300.fc44.aarch64/updates/`.
+- **Câmera IR (HM1092)** — sensor e binding Asus Purwa confirmados via pacote Qualcomm; AVDD/DOVDD dependem do pm8010, ausente no SPMI e sem resposta física aos testes RPMH. Continua bloqueada; não habilitar ou testar durante o trabalho da RGB. Findings em `docs/research/2026-04-11-ir-camera-discovery.md` e `docs/research/CAMERA_STATUS.md`.
+- **NPU QNN/HTP** — `onnxruntime-qnn 2.4.0` registra a NPU, mas o backend falha em inicializar no SoC real ID 635/X1P42100 mesmo como root e sem fallback CPU. Revalidar `tools/verify-qnn-npu.py` quando a Qualcomm publicar runtime compatível; não persistir spoof de SoC.
+- **Warnings da câmera no kernel 7.2** — captura funciona, mas Fedora libcamera 0.7.1 ainda avisa sobre static properties/helper do OV02C10 e o kernel emite `cam_cc_slow_ahb_clk_src`, `Lucid PLL latch failed` e `cam_cc_pll8 failed to enable`. O patch `docs/research/qcom-camss-x1e80100-cpas-ahb-fix.patch` só foi provado no 6.19.8 e não é instalado pelo setup; reconstruir por kernel antes de declarar logs limpos.
 - **1 device I2C desconhecido** — bus 4: 0x5b respondendo (0x43 e 0x76 não responderam no scan). Pode ser PS8833 (USB retimer) já mapeado no DTB.
 - **UCM2 upstream** — PR para alsa-ucm-conf adicionando Vivobook 14 ao regex
 - **Mesa issue #15106** — Aberto e fechado: device select via MR 37622 funciona no Mesa 25.3.6, mas LVP ainda é carregado sem `VK_DRIVER_FILES`, degradando rendering. `VK_DRIVER_FILES` mantido no setup. https://gitlab.freedesktop.org/mesa/mesa/-/issues/15106

@@ -118,6 +118,30 @@
   bateria e 2.9568GHz no AC/USB. O repo agora reproduz esse contrato no setup,
   BLS e `custom.cfg`; o live USB mantém pd+clk por segurança.
 
+## 2026-08-24 — GPU Vulkan, câmera RGB e CDSP/NPU
+
+- **GPU pronta:** após o segundo reboot limpo, `vulkaninfo --summary` confirmou
+  Vulkan 1.4.341, Mesa 26.0.3, `turnip Mesa driver` e Adreno X1-45. O setup fixa o
+  ICD Freedreno em `~/.config/environment.d/vulkan-hardware.conf` para impedir
+  que Lavapipe seja carregado junto.
+- **Câmera RGB pronta e on-demand:** o setup instala as ferramentas e plugins
+  libcamera/PipeWire, o tuning `ov02c10.yaml`, uma regra uaccess apenas para o
+  DMA heap `system`, e o serviço carrega `system_heap` antes da pilha CAMSS.
+  Após reboot: still XRGB8888 1920×1080 (8.294.400 bytes) e vídeo XRGB8888
+  1280×720 com 60/60 frames a ~30 fps. O serviço é `static`, sem vínculo de
+  boot; `stop` não descarrega módulos e o unload seguro é reboot. Permanecem
+  avisos não fatais de propriedades/helper no libcamera e de clocks CAMCC no
+  kernel 7.2; não houve Oops/soft lockup e as capturas concluíram.
+- **CDSP pronto, NPU parcial:** ADSP e CDSP estão `running`; somente
+  `/dev/fastrpc-cdsp` não seguro é exposto em `root:render 0660`. Os nós secure
+  e ADSP permanecem `root:root 0600`. `onnxruntime-qnn 2.4.0` registra o
+  `QNNExecutionProvider` como NPU, mas uma inferência HTP com fallback CPU
+  desabilitado falha em `QNN_BACKEND_ERROR_CANNOT_INITIALIZE` no SoC real ID
+  `635`/X1P42100, inclusive como root. Portanto não é bloqueio de permissão e
+  CDSP online não deve ser documentado como inferência NPU funcional.
+- Contratos reproduzíveis: `tests/test-accelerator-runtime.sh` valida os
+  arquivos instalados e `tools/verify-qnn-npu.py` impede falso positivo por CPU.
+
 ## ISO final
 
 Reempacotada em 20/08 (tarde) via `tools/resume-personal-iso-repack.sh` dentro
@@ -160,6 +184,8 @@ zstd --long=31 -t windows-drivers/X1407QA_DRV-full-2026-08-19.tar.zst
   antes de considerar uma instalação futura automaticamente bootável.
 - O percentual da bateria no live continua uma pendência separada e não deve
   ser considerado corrigido até o teste físico.
+- Revalidar QNN/HTP quando houver runtime Qualcomm que reconheça oficialmente
+  X1P42100/SoC ID 635; não persistir `soc_model`/`htp_arch` falsos.
 
 Consulte [`docs/BUILD-REPORT-2026-08-24.md`](docs/BUILD-REPORT-2026-08-24.md)
 para a memória completa desta execução. Os relatórios anteriores foram

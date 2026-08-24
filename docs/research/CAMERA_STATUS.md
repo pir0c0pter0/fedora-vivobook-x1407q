@@ -1,10 +1,10 @@
-# Camera Fix — Status e Progresso (2026-03-16)
+# Camera Fix — Status e Progresso (atualizado em 2026-08-24)
 
 ## Status Atual
 
 | Câmera | Status | Detalhes |
 |--------|--------|---------|
-| RGB #1 (OV02C10) | **FUNCIONANDO** | CCI1 bus 1 (AON), addr 0x36, libcamera OK, Snapshot mostra imagem |
+| RGB #1 (OV02C10) | **FUNCIONANDO COM WARNINGS** | CCI1 bus 1 (AON), addr 0x36; still XRGB8888 1080p e vídeo XRGB8888 720p30 validados. libcamera/CAMCC ainda avisam no kernel 7.2, sem impedir captura |
 | IR (HM1092) | **PESQUISADA, NÃO RESOLVIDA** | Sensor confirmado Hynix HM1092, ACPI VEN_QCOM&DEV_0C99, binding Asus Purwa = QRD_Pw, AVDD pm8010 LDO7_M @ 2.91V, DOVDD pm8010 LDO4_M @ 1.82V, MCLK0 GPIO 96, reset GPIO 109, AosShareResource=0. pm8010 ausente no SPMI scan mas Windows usa essas LDOs. Checkpoint A = YELLOW. I2C bus ainda TBD. Ver `2026-04-11-ir-camera-discovery.md` |
 
 ## Módulo DKMS: `vivobook-cam-fix` v2.0
@@ -18,6 +18,9 @@
 | `vivobook_cam_fix.c` | Módulo kernel: two-phase overlay + pm_runtime hold no CAMCC |
 | `Makefile` | CPP+DTC para 2 overlays → .dtbo → xxd → .h → kbuild .ko |
 | `dkms.conf` | DKMS config com PRE_BUILD para ambos overlays |
+| `ov02c10.yaml` | Tuning IPA simple compatível com libcamera 0.7.1 |
+| `vivobook-camera.service` | Loader on-demand; carrega `system_heap` e nunca deve ser habilitado no boot |
+| `vivobook-camera` | Comando seguro `start\|status` |
 
 **Cópia no repo:** `modules/vivobook-cam-fix-2.0/`
 
@@ -64,17 +67,27 @@ Phase 2: CCI0 status="okay" + CCI1 status="okay"
 ### 7. Imagem de ponta-cabeça
 **Fix:** Adicionado `rotation = <180>;` no nó do sensor OV02C10.
 
-## O que NÃO funciona / Pendente
+## Operação segura e pendências
 
-### Streaming via Pipewire (parcialmente)
-- `cam --capture=1` funciona (libcamera direto)
-- Pipewire/Snapshot: o PLL8 fix (`pm_runtime_get_sync`) pode não ser suficiente se CAMCC suspendeu ANTES do get_sync
-- **Workaround atual:** reboot limpo + insmod + wireplumber restart + Snapshot
-- **NUNCA fazer rmmod** do módulo — CAMCC corrompe state de GDSC ao recarregar, kernel crasha, shutdown trava
+### RGB concluída, sempre on-demand
+
+- `cam -l`, captura libcamera, vídeo 720p30 e PipeWire/Snapshot funcionam.
+- O serviço carrega `system_heap`, reinicia WirePlumber e mantém CAMCC/CAMSS/CCI
+  ativos antes do primeiro stream.
+- A regra udev concede uaccess apenas ao DMA heap `system`; não altera outros
+  heaps.
+- `systemctl stop vivobook-camera` é intencionalmente no-op: os módulos ficam
+  carregados. **Nunca usar `rmmod`**; reboot é o único unload seguro.
+- Fedora libcamera 0.7.1 carrega `ov02c10.yaml`, mas ainda avisa sobre static
+  properties, crop ioctls e sensor helper ausentes.
+- Kernel 7.2 ainda registra `cam_cc_slow_ahb_clk_src`, `Lucid PLL latch failed`
+  e `cam_cc_pll8 failed to enable` durante o teste. O patch que suprimiu esses
+  avisos no 6.19.8 não é instalado pelo setup e precisa ser reconstruído por
+  kernel. A captura atual conclui sem Oops/soft lockup.
 
 ### Câmera IR — BLOQUEADA
 - **DSDT HID:** QCOM0C99 = "Qualcomm Spectra 695 ISP Camera Auxiliary Sensor Device" (WOA-Project BOM)
-- **Modelo sensor:** desconhecido — QCOM0C99 é device ISP, não sensor direto
+- **Modelo sensor:** Hynix HM1092, confirmado pelo pacote Qualcomm/ASUS; QCOM0C99 é o device ISP auxiliar, não o identificador direto do sensor
 - **AeoB (CAMI_RES_MTP.bin):** MCLK0 24MHz (GPIO 96), reset GPIO 109, LDO4_M (1.8V DOVDD), LDO7_M (2.9V AVDD)
 - **AeoB nota:** arquivo sem sufixo `_Pw` (genérico MTP, não Purwa-specific) — pode não refletir hardware real do Vivobook
 - **Problema principal:** pm8010 ausente no SPMI. LDO3_M/LDO4_M funcionam fire-and-forget via RPMH, mas LDO7_M retorna `-ENOTRECOVERABLE` — devm_regulator_register() falha no voltage read
@@ -166,11 +179,12 @@ GPIO 237 — RGB camera reset  — active-low, output ✓
 ## Como Testar
 
 ```bash
-# Reboot limpo (obrigatório — CAMCC não suporta re-probe)
-sudo reboot
+# Após boot limpo, confirmar que continua on-demand
+systemctl is-enabled vivobook-camera.service  # static
+systemctl is-active vivobook-camera.service   # inactive
 
-# Carregar módulo
-sudo insmod /lib/modules/$(uname -r)/extra/vivobook_cam_fix.ko.xz
+# Carregar a pilha pelo wrapper
+vivobook-camera start
 
 # Verificar probe
 sudo dmesg | grep -E '(vivobook_cam|ov02c10|Error|fail)' | grep -v overlay
@@ -181,17 +195,28 @@ ls /sys/bus/i2c/drivers/ov02c10/
 
 # Testar câmera RGB
 cam -l
-cam -c 1 --capture=1
+cam -c 1 --capture=1 --stream role=still,width=1920,height=1080,pixelformat=XRGB8888 --file=/tmp/ov02c10-still.bin
+cam -c 1 --capture=60 --stream role=video,width=1280,height=720,pixelformat=XRGB8888 --file=/tmp/ov02c10-video-#.bin
 
 # Verificar IR (se probou)
 sudo i2cdetect -y 9   # CCI0 bus 0
 sudo i2cdetect -y 10  # CCI0 bus 1
 
-# GUI
-systemctl --user restart wireplumber
-sleep 3
+# GUI: o serviço já reinicia WirePlumber
 snapshot
 ```
+
+### Validação física pós-reboot — 2026-08-24
+
+- service inicialmente `inactive` e módulo ausente, preservando o contrato
+  on-demand;
+- `vivobook-camera start` concluiu sem erro;
+- still XRGB8888 1920×1080: 8.294.400 bytes;
+- vídeo XRGB8888 1280×720: 60/60 frames, aproximadamente 30 fps;
+- `systemctl stop` manteve o módulo carregado, como projetado; unload só por
+  reboot.
+- o tuning YAML foi usado, mas os avisos de metadata/helper do libcamera e os
+  avisos CAMCC do kernel 7.2 permaneceram; captura concluiu sem Oops/soft lockup.
 
 ## NUNCA FAZER
 
