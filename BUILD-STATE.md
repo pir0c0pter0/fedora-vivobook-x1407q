@@ -110,13 +110,14 @@
   botão/tampa.
 - **Reboot físico validado**: áudio autocarregou sem erros SoundWire, o cmdline
   contém `mem_sleep_default=s2idle`, `[s2idle]` ficou selecionado e a auditoria
-  final passou 16/16 no notebook.
+  final passou inteira no notebook.
 - **Plano CPU/bateria, Fases 0–4**: Runtime PM PCIe não trouxe ganho e não foi
-  persistido; `pd_ignore_unused` foi removido do sistema instalado com 16/16
-  PASS (~0.1–0.2W de ganho), enquanto `clk_ignore_unused` continua obrigatório
-  para o PCIe/Wi-Fi; o cap automático de CPU foi validado em 2.3808GHz na
-  bateria e 2.9568GHz no AC/USB. O repo agora reproduz esse contrato no setup,
-  BLS e `custom.cfg`; o live USB mantém pd+clk por segurança.
+  persistido; `pd_ignore_unused` foi removido do sistema instalado com a
+  auditoria inteira em PASS (~0.1–0.2W de ganho), enquanto
+  `clk_ignore_unused` continua obrigatório para o PCIe/Wi-Fi; o cap automático
+  de CPU foi validado em 2.3808GHz na bateria e 2.9568GHz no AC/USB. O repo
+  agora reproduz esse contrato no setup, BLS e `custom.cfg`; o live USB mantém
+  pd+clk por segurança.
 
 ## 2026-08-24 — GPU Vulkan, câmera RGB e CDSP/NPU
 
@@ -138,9 +139,12 @@
   clocks CAMCC deixaram de aparecer; a imagem sai na orientação correta porque
   `rotation = <180>` faz o libcamera dirigir `HFLIP`/`VFLIP` do sensor. Não
   houve Oops/soft lockup e as capturas concluíram.
-- **Estado global atual:** auditoria estável 16/16; boot total de 7.301s
-  (3.325s userspace, `graphical.target` em 3.278s e comandos do módulo da
-  câmera em 112ms). O
+- **Estado global atual:** auditoria estável 18/18 no notebook em 2026-08-24 —
+  os 16 checks originais mais `vulkan-pool-fix` e `npu-runtime`, que cobrem os
+  artefatos de userspace das conquistas 9 e 15 porque um 16/16 podia passar
+  numa máquina onde o fix Vulkan inteiro estava ausente: nada verificava
+  userspace. Boot total de 7.301s (3.325s userspace,
+  `graphical.target` em 3.278s e comandos do módulo da câmera em 112ms). O
   instalado desativa zram/Plymouth pelo cmdline; o live principal conserva
   `rd.live.ram`. O kernel 7.2 inclui nftables e o helper conntrack NetBIOS;
   `firewalld` foi validado `active/running` em 2026-08-24.

@@ -479,6 +479,163 @@ check_lid_safety() {
     pass lid-safety 'lid suspends via s2idle; hibernate-family targets remain masked'
 }
 
+# The audit usually runs under sudo, so the real user's HOME comes from
+# SUDO_USER (logname/USER when it is invoked directly). A plain root run falls
+# back to the first /home entry with a passwd record instead of /root.
+audit_real_home() {
+    local user home candidate
+
+    user=${SUDO_USER:-}
+    [[ -n $user ]] || user=$(logname 2>/dev/null || true)
+    [[ -n $user ]] || user=${USER:-}
+    if [[ -z $user || $user == root ]]; then
+        for candidate in /home/*; do
+            [[ -d $candidate ]] || continue
+            if getent passwd "${candidate##*/}" >/dev/null 2>&1; then
+                user=${candidate##*/}
+                break
+            fi
+        done
+    fi
+    home=$(getent passwd "$user" 2>/dev/null | cut -d: -f6 || true)
+    [[ -n $home ]] || home=${HOME:-}
+    [[ -n $home && -d $home ]] || return 1
+    printf '%s\n' "$home"
+}
+
+# ld.so never fails a bad LD_PRELOAD: it warns on stderr and ignores the
+# library, so the loader probe has to inspect stderr instead of the exit code.
+preload_rejects() {
+    local message
+
+    message=$(LD_PRELOAD=$1 /bin/true 2>&1 >/dev/null || true)
+    [[ -n $message ]]
+}
+
+check_vulkan_pool_fix() {
+    local library=/usr/local/lib64/vk_pool_fix.so
+    local wrapper=/usr/local/bin/ptyxis-fixed
+    local home icd_conf service desktop
+
+    if ! have getent; then
+        fail vulkan-pool-fix 'getent is unavailable'
+        return
+    fi
+    if [[ ! -f $library ]]; then
+        fail vulkan-pool-fix "${library} is absent"
+        return
+    fi
+    if preload_rejects "$library"; then
+        fail vulkan-pool-fix "${library} is present but the dynamic loader rejects it"
+        return
+    fi
+    # nm ships with binutils, which is optional: without it the loader probe
+    # above still rejects a broken library, only the symbol proof is skipped.
+    if have nm && ! nm -D --defined-only "$library" 2>/dev/null |
+        grep -q ' vkCreateDescriptorPool$'; then
+        fail vulkan-pool-fix "${library} does not export vkCreateDescriptorPool"
+        return
+    fi
+    if ! home=$(audit_real_home); then
+        fail vulkan-pool-fix 'the home directory of the real user is unresolvable'
+        return
+    fi
+    icd_conf=$home/.config/environment.d/vulkan-hardware.conf
+    if [[ ! -r $icd_conf ]] || ! grep -q '^VK_DRIVER_FILES=' "$icd_conf"; then
+        fail vulkan-pool-fix "${icd_conf} does not set VK_DRIVER_FILES"
+        return
+    fi
+    # Ptyxis absent: the library and the ICD override above are still required,
+    # but the terminal wrapper and its overrides have nothing to launch.
+    if ! have ptyxis; then
+        pass vulkan-pool-fix "${library} loads and exports the pool fix; VK_DRIVER_FILES is set (Ptyxis is not installed)"
+        return
+    fi
+    if [[ ! -x $wrapper ]]; then
+        fail vulkan-pool-fix "${wrapper} is absent or not executable"
+        return
+    fi
+    # Anchored to a real assignment: a plain substring match also accepts the
+    # line commented out, which silently drops the fix the wrapper exists for.
+    if ! grep -qE '^[[:space:]]*(export[[:space:]]+)?LD_PRELOAD=[^#]*vk_pool_fix\.so' "$wrapper" ||
+       ! grep -qE '^[[:space:]]*(export[[:space:]]+)?VK_DRIVER_FILES=' "$wrapper"; then
+        fail vulkan-pool-fix "${wrapper} does not set both LD_PRELOAD and VK_DRIVER_FILES"
+        return
+    fi
+    # Ptyxis is D-Bus activated: without the service override the wrapper is
+    # bypassed whenever the shell activates the terminal on the bus.
+    service=$home/.local/share/dbus-1/services/org.gnome.Ptyxis.service
+    if [[ ! -r $service ]] || ! grep -q "^Exec=${wrapper}" "$service"; then
+        fail vulkan-pool-fix "D-Bus activation in ${service} does not run ${wrapper}"
+        return
+    fi
+    desktop=$home/.local/share/applications/org.gnome.Ptyxis.desktop
+    if [[ ! -r $desktop ]] || ! grep -q "^Exec=${wrapper}" "$desktop" ||
+       grep '^Exec=' "$desktop" | grep -qv "^Exec=${wrapper}"; then
+        fail vulkan-pool-fix "${desktop} does not route every Exec line through ${wrapper}"
+        return
+    fi
+    pass vulkan-pool-fix 'vk_pool_fix.so loads and Ptyxis is launched through the wrapper with VK_DRIVER_FILES'
+}
+
+check_npu_runtime() {
+    local dsp_dir=/usr/share/qcom/x1p42100/Qualcomm/Purwa-IoT-EVK/dsp/cdsp
+    local conf_dir=/usr/share/qcom/conf.d
+    local shim=/usr/local/lib64/qnn_soc_id_fix.so
+    local mbn=/usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qccdsp8380.mbn
+    local binary model soc_id authcheck
+
+    authcheck=$(dirname "${BASH_SOURCE[0]}")/lib/hexagon-authcheck.py
+
+    if ! have ldconfig || ! ldconfig -p 2>/dev/null | grep -q 'libcdsprpc\.so'; then
+        fail npu-runtime 'libcdsprpc.so does not resolve through ldconfig'
+        return
+    fi
+    for binary in fastrpc_shell_3 fastrpc_shell_unsigned_3 libc++.so.1 libc++abi.so.1; do
+        if [[ ! -f "$dsp_dir/$binary" ]]; then
+            fail npu-runtime "Hexagon binary ${binary} is missing from ${dsp_dir}"
+            return
+        fi
+    done
+    model=$(tr -d '\0' </sys/firmware/devicetree/base/model 2>/dev/null || true)
+    if [[ -z $model ]]; then
+        fail npu-runtime 'the device-tree model is unreadable'
+        return
+    fi
+    if ! grep -rqF -- "$model" "$conf_dir" 2>/dev/null; then
+        fail npu-runtime "no ${conf_dir} YAML maps the device-tree model ${model}"
+        return
+    fi
+    if [[ ! -f $shim ]]; then
+        fail npu-runtime "${shim} is absent"
+        return
+    fi
+    if preload_rejects "$shim"; then
+        fail npu-runtime "${shim} is present but the dynamic loader rejects it"
+        return
+    fi
+    soc_id=$(cat /sys/devices/soc0/soc_id 2>/dev/null || true)
+    if [[ $soc_id == 555 ]]; then
+        fail npu-runtime 'soc_id reads 555 without the shim, so a global SoC ID spoof is installed'
+        return
+    fi
+    if [[ $soc_id != 635 ]]; then
+        fail npu-runtime "soc_id is ${soc_id:-unreadable}, expected the real 635"
+        return
+    fi
+    # The signed CDSP firmware whitelists the SHA-256 of every ELF segment it
+    # will run; the helper is only present for in-tree runs, never a failure.
+    if [[ -r $authcheck ]] && have python3 && [[ -r $mbn ]]; then
+        if ! python3 "$authcheck" --mbn "$mbn" "$dsp_dir" >/dev/null 2>&1; then
+            fail npu-runtime "the signed CDSP firmware does not authorize the binaries in ${dsp_dir}"
+            return
+        fi
+        pass npu-runtime 'FastRPC library, Hexagon binaries authorized by the signed CDSP firmware, conf.d mapping, and the SoC ID shim are installed'
+        return
+    fi
+    pass npu-runtime 'FastRPC library, Hexagon binaries, conf.d mapping, and the SoC ID shim are installed'
+}
+
 if ! require_audit_tools; then
     exit 2
 fi
@@ -499,6 +656,8 @@ check_charge_limit
 check_camera_rgb
 check_color_control
 check_lid_safety
+check_vulkan_pool_fix
+check_npu_runtime
 
 if [[ $infrastructure_failures -ne 0 ]]; then
     exit 2

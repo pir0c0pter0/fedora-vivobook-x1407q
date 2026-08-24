@@ -233,8 +233,8 @@ stages `firmware/ath11k/WCN6855/hw2.1/`, where `amss.bin` is the validated
 `wlanfw20.mbn` and the other three files are the matching X1407QA set.
 
 Per the handoff's completion condition: after Wi-Fi passes, rerun
-`tools/audit-stable-hardware.sh --post-reboot` (expect 16/16) and the full
-repository test suite before committing a final fix.
+`tools/audit-stable-hardware.sh --post-reboot` (expect every check to pass)
+and the full repository test suite before committing a final fix.
 
 ## Independent review (Codex, GPT-5.2, two rounds)
 

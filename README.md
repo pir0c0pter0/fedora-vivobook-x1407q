@@ -118,9 +118,10 @@ The setup does not expose `fastrpc-cdsp-secure` or ADSP nodes to regular users.
 The diagnostic verifier deliberately disables CPU fallback so a CPU execution
 cannot be mistaken for NPU acceleration.
 
-The hardware audit passed 16/16 after the autostart reboot. The status table
-still marks USB4/TB3 and the IR camera as unsolved rather than presenting them
-as done.
+The hardware audit passed all 16 checks it had at the time, after the autostart
+reboot; it now runs 18 (see [Step 7](#step-7--reboot-and-verify)). The status
+table still marks USB4/TB3 and the IR camera as unsolved rather than presenting
+them as done.
 
 ---
 
@@ -394,7 +395,19 @@ Or apply each fix manually — see [Detailed Fix Guide](#detailed-fix-guide) bel
 sudo reboot
 ```
 
-After reboot, verify everything:
+After reboot, verify everything — start with the full audit:
+
+```bash
+sudo tools/audit-stable-hardware.sh --post-reboot   # 18 checks, exit code = failures
+```
+
+> The audit grew from 16 to 18 checks: `vulkan-pool-fix` and `npu-runtime` also
+> verify the userspace artifacts of achievements
+> [9](#9-terminal-flicker-fix) and [15](#15-cdspnpu-fix) — the preload library,
+> the `ptyxis-fixed` wrapper, the D-Bus service override, and the
+> `libcdsprpc`/Hexagon runtime. They were added because a 16/16 pass was
+> recorded on a machine where the whole terminal flicker fix was missing: every
+> kernel-side check passed and nothing looked at userspace.
 
 ```bash
 # WiFi
@@ -514,7 +527,7 @@ The following scripts have been removed and replaced:
 | Parameter | Purpose |
 |-----------|---------|
 | `clk_ignore_unused` | Prevents kernel from disabling Qualcomm clocks needed by firmware |
-| `pd_ignore_unused` | Live USB safety guard only; removal from the installed system passed 16/16 hardware checks and saves ~0.1–0.2W |
+| `pd_ignore_unused` | Live USB safety guard only; removal from the installed system passed every hardware audit check and saves ~0.1–0.2W |
 | `mem_sleep_default=s2idle` | Installed system: selects the suspend mode validated on this hardware; `deep` crashes |
 | `systemd.zram=0` | Installed system only: prevents a 45s wait for the zram module absent from the custom kernel |
 | `plymouth.enable=0` | Installed system only: skips the unused splash wait; live boot keeps Plymouth |
@@ -560,7 +573,7 @@ sudo poweroff  # wait at least 30 seconds before powering on
 The stock linux-firmware `SILICONZ_LITE` image reached Mission mode but entered
 RDDM while processing the Windows board-data exchange. `wlanfw20.mbn` completed
 initialization, created `wlP4p1s0`, scanned and connected to Wi-Fi. The
-post-reboot hardware audit passed 16/16 checks.
+post-reboot hardware audit passed every check.
 
 The legacy `wcn_regulator_fix` DKMS package remains available for older kernels
 but is not loaded by the validated Linux 7.2 configuration.
