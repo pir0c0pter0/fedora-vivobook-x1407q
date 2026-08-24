@@ -31,11 +31,19 @@ function_contains() {
     ' "$audit"
 }
 
-expect 'lid safety does not require every sleep target to be masked' \
-    grep -q 'for target in sleep.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target' "$audit"
+expect 'lid safety does not require sleep/suspend targets to be unmasked' \
+    grep -q 'for target in sleep.target suspend.target' "$audit"
+expect 'lid safety does not keep hibernate-family targets masked' \
+    grep -q 'for target in hibernate.target hybrid-sleep.target suspend-then-hibernate.target' "$audit"
 for policy in HandleLidSwitch HandleLidSwitchExternalPower HandleLidSwitchDocked; do
-    expect "lid safety does not validate effective ${policy}=lock" grep -q "$policy" "$audit"
+    expect "lid safety does not validate effective ${policy}=suspend" grep -q "$policy" "$audit"
 done
+expect 'lid safety does not require the effective lid policy to be suspend' \
+    grep -qF 'expected suspend' "$audit"
+expect 'lid safety does not validate the selected s2idle mem_sleep mode' \
+    grep -qF '/sys/power/mem_sleep' "$audit"
+expect 'audio audit lacks the ALSA fallback for session-less runs' \
+    grep -qF 'ALSA card present (no user session bus)' "$audit"
 expect 'lid safety does not inspect effective logind configuration' grep -q 'systemd-analyze cat-config' "$audit"
 
 for function_name in check_wifi check_remoteproc check_gpu; do

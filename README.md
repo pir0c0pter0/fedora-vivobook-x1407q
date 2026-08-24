@@ -4,8 +4,8 @@
 
 **Author:** Pir0c0pter0 — pir0c0pter0000@gmail.com
 
-> **Build reproduzível de 2026-08-19:** consulte o
-> [relatório completo do Fedora 44 com Linux 7.2](docs/BUILD-REPORT-2026-08-19.md)
+> **Build reproduzível de 2026-08-20:** consulte o
+> [relatório completo do Fedora 44 com Linux 7.2](docs/BUILD-REPORT-2026-08-20.md)
 > e o [estado final da construção](BUILD-STATE.md).
 
 > **Regra de recuperação:** USB e USB tethering são infraestrutura crítica.
@@ -16,6 +16,14 @@
 > `35763b73052b88433a942b93555a1ce931d81abc67f9e465821c10683ac26199`.
 > Experimentos de Wi-Fi nunca devem resetar,
 > descarregar, reconfigurar ou colocar USB em risco.
+
+> **ISO personalizada atual:**
+> `Fedora-44-X1407QA-Linux-7.2-hardware-ram.iso`, SHA-256
+> `ffd0f459c07e8b5cf5ae591818c6bafae0e626a444b37dae72f1bf113a7a5cbf`.
+> Ela corrige a ordem de inicialização do WCN6855, inclui tethering USB/PAN e
+> restaura as permissões do live rootfs. Foi auditada e relida do pendrive, mas
+> ainda aguarda boot físico; o percentual da bateria permanece pendente. No
+> GRUB, teste primeiro **RAM, principal**.
 
 ## Hardware
 
@@ -54,7 +62,7 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | 10 | **Battery time in panel** | GNOME Shell extension `battery-time@wifiteste` | Hover over battery icon shows time remaining (weighted rolling average) |
 | 11 | **Touchpad right-click** | gsettings `click-method` → `areas` | Clickpad only reports BTN_LEFT; area-based mapping restores right-click |
 | 12 | **Audio working** | ALSA UCM2 regex fix for Vivobook 14 | Speaker, headphones, internal mic, headset mic, HDMI audio |
-| 13 | **Lid close = screen off** | logind `HandleLidSwitch=lock` + mask all suspend targets | S3 suspend crashes Snapdragon X → disabled suspend, lid just turns off screen |
+| 13 | **Lid close = s2idle suspend** | `mem_sleep_default=s2idle` + logind `HandleLidSwitch=suspend` | deep (S3) still crashes and stays disabled; s2idle validated 2026-08-24 — ~0.80W suspended vs 2.85W idle on |
 | 14 | **CPU frequency scaling** | Autoload in-tree `scmi_cpufreq` module | CPU scales 710MHz–2.96GHz, battery savings + thermal protection |
 | 15 | **CDSP / NPU online** | CDSP firmware in initramfs | Hexagon Compute DSP boots at early boot — fastrpc compute contexts available |
 | 16 | **Battery charge limit** | udev rule sets 80% threshold | Charge stops at 80%, starts at 50% — extends battery lifespan |
@@ -65,6 +73,11 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 **7 custom kernel modules**, **1 in-tree kernel module override** (`qcom-camss`), **1 Vulkan driver fix**, **1 PTY sync proxy**, **1 GNOME extension**, **1 UCM2 config fix**, **1 suspend fix**, **1 cpufreq fix**, **1 CDSP firmware fix**, **1 charge control fix** — everything needed for daily-driver use currently runs at runtime via DKMS/module overrides/LD_PRELOAD because the INSYDE UEFI blocks DTB overrides. USB4/TB3 is the first area that still appears to require a real custom-kernel path.
 
 ## Current Status
+
+Esta tabela descreve o sistema Fedora previamente instalado e configurado. O
+estado específico da nova ISO live está no aviso acima e em
+[`BUILD-STATE.md`](BUILD-STATE.md); não confunda validação histórica do sistema
+instalado com validação física da reconstrução atual.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -81,8 +94,8 @@ Starting from a laptop that **refused to boot** Linux, every fix was reverse-eng
 | **USB ports** | :white_check_mark: Working | USB-C, USB-A, HDMI |
 | **NVMe** | :white_check_mark: Working | PCIe 4.0 |
 | **Audio** | :white_check_mark: Working | UCM2 regex fix (see [Audio Fix](#12-audio-fix)) |
-| **Lid close** | :white_check_mark: Working | Lid close = screen off only, no suspend (see [Lid Close Fix](#13-lid-close-fix)) |
-| **Suspend (S3/s2idle)** | :warning: Broken | S3 deep and s2idle both crash — PDC wakeup mapping disabled in kernel, Qualcomm patches in review. Custom kernel with fix prepared but not yet built ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4)) |
+| **Lid close** | :white_check_mark: Working | Lid close = s2idle suspend, ~0.80W (see [Lid Close Fix](#13-lid-close-fix)) |
+| **Suspend (s2idle)** | :white_check_mark: Working | s2idle validated 2026-08-24 on installed `7.2.0-x1407qa` — 2 clean cycles, ~0.80W suspended. deep (S3) still crashes and stays disabled (see [Lid Close Fix](#13-lid-close-fix)) |
 | **cpufreq** | :white_check_mark: Working | SCMI cpufreq via autoload — 710MHz–2.96GHz, schedutil governor (see [CPU Frequency Fix](#14-cpu-frequency-fix)) |
 | **CDSP / NPU** | :white_check_mark: Working | CDSP firmware in initramfs — Hexagon compute online (see [CDSP/NPU Fix](#15-cdspnpu-fix)) |
 | **Charge control** | :white_check_mark: Working | Charge limit 80% via udev rule (see [Charge Control Fix](#16-battery-charge-control-fix)) |
@@ -205,15 +218,31 @@ firmware or DKMS modules to be present, so it works on any machine.
 
 ### Step 4 — Boot from USB
 
+> Ao usar a ISO personalizada indicada no topo, escolha **RAM, principal** no
+> GRUB; os parâmetros já estão incorporados. As instruções de edição abaixo são
+> para a ISO Fedora genérica construída pelo fluxo original.
+
 1. Connect the USB drive
 2. Hold **F12** (or **ESC**) during power-on for boot menu
 3. Select the USB drive
 4. At the GRUB menu, press **e** to edit the boot entry and add to the `linux` line:
    ```
-   clk_ignore_unused pd_ignore_unused
+   clk_ignore_unused pd_ignore_unused systemd.tpm2_wait=0 modprobe.blacklist=qcom_q6v5_pas
    ```
 5. Press **Ctrl+X** to boot
 6. The system will boot using the **Zenbook A14 DTB** (`x1p42100-asus-zenbook-a14.dtb`) — same Qualcomm "Purwa" die
+
+> Prefer a **USB-A port** for the installer. On USB-C, starting the ADSP resets
+> the Type-C mux and makes the live drive disappear mid-boot; the temporary
+> `qcom_q6v5_pas` blacklist prevents that reset. The ISO builder adds all four
+> parameters automatically. See Fedora's
+> [Snapdragon WoA install guide](https://fedoraproject.org/wiki/Snapdragon_WoA_Laptop_Install).
+
+If the machine still hard-resets, remove `quiet rhgb` and add
+`rd.break=cmdline rd.shell rd.debug log_buf_len=1M`. Reaching the dracut shell
+proves the kernel entered the initramfs; otherwise, report the exact ISO/kernel,
+BIOS version, USB port used, and a photo of the last visible line in
+[#11](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/11).
 
 > **Why Zenbook A14 DTB?** There is no DTB for the Vivobook X1407QA in the kernel. The Zenbook A14 uses the same Qualcomm x1p42100 SoC. The INSYDE UEFI firmware provides the DTB and **cannot be overridden** from GRUB on aarch64 (7 methods tested: BLS devicetree, GRUB fdt module, dtbloader.efi, EFI stub — all fail). So we boot with the Zenbook DTB and fix all hardware differences via runtime kernel modules.
 
@@ -223,7 +252,9 @@ firmware or DKMS modules to be present, so it works on any machine.
 2. Install Fedora to the NVMe drive (default btrfs layout)
 3. Reboot into the installed system
 
-> **Important:** At first boot from NVMe, edit GRUB again with `clk_ignore_unused pd_ignore_unused` — you'll make this permanent in Step 6.
+> **Important:** At first boot from NVMe, edit GRUB again with
+> `clk_ignore_unused pd_ignore_unused systemd.tpm2_wait=0` (without the temporary
+> `qcom_q6v5_pas` blacklist) — you'll make this permanent in Step 6.
 
 ### Step 6 — Apply firmware + all fixes (Part 2)
 
@@ -450,6 +481,8 @@ The following scripts have been removed and replaced:
 |-----------|---------|
 | `clk_ignore_unused` | Prevents kernel from disabling Qualcomm clocks needed by firmware |
 | `pd_ignore_unused` | Prevents kernel from disabling power domains needed by firmware |
+| `systemd.tpm2_wait=0` | Skips the two false TPM waits |
+| `modprobe.blacklist=qcom_q6v5_pas` | Live USB only: prevents the ADSP restart from disconnecting USB-C storage |
 | `rd.driver.pre=wcn_regulator_fix` | Loads WiFi regulator fix before PCIe scan |
 | `rd.systemd.mask=dev-tpm0.device` | Skips TPM wait in initrd |
 | `rd.systemd.mask=dev-tpmrm0.device` | Skips TPM resource manager wait in initrd |
@@ -457,7 +490,7 @@ The following scripts have been removed and replaced:
 **Full kernel cmdline used:**
 
 ```
-BOOT_IMAGE=/vmlinuz-6.19.6-300.fc44.aarch64 root=UUID=<your-uuid> ro rootflags=subvol=root quiet rhgb clk_ignore_unused pd_ignore_unused rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device
+BOOT_IMAGE=/vmlinuz-6.19.6-300.fc44.aarch64 root=UUID=<your-uuid> ro rootflags=subvol=root quiet rhgb clk_ignore_unused pd_ignore_unused systemd.tpm2_wait=0 rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device
 ```
 
 ### 2. WiFi Fix
@@ -849,51 +882,56 @@ systemctl --user restart pipewire pipewire-pulse wireplumber
 
 > **WARNING**: This fix modifies system files owned by `alsa-ucm` package. It will be overwritten on `alsa-ucm` updates. The proper fix is a PR to [alsa-ucm-conf](https://github.com/alsa-project/alsa-ucm-conf) upstream to add `Vivobook 14` to the regex permanently.
 
+> **Installed system, custom kernel `7.2.0-x1407qa` (2026-08-24):** audio was dead again — three stacked causes, all fixed on the machine:
+> 1. Custom kernel lacks `CONFIG_FW_LOADER_COMPRESS`/`_XZ` → it cannot load the topology `qcom/x1e80100/X1E80100-ASUS-Zenbook-A14-tplg.bin.xz` (linux-firmware ships only the `.xz`). Local fix: `xz -dk` the file so the uncompressed `.bin` exists.
+> 2. `snd_soc_wcd938x` did not autoload at boot (probe race; modalias is correct) → `/etc/modules-load.d/vivobook-audio.conf` with `snd_soc_wcd938x`.
+> 3. The UCM2 regex fix above had never been applied to the installed system → same `sed` as above.
+
 ---
 
 ### 13. Lid Close Fix
 
-**Problem:** Closing the laptop lid triggers S3 suspend (`PM: suspend entry (deep)`), but the Snapdragon X firmware (INSYDE) fails to save/restore power domain state. Instead of waking up, the system cold reboots — losing all open work.
+**Problem:** Closing the laptop lid used to trigger S3 suspend (`PM: suspend entry (deep)`), and the Snapdragon X firmware (INSYDE) fails to save/restore power domain state — instead of resuming, the system cold reboots. The original workaround disabled suspend entirely (lid = screen off + lock), leaving the machine at ~2.85W with the lid closed — ~25–50% battery lost per closed-lid night.
 
-**Root cause:** The kernel defaults to `mem_sleep=deep` (S3 suspend-to-RAM). On Qualcomm X1E/X1P platforms, the firmware doesn't properly handle S3 power domain save/restore, causing a crash during suspend. The system has `s2idle` available but untested, and S3 is unreliable.
+**Root cause:** Only `deep` (S3) is broken — its firmware power-domain save/restore path crashes. `s2idle` (S0ix) never enters that firmware path and works on this hardware: validated 2026-08-24 on the installed system (kernel `7.2.0-x1407qa`) with 2 clean suspend/resume cycles (`PM: suspend entry (s2idle)` → exit), WiFi/BT/keyboard/audio all working after resume. Measured drain while suspended: 0.368Wh in 27.7min = **~0.80W** (vs 2.85W idle powered on).
 
-**Solution:** Disable all suspend paths and configure lid close to only lock the screen (turns off display via DPMS):
+**Solution:** Default to s2idle, make the lid suspend again, keep `deep` and hibernate disabled:
 
 ```bash
-# 1. logind: lid close = lock screen only (no suspend)
+# 1. Kernel cmdline (BLS entry + custom.cfg): force s2idle as default suspend mode
+#    mem_sleep_default=s2idle
+
+# 2. logind: lid close = suspend (s2idle)
 sudo mkdir -p /etc/systemd/logind.conf.d/
 sudo tee /etc/systemd/logind.conf.d/no-suspend.conf > /dev/null << 'EOF'
 [Login]
-HandleLidSwitch=lock
-HandleLidSwitchExternalPower=lock
-HandleLidSwitchDocked=lock
+HandleLidSwitch=suspend
+HandleLidSwitchExternalPower=suspend
+HandleLidSwitchDocked=suspend
 IdleAction=ignore
 EOF
 
-# 2. Mask all suspend/hibernate systemd targets
-sudo systemctl mask suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target sleep.target
-
-# 3. Disable GNOME idle suspend (AC and battery)
-gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
-gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing'
-gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-timeout 0
-gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-timeout 0
+# 3. Unmask only the suspend path; hibernate stays masked (no swap)
+sudo systemctl unmask sleep.target suspend.target
+sudo systemctl mask hibernate.target hybrid-sleep.target suspend-then-hibernate.target
 ```
 
 **Behavior after fix:**
-- **Lid close** → screen turns off + session locks (lock screen on open)
-- **Lid open** → screen turns on, shows lock screen
-- **Idle timeout** → no suspend, screen stays on
-- **Power button** → interactive dialog (unchanged)
+- **Lid close** → s2idle suspend (~0.80W)
+- **Lid open / power button** → resume; WiFi/BT/keyboard/audio come back
+- **No timed wake** → the pm8xxx RTC has no alarm (no `wakealarm` in sysfs) — wake is always lid/power button
 
 | Property | Value |
 |----------|-------|
 | **Lid switch device** | `gpio-keys` (`/dev/input/event0`), capability `SW_LID` |
-| **Lid sensor type** | Hall effect (magnetic), exposed via GPIO in DTB |
-| **Suspend mode that crashes** | `deep` (S3 suspend-to-RAM) |
-| **Alternative available** | `s2idle` (S0ix) — untested, may work in future kernels |
-| **Config location** | `/etc/systemd/logind.conf.d/no-suspend.conf` |
-| **Systemd targets masked** | `suspend.target`, `hibernate.target`, `hybrid-sleep.target`, `suspend-then-hibernate.target`, `sleep.target` |
+| **Suspend mode used** | `s2idle` (S0ix) — validated 2026-08-24, 2 clean cycles |
+| **Suspend mode that crashes** | `deep` (S3) — still disabled, never re-enable |
+| **Power while suspended** | 0.368Wh / 27.7min = **~0.80W** (vs 2.85W idle on) |
+| **Kernel cmdline** | `mem_sleep_default=s2idle` (BLS entry + `custom.cfg`) |
+| **logind config** | `/etc/systemd/logind.conf.d/no-suspend.conf` — `HandleLidSwitch=suspend` (3 variants) + `IdleAction=ignore` |
+| **Targets unmasked** | `sleep.target`, `suspend.target` |
+| **Targets still masked** | `hibernate.target`, `hybrid-sleep.target`, `suspend-then-hibernate.target` (no swap) |
+| **Wakeup sources** | Lid / power button only — pm8xxx RTC has no `wakealarm` |
 
 ---
 
@@ -1259,11 +1297,11 @@ echo "1.15" | sudo tee /sys/kernel/vivobook_color/contrast
     Regex: added "Vivobook 14" to ASUS match group (same change)
 
 /etc/systemd/logind.conf.d/
-    no-suspend.conf            → HandleLidSwitch=lock, IdleAction=ignore
+    no-suspend.conf            → HandleLidSwitch=suspend (s2idle), IdleAction=ignore
 
 systemd masked targets:
-    suspend.target, hibernate.target, hybrid-sleep.target,
-    suspend-then-hibernate.target, sleep.target
+    hibernate.target, hybrid-sleep.target, suspend-then-hibernate.target
+    (sleep.target and suspend.target unmasked since 2026-08-24 — s2idle validated)
 
 /etc/udev/rules.d/
     99-battery-charge-limit.rules → charge_control_end_threshold=80
@@ -1475,7 +1513,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **TPM**: No fTPM support in Linux for Snapdragon X — devices masked to avoid boot delay
 - **Camera RGB**: Working on-demand (`vivobook-camera start`) with clean `libcamera`, still frame, and 720p30 video. Not auto-loaded at boot to avoid I2C bus renumbering. `rmmod` causes CAMCC GDSC corruption — reboot to unload (see [Camera Fix](#17-rgb-camera-fix))
 - **Camera IR**: pm8010 PMIC physically absent — sensor has no power. No one upstream has IR camera working on Snapdragon X Linux (see [Camera Research](#camera-research))
-- **Suspend (S3/s2idle)**: Both crash — PDC wakeup mapping disabled in kernel (`nwakeirq_map = 0`), system power domain has no idle state. Qualcomm patches (Maulik Shah, 5-patch series) in review on LKML. Custom kernel with fix prepared but build incomplete ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
+- **Suspend**: `deep` (S3) still crashes and stays disabled. `s2idle` validated 2026-08-24 on the installed `7.2.0-x1407qa` — 2 clean cycles, ~0.80W suspended (see [Lid Close Fix](#13-lid-close-fix)). No RTC alarm on pm8xxx — wake by lid/power button only ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
 - **USB4 / Thunderbolt 3**: Plain DP alt-mode works, but TB3 dock tunneling is blocked. `data_role` may initialize wrong, UCSI exposes no `ALT_MODE_OVERRIDE`, the normal firmware path never delivers `USBC_NOTIFY`, and current kernels still lack Qualcomm `x1e80100` host/router support. See [USB4/TB3 Status](#usb4tb3-status-mar-2026)
 - **~~cpufreq~~**: Fixed — `scmi_cpufreq` autoload via `/etc/modules-load.d/` ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
 - **~~CDSP/NPU offline~~**: Fixed — firmware in initramfs (see [CDSP/NPU Fix](#15-cdspnpu-fix)). Nota: Qualcomm **fechou a issue** sobre open-source dos headers DSP Snapdragon X (abr 2026) — não vão liberar. Proposta de driver alternativo QDA no kernel, mas incompatível com stack fastrpc existente.

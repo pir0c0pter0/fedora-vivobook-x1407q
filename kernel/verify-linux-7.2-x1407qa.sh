@@ -33,6 +33,7 @@ fi
 for required_config in \
     CONFIG_ISO9660_FS=y CONFIG_JOLIET=y CONFIG_EROFS_FS=y \
     CONFIG_EROFS_FS_ZIP=y CONFIG_DM_SNAPSHOT=m \
+    CONFIG_FW_LOADER_COMPRESS=y CONFIG_FW_LOADER_COMPRESS_XZ=y \
     CONFIG_QCOM_Q6V5_PAS=m CONFIG_QCOM_Q6V5_ADSP=m \
     CONFIG_QCOM_PMIC_GLINK=m CONFIG_BATTERY_QCOM_BATTMGR=m; do
     grep -qxF "$required_config" "$CONFIG" || {
@@ -40,6 +41,61 @@ for required_config in \
         exit 1
     }
 done
+for required_config in \
+    CONFIG_HID CONFIG_I2C_HID_CORE CONFIG_BACKLIGHT_CLASS_DEVICE \
+    CONFIG_REGULATOR CONFIG_SPMI CONFIG_MFD_SPMI_PMIC CONFIG_REGMAP_SPMI; do
+    grep -Eq "^${required_config}=[ym]$" "$CONFIG" || {
+        echo "ERROR: kernel config missing $required_config" >&2
+        exit 1
+    }
+done
+for required_config in \
+    CONFIG_I2C_QCOM_GENI=m CONFIG_ATH11K=m CONFIG_ATH11K_PCI=m \
+    CONFIG_QCOM_Q6V5_PAS=m CONFIG_QCOM_PMIC_GLINK=m \
+    CONFIG_BATTERY_QCOM_BATTMGR=m; do
+    grep -qxF "$required_config" "$CONFIG" || {
+        echo "ERROR: kernel config must be $required_config" >&2
+        exit 1
+    }
+done
+for required_config in \
+    CONFIG_USB_USBNET=m CONFIG_USB_NET_CDCETHER=m CONFIG_USB_NET_CDC_NCM=m \
+    CONFIG_USB_NET_RNDIS_HOST=m CONFIG_BT_BNEP=m \
+    CONFIG_POWER_SEQUENCING_QCOM_WCN=m; do
+    grep -qxF "$required_config" "$CONFIG" || {
+        echo "ERROR: kernel config must be $required_config" >&2
+        exit 1
+    }
+done
+for module in \
+    wcn_regulator_fix vivobook_hotkey_fix vivobook_kbd_fix vivobook_bl_fix; do
+    module_path=$(find "$MODULE_ROOT/extra" -type f -name "$module.ko*" -size +0c -print -quit)
+    [[ -n $module_path ]] || {
+            echo "ERROR: core X1407QA module missing: $module" >&2
+            exit 1
+    }
+    file "$module_path" | grep -Eq 'ARM aarch64|ARM64' || {
+        echo "ERROR: core X1407QA module is not aarch64: $module_path" >&2
+        exit 1
+    }
+    [[ $(modinfo -F vermagic "$module_path" | cut -d' ' -f1) == "$VERSION" ]] || {
+        echo "ERROR: core X1407QA module vermagic mismatch: $module_path" >&2
+        exit 1
+    }
+    modprobe -d "$ARTIFACT_ROOT" -S "$VERSION" --show-depends "$module" >/dev/null || {
+        echo "ERROR: dependencies do not resolve for $module" >&2
+        exit 1
+    }
+    if [[ $module == wcn_regulator_fix ]] &&
+        [[ $(modinfo -F softdep "$module_path") != *pwrseq_qcom_wcn* ]]; then
+        echo 'ERROR: wcn_regulator_fix must load after pwrseq_qcom_wcn' >&2
+        exit 1
+    fi
+done
+modprobe -d "$ARTIFACT_ROOT" -S "$VERSION" --show-depends pwrseq_qcom_wcn >/dev/null || {
+    echo 'ERROR: dependencies do not resolve for pwrseq_qcom_wcn' >&2
+    exit 1
+}
 
 rndis_module=
 for module_filename in rndis_host.ko rndis_host.ko.xz rndis_host.ko.zst rndis_host.ko.gz; do

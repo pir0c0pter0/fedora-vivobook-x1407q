@@ -319,12 +319,13 @@ check_hotkeys() {
 }
 
 check_audio() {
-    if ! have pactl; then
-        fail audio 'pactl is unavailable'
-        return
-    fi
-    if ! pactl info >/dev/null 2>&1; then
-        fail audio 'PulseAudio/PipeWire server is unavailable'
+    if ! have pactl || ! pactl info >/dev/null 2>&1; then
+        # Typical under sudo/SSH without a session bus: fall back to raw ALSA.
+        if grep -q '^[[:space:]]*[0-9]' /proc/asound/cards 2>/dev/null; then
+            pass audio 'ALSA card present (no user session bus)'
+        else
+            fail audio 'no audio server is reachable and no ALSA soundcard is registered'
+        fi
         return
     fi
     if ! pactl list short sinks 2>/dev/null | grep -q .; then
@@ -426,13 +427,20 @@ effective_logind_policy() {
 }
 
 check_lid_safety() {
-    local target status policy value
+    local target status policy value mem_sleep
 
     if ! have systemctl || ! have systemd-analyze; then
         fail lid-safety 'systemctl or systemd-analyze is unavailable'
         return
     fi
-    for target in sleep.target suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target; do
+    for target in sleep.target suspend.target; do
+        status=$(systemctl is-enabled "$target" 2>&1 || true)
+        if [[ $status == masked ]]; then
+            fail lid-safety "${target} is masked, expected unmasked for s2idle suspend"
+            return
+        fi
+    done
+    for target in hibernate.target hybrid-sleep.target suspend-then-hibernate.target; do
         status=$(systemctl is-enabled "$target" 2>&1 || true)
         if [[ $status != masked ]]; then
             fail lid-safety "${target} is ${status:-not-found}, expected masked"
@@ -444,12 +452,19 @@ check_lid_safety() {
             fail lid-safety "cannot determine effective ${policy} policy"
             return
         fi
-        if [[ $value != lock ]]; then
-            fail lid-safety "effective ${policy} policy is ${value}, expected lock"
+        if [[ $value != suspend ]]; then
+            fail lid-safety "effective ${policy} policy is ${value}, expected suspend"
             return
         fi
     done
-    pass lid-safety 'effective lid policies lock the session and all sleep targets remain masked'
+    if [[ -r /sys/power/mem_sleep ]]; then
+        mem_sleep=$(</sys/power/mem_sleep)
+        if [[ $mem_sleep != *'[s2idle]'* ]]; then
+            fail lid-safety "selected mem_sleep mode is ${mem_sleep}, expected [s2idle]"
+            return
+        fi
+    fi
+    pass lid-safety 'lid suspends via s2idle; hibernate-family targets remain masked'
 }
 
 if ! require_audit_tools; then

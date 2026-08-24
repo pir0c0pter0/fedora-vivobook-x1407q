@@ -871,11 +871,20 @@ write_core_module_boot_configs() {
     atomic_write_config "$dracut_target" 0644 "$dracut_content"
 }
 
-keep_sleep_targets_masked() {
+configure_sleep_targets() {
     local target
 
-    for target in sleep.target suspend.target hibernate.target \
-        hybrid-sleep.target suspend-then-hibernate.target; do
+    # s2idle validado em 2026-08-24 (~0.8W suspenso) — suspend liberado;
+    # hibernate segue masked (sem swap) e deep/S3 continua proibido.
+    for target in sleep.target suspend.target; do
+        systemctl unmask "$target" >/dev/null || return 1
+        [[ $(systemctl is-enabled "$target" 2>&1 || true) != masked ]] || {
+            err "Target de sleep permaneceu masked: $target"
+            return 1
+        }
+    done
+    for target in hibernate.target hybrid-sleep.target \
+        suspend-then-hibernate.target; do
         systemctl mask "$target" >/dev/null || return 1
         [[ $(systemctl is-enabled "$target" 2>&1 || true) == masked ]] || {
             err "Target de sleep não permaneceu masked: $target"
@@ -883,6 +892,9 @@ keep_sleep_targets_masked() {
         }
     done
 }
+
+# ponytail: alias de compat — tools/recover-stable-hardware.sh chama o nome antigo
+keep_sleep_targets_masked() { configure_sleep_targets; }
 
 # ─── Early boot remoteproc contract ──────────────────────────────────────────
 require_remoteproc_early_boot_assets() {
@@ -1090,10 +1102,12 @@ desktop_extension_status=0
 
 # ─── 1. GRUB kernel parameters ──────────────────────────────────────────────
 step 1 $TOTAL "Parâmetros de kernel (GRUB)..."
+# O blacklist só protege o boot do Live USB; no NVMe o ADSP é necessário.
+rm -f /etc/modprobe.d/anaconda-denylist.conf
 if ! grep -q "clk_ignore_unused" /etc/default/grub 2>/dev/null; then
-    sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet rhgb clk_ignore_unused pd_ignore_unused rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"/' /etc/default/grub
+    sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet rhgb clk_ignore_unused pd_ignore_unused systemd.tpm2_wait=0 rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device"/' /etc/default/grub
 fi
-grubby --update-kernel=ALL --args="clk_ignore_unused pd_ignore_unused rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device" 2>/dev/null || true
+grubby --update-kernel=ALL --args="clk_ignore_unused pd_ignore_unused systemd.tpm2_wait=0 rd.driver.pre=wcn_regulator_fix rd.systemd.mask=dev-tpm0.device rd.systemd.mask=dev-tpmrm0.device" 2>/dev/null || true
 log "  GRUB configurado"
 
 # ─── 2. WiFi — DKMS wcn_regulator_fix ───────────────────────────────────────
@@ -1296,23 +1310,36 @@ if [[ -f "$UCM_CONF" ]]; then
 else
     warn "  UCM2 x1e80100.conf não encontrado — instalar alsa-ucm-conf"
 fi
+# Topologia de áudio: kernel custom sem CONFIG_FW_LOADER_COMPRESS_XZ não lê
+# o .xz do linux-firmware — descomprimir (no-op se .bin já existe)
+AUDIO_TPLG="${FIRMWARE_ROOT}/qcom/x1e80100/X1E80100-ASUS-Zenbook-A14-tplg.bin"
+if [[ ! -f "$AUDIO_TPLG" && -f "${AUDIO_TPLG}.xz" ]]; then
+    if xz -dk "${AUDIO_TPLG}.xz"; then
+        log "  Topologia de áudio descomprimida (${AUDIO_TPLG##*/})"
+    else
+        warn "  Falha ao descomprimir ${AUDIO_TPLG}.xz"
+    fi
+fi
+echo "snd_soc_wcd938x" > /etc/modules-load.d/vivobook-audio.conf
+log "  Autoload snd_soc_wcd938x (race no boot)"
 
-# ─── 13. Lid close — Suspend desabilitado ───────────────────────────────────
-step 13 $TOTAL "Lid close (suspend desabilitado, lid = lock)..."
+# ─── 13. Lid close — suspend via s2idle ─────────────────────────────────────
+step 13 $TOTAL "Lid close (suspend s2idle)..."
 mkdir -p /etc/systemd/logind.conf.d
 cat > /etc/systemd/logind.conf.d/no-suspend.conf << 'EOF'
+# s2idle validado em 2026-08-24: ~0.8W suspenso (vs 2.85W idle) — deep/S3 continua proibido
 [Login]
-HandleLidSwitch=lock
-HandleLidSwitchExternalPower=lock
-HandleLidSwitchDocked=lock
+HandleLidSwitch=suspend
+HandleLidSwitchExternalPower=suspend
+HandleLidSwitchDocked=suspend
 IdleAction=ignore
 EOF
-if ! keep_sleep_targets_masked; then
-    err "Targets de suspend/hibernate não permaneceram masked"
+if ! configure_sleep_targets; then
+    err "Targets de sleep não ficaram no estado esperado"
     exit 1
 fi
 systemctl mask dev-tpm0.device dev-tpmrm0.device 2>/dev/null || true
-log "  Suspend disabled, lid = lock screen"
+log "  Lid = suspend (s2idle); hibernate continua masked"
 
 # ─── 14. cpufreq — scmi_cpufreq autoload ────────────────────────────────────
 step 14 $TOTAL "CPU frequency scaling (scmi_cpufreq)..."
@@ -1500,7 +1527,7 @@ echo "    Áudio:    pactl list sinks short"
 echo "    cpufreq:  cat /sys/devices/system/cpu/cpufreq/policy0/scaling_governor"
 echo "    CDSP:     cat /sys/class/remoteproc/remoteproc1/state"
 echo "    Carga:    cat /sys/class/power_supply/qcom-battmgr-bat/charge_control_end_threshold"
-echo "    Suspend:  systemctl is-enabled suspend.target"
+echo "    Suspend:  systemctl suspend  (s2idle; hibernate.target deve seguir masked)"
 echo "    Câmera:   vivobook-camera start  (on-demand, não auto-load)"
 echo ""
 
