@@ -110,9 +110,13 @@ sudo rescue-installed-boot --repair
 | [USB4/TB3 investigation](USB4-TB3-investigation.md) | Host-router reverse engineering and upstream blockers |
 | [Research archive](docs/research/) | Camera, Wi-Fi, suspend, USB4, and hardware notes |
 
-For bugs or hardware differences, open an
-[issue](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues) and attach
-the relevant logs from the detailed guide.
+## Testing another Snapdragon X device?
+
+Reports from other Snapdragon X laptops are welcome, but support outside the
+X1407QA is experimental. Open a
+[compatibility report](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/new)
+with the exact laptop model, Snapdragon SoC, boot result, working and broken
+hardware, and any relevant logs from the detailed guide.
 
 ## Scope and licensing
 
