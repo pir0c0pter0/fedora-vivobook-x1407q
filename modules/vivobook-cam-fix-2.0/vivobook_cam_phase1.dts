@@ -34,6 +34,7 @@
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/interconnect/qcom,icc.h>
 #include <dt-bindings/interconnect/qcom,x1e80100-rpmh.h>
+#include <dt-bindings/leds/common.h>
 #include <dt-bindings/power/qcom,rpmhpd.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
 
@@ -120,7 +121,27 @@
 };
 
 /* ------------------------------------------------------------------ */
-/* 2. Pinctrl states                                                   */
+/* 2. IR illuminator                                                   */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The ASUS Windows BSP exposes the IR emitter through QCOM0C27 and caps it
+ * at 700mA. Hardware validation on the X1407QA found the emitter on ganged
+ * PM8550 outputs 1+4; Linux splits the total equally between both.
+ */
+&pm8550_flash {
+	status = "okay";
+
+	ir_illuminator: led-0 {
+		function = LED_FUNCTION_TORCH;
+		color = <LED_COLOR_ID_IR>;
+		led-sources = <1>, <4>;
+		led-max-microamp = <700000>;
+	};
+};
+
+/* ------------------------------------------------------------------ */
+/* 3. Pinctrl states                                                   */
 /* ------------------------------------------------------------------ */
 &tlmm {
 	cci0_default: cci0-default-state {
@@ -262,7 +283,7 @@
 			/* Camera IR (Windows Hello) — Himax HM1092.
 			 * Endereco 0x24 confirmado por varredura; model ID
 			 * 0x1091 lido em 0x0000/0x0001. */
-			camera@24 {
+			hm1092: camera@24 {
 				compatible = "himax,hm1092";
 				reg = <0x24>;
 
@@ -280,6 +301,7 @@
 
 				avdd-supply = <&vreg_l7m_2p9>;
 				dovdd-supply = <&vreg_l4m_1p8>;
+				leds = <&ir_illuminator>;
 
 				port {
 					hm1092_ep: endpoint {

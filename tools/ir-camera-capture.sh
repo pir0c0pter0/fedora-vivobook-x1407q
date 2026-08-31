@@ -10,6 +10,7 @@
 
 set -euo pipefail
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 FRAMES=${1:-5}
 PNG=${2:-}
 MEDIA=${MEDIA_DEV:-/dev/media0}
@@ -21,6 +22,7 @@ trap 'rm -f "$RAW"' EXIT
 need() { command -v "$1" >/dev/null || { echo "falta $1 (dnf install v4l-utils)" >&2; exit 1; }; }
 need media-ctl
 need v4l2-ctl
+need python3
 
 if ! media-ctl -d "$MEDIA" -p >/dev/null 2>&1; then
     echo "sem acesso a $MEDIA — rode como root" >&2
@@ -57,45 +59,4 @@ echo "capturados $BYTES bytes ($((BYTES / (704 * H))) frames de ${W}x${H} Y10P) 
 
 [ -n "$PNG" ] || { cp "$RAW" "${RAW%.raw}.keep.raw"; echo "raw em ${RAW%.raw}.keep.raw"; exit 0; }
 
-python3 - "$RAW" "$PNG" "$W" "$H" <<'PY'
-import struct, sys, zlib
-
-raw_path, png_path, W, H = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
-STRIDE = ((W * 10 // 8) + 63) // 64 * 64   # camss alinha a linha em 64 bytes
-ROW = W * 10 // 8
-data = open(raw_path, "rb").read()
-frame = data[-STRIDE * H:]                  # ultimo frame
-
-def unpack(fr):
-    """Y10P: 4 pixels em 5 bytes, os 2 LSB de cada um no 5o."""
-    out = bytearray(W * H)
-    for y in range(H):
-        row = fr[y * STRIDE:y * STRIDE + ROW]
-        o, x, i = y * W, 0, 0
-        while x < W and i + 5 <= len(row):
-            b = row[i:i + 5]; i += 5
-            for k in range(4):
-                if x >= W:
-                    break
-                out[o + x] = ((b[k] << 2) | ((b[4] >> (2 * k)) & 3)) >> 2
-                x += 1
-    return out
-
-g = unpack(frame)
-lo, hi = min(g), max(g)
-# Sem iluminador IR a cena fica em ~10 niveis; sem esticar nao se ve nada.
-span = max(1, hi - lo)
-g = bytes(min(255, (v - lo) * 255 // span) for v in g)
-
-def chunk(tag, payload):
-    c = tag + payload
-    return struct.pack(">I", len(payload)) + c + struct.pack(">I", zlib.crc32(c) & 0xffffffff)
-
-scan = b"".join(b"\x00" + bytes(g[y * W:(y + 1) * W]) for y in range(H))
-open(png_path, "wb").write(
-    b"\x89PNG\r\n\x1a\n"
-    + chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 0, 0, 0, 0))
-    + chunk(b"IDAT", zlib.compress(scan, 9))
-    + chunk(b"IEND", b""))
-print(f"{png_path}: contraste esticado de [{lo},{hi}] para [0,255]")
-PY
+python3 "$SCRIPT_DIR/ir-frame-stats.py" "$RAW" "$W" "$H" "$PNG"

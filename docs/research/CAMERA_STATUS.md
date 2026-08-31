@@ -1,11 +1,11 @@
-# Camera Fix — Status e Progresso (atualizado em 2026-08-24)
+# Camera Fix — Status e Progresso (atualizado em 2026-08-31)
 
 ## Status Atual
 
 | Câmera | Status | Detalhes |
 |--------|--------|---------|
 | RGB #1 (OV02C10) | **FUNCIONANDO** | CCI1 bus 1 (AON), addr 0x36; still XRGB8888 1080p e vídeo XRGB8888 720p30 validados. Imagem na orientação correta via `rotation = <180>`. Sem warnings de libcamera/CAMCC no kernel 7.2 patchado |
-| IR (HM1092) | **FUNCIONANDO** (2026-08-24) | Streaming real pelo camss: 560×360 Y10 (`V4L2_PIX_FMT_Y10P`), ~29,7 fps, caminho `hm1092 → csiphy0 → csid0 → vfe0_rdi0 → /dev/video0`. Driver próprio `modules/vivobook-ir-cam-1.0` (`himax,hm1092`). Sensor em i2c-9 (CCI0 bus 0), addr 0x24, model ID `0x1091`. Sem iluminador IR — só fontes de IR aparecem. Captura: `tools/ir-camera-capture.sh` |
+| IR (HM1092) | **FUNCIONANDO** (2026-08-31) | Streaming real pelo camss: 560×360 Y10 (`V4L2_PIX_FMT_Y10P`), ~29,7 fps, caminho `hm1092 → csiphy0 → csid0 → vfe0_rdi0 → /dev/video0`. Driver próprio `modules/vivobook-ir-cam-1.0` (`himax,hm1092`). Sensor em i2c-9 (CCI0 bus 0), addr 0x24, model ID `0x1091`. Iluminador PM8550 de 700 mA (fontes 1+4) liga e desliga automaticamente com o stream. Captura: `tools/ir-camera-capture.sh` |
 
 ## Módulo DKMS: `vivobook-cam-fix` v2.0
 
@@ -93,7 +93,7 @@ errado, ver a seção da IR: o LDO7 só registra em 2.912 V.
   libcamera dirigir `HFLIP`/`VFLIP` do OV02C10; com `<0>` a imagem sai de ponta
   cabeça.
 
-### Câmera IR — FUNCIONANDO (2026-08-24)
+### Câmera IR — FUNCIONANDO (2026-08-31)
 
 Streaming real, 560×360 Y10 a ~29,7 fps. O bloqueio de abril era **software**,
 não ausência de hardware.
@@ -146,6 +146,25 @@ CSIPHY0 e CSIPHY4.
 | CSI-2 | 1 lane, link frequency 180 MHz, DT 0x2B (RAW10) |
 | Modo | 560×360, `MEDIA_BUS_FMT_Y10_1X10`, HTS 1616, VTS 750, ~29,7 fps |
 | Pipeline | `hm1092 → csiphy0 → csid0 → vfe0_rdi0 → /dev/video0` (`Y10P`) |
+| Iluminador | PM8550 `leds-qcom-flash`, fontes 1+4, `ir:torch`, teto de 700 mA |
+
+#### Iluminador IR e segurança
+
+O overlay cria o flash PM8550 e o módulo `vivobook_cam_fix` corrige o parent
+dinâmico para o dispositivo SPMI `0-01` antes do probe de `leds-qcom-flash`.
+O `hm1092` acende o IR somente depois de iniciar o sensor e sempre tenta apagá-lo
+antes de parar o sensor. Falhas transitórias de desligamento são repetidas sem
+soltar prematuramente a referência de runtime PM; o cleanup diferido roda em
+workqueue freezable. Suspend/resume, shutdown e remove têm caminhos explícitos
+de apagamento. Em shutdown/remove, uma falha persistente da LED class cai para
+um fallback síncrono no regmap do PM8550: ele limpa fontes 1+4 e module-enable
+e exige readback desligado antes de considerar o fallback concluído.
+
+No teste físico final de 2026-08-31, 30 frames por etapa produziram média
+`7,98 → 14,17 → 7,98` e p95 `9 → 36 → 9` em escuro → iluminado → escuro.
+Durante o stream iluminado, o regmap do PM8550 mostrou `ee46=80` e `ee4e=09`;
+após fechar, ambos voltaram a `00`, o LED class ficou em `0` e o HM1092 entrou
+em runtime suspend. O boot limpo não registrou Oops nem erro do driver.
 
 #### Sequência de init
 
@@ -171,11 +190,6 @@ de dados em 0x9A5C; cada escrita é um registro de 10 u32 —
 
 #### O que ainda falta
 
-- **Iluminador IR.** É o motivo de a imagem ser escura: sem ele só fontes de IR
-  (lâmpadas) aparecem. Não é GPIO — o INF `qccamflash_ext8380` traz
-  `IrLedCurrentMilliampere = 700`, ou seja um flash LED de PMIC. O kernel tem
-  `leds-qcom-flash.ko`, mas não existe nó de flash no DTB e falta descobrir qual
-  PMIC e qual base de registrador. Projeto à parte.
 - **libcamera.** A IR **aparece** no `cam -l` (`camera 1`,
   `/base/soc@0/cci@ac15000/i2c-bus@0/camera@24`) desde que o driver exponha
   `V4L2_CID_ANALOGUE_GAIN` — sem ele o libcamera descarta o sensor. Mas capturar
@@ -188,6 +202,11 @@ de dados em 0x9A5C; cada escrita é um registro de 10 u32 —
   foi testado e provavelmente exige RDI diferentes no mesmo VFE.
 
 ### Câmera IR — histórico do bloqueio (superado)
+
+> Os itens abaixo preservam a investigação e suas conclusões intermediárias,
+> inclusive hipóteses depois refutadas. O estado confirmado atual é o da seção
+> **Câmera IR — FUNCIONANDO (2026-08-31)** acima.
+
 - **DSDT HID:** QCOM0C99 = "Qualcomm Spectra 695 ISP Camera Auxiliary Sensor Device" (WOA-Project BOM)
 - **Modelo sensor:** Hynix HM1092, confirmado pelo pacote Qualcomm/ASUS; QCOM0C99 é o device ISP auxiliar, não o identificador direto do sensor
 - **AeoB (CAMI_RES_MTP.bin):** MCLK0 24MHz (GPIO 96), reset GPIO 109, LDO4_M (1.8V DOVDD), LDO7_M (2.9V AVDD)

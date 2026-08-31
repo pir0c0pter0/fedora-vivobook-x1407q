@@ -9,15 +9,20 @@
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
+#include <linux/leds.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <linux/property.h>
+#include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
+#include <linux/workqueue.h>
 #include <media/v4l2-cci.h>
 #include <media/v4l2-common.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-fwnode.h>
 
+#include "hm1092_ir_sequence.h"
 #include "hm1092_regs.h"
 
 #define HM1092_XVCLK			24000000
@@ -76,6 +81,19 @@
  * na imagem. Entao todo write de controle vai dentro do hold. */
 #define HM1092_REG_GROUP_HOLD		CCI_REG8(0x0104)
 #define HM1092_GAIN_MAX			0x3ff
+#define HM1092_IR_RETRY_DELAY_MS	250
+
+#define HM1092_FLASH_BASE		0xee00
+#define HM1092_FLASH_MODULE_ENABLE	0x46
+#define HM1092_FLASH_CHANNEL_ENABLE	0x4e
+#define HM1092_FLASH_MODULE_MASK	BIT(7)
+#define HM1092_FLASH_CHANNEL_MASK	(BIT(0) | BIT(3))
+
+/* O BSP oficial da ASUS limita o emissor a 700mA; o DT aplica esse teto. */
+static unsigned int ir_led_brightness = LED_FULL;
+module_param(ir_led_brightness, uint, 0644);
+MODULE_PARM_DESC(ir_led_brightness,
+		 "IR brightness (0-255; full scale is capped at 700mA by DT)");
 
 /* Escreve um valor de 16 bits em duas metades: baixo primeiro, como o
  * driver de fabrica faz (o sensor nao auto-incrementa). */
@@ -106,6 +124,16 @@ struct hm1092 {
 
 	struct clk *xvclk;
 	struct gpio_desc *reset;
+	struct led_classdev *ir_led;
+	struct regmap *ir_provider_regmap;
+	u32 ir_provider_base;
+	bool streaming;
+	bool cleanup_pending;
+	bool cleanup_stop_sensor;
+	bool cleanup_release_pm;
+	bool cleanup_restore_stream;
+	bool removing;
+	struct delayed_work ir_cleanup_work;
 	struct regulator_bulk_data supplies[ARRAY_SIZE(hm1092_supply_names)];
 };
 
@@ -231,31 +259,269 @@ static void hm1092_update_pad_format(struct v4l2_mbus_framefmt *fmt)
 	fmt->field = V4L2_FIELD_NONE;
 }
 
-static int hm1092_enable_streams(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *state,
-				 u32 pad, u64 streams_mask)
+static int hm1092_sensor_set(void *context, bool on)
 {
-	struct hm1092 *hm1092 = to_hm1092(sd);
+	struct hm1092 *hm1092 = context;
+
+	return cci_write(hm1092->regmap, HM1092_REG_STREAM_CONTROL, on, NULL);
+}
+
+static int hm1092_illuminator_set(void *context, bool on)
+{
+	struct hm1092 *hm1092 = context;
+	unsigned int brightness;
+
+	brightness = on ? min(ir_led_brightness, (unsigned int)LED_FULL) :
+			  LED_OFF;
+	return led_set_brightness_sync(hm1092->ir_led, brightness);
+}
+
+static int hm1092_provider_force_ir_off(void *context)
+{
+	struct hm1092 *hm1092 = context;
+	unsigned int channels = ~0U, module = ~0U;
+	int attempt, channel_ret, module_ret, read_channel_ret, read_module_ret;
+	int ret = -EIO;
+
+	for (attempt = 0; attempt < HM1092_IR_OFF_ATTEMPTS; attempt++) {
+		channel_ret = regmap_update_bits(hm1092->ir_provider_regmap,
+				hm1092->ir_provider_base +
+				HM1092_FLASH_CHANNEL_ENABLE,
+				HM1092_FLASH_CHANNEL_MASK, 0);
+		module_ret = regmap_update_bits(hm1092->ir_provider_regmap,
+				hm1092->ir_provider_base +
+				HM1092_FLASH_MODULE_ENABLE,
+				HM1092_FLASH_MODULE_MASK, 0);
+		read_channel_ret = regmap_read(hm1092->ir_provider_regmap,
+				hm1092->ir_provider_base +
+				HM1092_FLASH_CHANNEL_ENABLE, &channels);
+		read_module_ret = regmap_read(hm1092->ir_provider_regmap,
+				hm1092->ir_provider_base +
+				HM1092_FLASH_MODULE_ENABLE, &module);
+
+		if (!read_channel_ret && !read_module_ret &&
+		    !(channels & HM1092_FLASH_CHANNEL_MASK) &&
+		    !(module & HM1092_FLASH_MODULE_MASK)) {
+			hm1092->ir_led->brightness = LED_OFF;
+			return 0;
+		}
+
+		if (channel_ret)
+			ret = channel_ret;
+		else if (module_ret)
+			ret = module_ret;
+		else if (read_channel_ret)
+			ret = read_channel_ret;
+		else if (read_module_ret)
+			ret = read_module_ret;
+		else
+			ret = -EIO;
+	}
+
+	dev_emerg(hm1092->dev,
+		  "PM8550 IR off could not be proved: channels=%02x module=%02x ret=%d\n",
+		  channels & 0xff, module & 0xff, ret);
+	return ret;
+}
+
+static int hm1092_sensor_power_off(void *context)
+{
+	struct hm1092 *hm1092 = context;
+
+	gpiod_set_value_cansleep(hm1092->reset, 1);
+	clk_disable_unprepare(hm1092->xvclk);
+	/* bulk_disable desliga na ordem inversa: avdd, depois dovdd. */
+	return regulator_bulk_disable(ARRAY_SIZE(hm1092_supply_names),
+				      hm1092->supplies);
+}
+
+static int hm1092_sensor_power_restore(void *context)
+{
+	struct hm1092 *hm1092 = context;
 	int ret;
 
-	ret = pm_runtime_resume_and_get(hm1092->dev);
-	if (ret)
+	/* regulator_bulk_disable() re-enables earlier rails before an error. */
+	ret = clk_prepare_enable(hm1092->xvclk);
+	if (ret) {
+		dev_emerg(hm1092->dev,
+			  "failed to restore clock after power-off error: %d\n",
+			  ret);
 		return ret;
+	}
+
+	usleep_range(1000, 1200);
+	gpiod_set_value_cansleep(hm1092->reset, 0);
+	usleep_range(10000, 10500);
+	return 0;
+}
+
+static const struct hm1092_ir_ops hm1092_ir_ops = {
+	.sensor_set = hm1092_sensor_set,
+	.illuminator_set = hm1092_illuminator_set,
+	.provider_force_off = hm1092_provider_force_ir_off,
+	.sensor_power_off = hm1092_sensor_power_off,
+	.sensor_power_restore = hm1092_sensor_power_restore,
+};
+
+static int hm1092_force_ir_off(struct hm1092 *hm1092, const char *reason)
+{
+	int ret;
+
+	ret = hm1092_ir_force_off(&hm1092_ir_ops, hm1092);
+	if (ret)
+		dev_err_ratelimited(hm1092->dev,
+				"failed to force IR illuminator off during %s after %u attempts: %d\n",
+				reason, HM1092_IR_OFF_ATTEMPTS, ret);
+
+	return ret;
+}
+
+static int hm1092_teardown_ir_off(struct hm1092 *hm1092,
+				   const char *reason)
+{
+	int ret;
+
+	ret = hm1092_ir_teardown_off(&hm1092_ir_ops, hm1092);
+	if (ret)
+		dev_emerg(hm1092->dev,
+			  "IR illuminator off is unresolved during %s: %d\n",
+			  reason, ret);
+
+	return ret;
+}
+
+static int hm1092_start_streaming_hw(struct hm1092 *hm1092,
+				      bool *sensor_active)
+{
+	int ret;
+
+	lockdep_assert_held(hm1092->sd.state_lock);
+	*sensor_active = false;
 
 	ret = cci_multi_reg_write(hm1092->regmap, hm1092_init_regs,
 				  ARRAY_SIZE(hm1092_init_regs), NULL);
 	if (ret) {
 		dev_err(hm1092->dev, "failed to set mode\n");
-		goto out;
+		return ret;
 	}
 
 	ret = __v4l2_ctrl_handler_setup(hm1092->sd.ctrl_handler);
 	if (ret)
-		goto out;
+		return ret;
 
-	ret = cci_write(hm1092->regmap, HM1092_REG_STREAM_CONTROL, 1, NULL);
-out:
+	return hm1092_ir_start(&hm1092_ir_ops, hm1092, sensor_active);
+}
+
+static void hm1092_schedule_ir_cleanup(struct hm1092 *hm1092,
+					bool stop_sensor, bool release_pm,
+					bool restore_stream)
+{
+	lockdep_assert_held(hm1092->sd.state_lock);
+	if (hm1092->removing)
+		return;
+
+	hm1092->cleanup_pending = true;
+	hm1092->cleanup_stop_sensor = stop_sensor;
+	hm1092->cleanup_release_pm = release_pm;
+	hm1092->cleanup_restore_stream = restore_stream;
+	mod_delayed_work(system_freezable_wq, &hm1092->ir_cleanup_work,
+			 msecs_to_jiffies(HM1092_IR_RETRY_DELAY_MS));
+}
+
+static void hm1092_ir_cleanup_worker(struct work_struct *work)
+{
+	struct hm1092 *hm1092 = container_of(to_delayed_work(work),
+						 struct hm1092, ir_cleanup_work);
+	bool release_pm = false, retry = false, sensor_active;
+	int ret;
+
+	mutex_lock(hm1092->sd.state_lock);
+	if (!hm1092->cleanup_pending)
+		goto unlock;
+
+	if (hm1092->cleanup_restore_stream) {
+		if (hm1092->cleanup_stop_sensor) {
+			ret = hm1092_force_ir_off(hm1092,
+						  "stream restore cleanup");
+			if (ret) {
+				retry = true;
+				goto unlock;
+			}
+			ret = hm1092_sensor_set(hm1092, false);
+			if (ret) {
+				retry = true;
+				goto unlock;
+			}
+			hm1092->cleanup_stop_sensor = false;
+		}
+
+		ret = hm1092_start_streaming_hw(hm1092, &sensor_active);
+		if (ret) {
+			hm1092->cleanup_stop_sensor = sensor_active;
+			retry = true;
+			goto unlock;
+		}
+		goto complete;
+	}
+
+	ret = hm1092_force_ir_off(hm1092, "deferred cleanup");
+	if (ret) {
+		retry = true;
+		goto unlock;
+	}
+
+	if (hm1092->cleanup_stop_sensor) {
+		ret = hm1092_sensor_set(hm1092, false);
+		if (ret) {
+			dev_err_ratelimited(hm1092->dev,
+					"failed to stop sensor during deferred IR cleanup: %d\n",
+					ret);
+			retry = true;
+			goto unlock;
+		}
+	}
+
+complete:
+	release_pm = hm1092->cleanup_release_pm;
+	if (release_pm)
+		hm1092->streaming = false;
+	hm1092->cleanup_pending = false;
+	hm1092->cleanup_stop_sensor = false;
+	hm1092->cleanup_release_pm = false;
+	hm1092->cleanup_restore_stream = false;
+
+unlock:
+	retry = retry && !hm1092->removing;
+	mutex_unlock(hm1092->sd.state_lock);
+
+	if (release_pm)
+		pm_runtime_put(hm1092->dev);
+	if (retry)
+		mod_delayed_work(system_freezable_wq, &hm1092->ir_cleanup_work,
+				 msecs_to_jiffies(HM1092_IR_RETRY_DELAY_MS));
+}
+
+static int hm1092_enable_streams(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *state,
+				 u32 pad, u64 streams_mask)
+{
+	struct hm1092 *hm1092 = to_hm1092(sd);
+	bool sensor_active;
+	int ret;
+
+	if (hm1092->removing || hm1092->cleanup_pending)
+		return -EBUSY;
+
+	ret = pm_runtime_resume_and_get(hm1092->dev);
 	if (ret)
+		return ret;
+
+	ret = hm1092_start_streaming_hw(hm1092, &sensor_active);
+	if (!ret)
+		hm1092->streaming = true;
+	else if (sensor_active)
+		hm1092_schedule_ir_cleanup(hm1092, true, true, false);
+	else
 		pm_runtime_put(hm1092->dev);
 	return ret;
 }
@@ -265,8 +531,23 @@ static int hm1092_disable_streams(struct v4l2_subdev *sd,
 				  u32 pad, u64 streams_mask)
 {
 	struct hm1092 *hm1092 = to_hm1092(sd);
+	int ret;
 
-	cci_write(hm1092->regmap, HM1092_REG_STREAM_CONTROL, 0, NULL);
+	if (!hm1092->streaming && !hm1092->cleanup_pending)
+		return 0;
+
+	ret = hm1092_ir_stop(&hm1092_ir_ops, hm1092);
+	if (ret) {
+		hm1092_schedule_ir_cleanup(hm1092, true, true, false);
+		dev_warn_ratelimited(hm1092->dev,
+				"stream stop deferred after hardware error: %d\n",
+				ret);
+		return 0;
+	}
+
+	hm1092->streaming = false;
+	hm1092->cleanup_pending = false;
+	cancel_delayed_work(&hm1092->ir_cleanup_work);
 	pm_runtime_put(hm1092->dev);
 	return 0;
 }
@@ -276,12 +557,7 @@ static int hm1092_power_off(struct device *dev)
 	struct v4l2_subdev *sd = dev_get_drvdata(dev);
 	struct hm1092 *hm1092 = to_hm1092(sd);
 
-	gpiod_set_value_cansleep(hm1092->reset, 1);
-	clk_disable_unprepare(hm1092->xvclk);
-	/* bulk_disable desliga na ordem inversa: avdd, depois dovdd. */
-	regulator_bulk_disable(ARRAY_SIZE(hm1092_supply_names),
-			       hm1092->supplies);
-	return 0;
+	return hm1092_ir_power_off(&hm1092_ir_ops, hm1092);
 }
 
 static int hm1092_power_on(struct device *dev)
@@ -415,16 +691,56 @@ static void hm1092_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct hm1092 *hm1092 = to_hm1092(sd);
+	bool release_pm;
+	int power_ret = 0, ret, sensor_ret = 0;
 
+	mutex_lock(hm1092->sd.state_lock);
+	hm1092->removing = true;
+	mutex_unlock(hm1092->sd.state_lock);
 	v4l2_async_unregister_subdev(sd);
+	cancel_delayed_work_sync(&hm1092->ir_cleanup_work);
+
+	mutex_lock(hm1092->sd.state_lock);
+	release_pm = hm1092->streaming || hm1092->cleanup_release_pm;
+	ret = hm1092_teardown_ir_off(hm1092, "remove");
+	if (!ret && (hm1092->streaming || hm1092->cleanup_pending)) {
+		sensor_ret = hm1092_sensor_set(hm1092, false);
+		if (sensor_ret)
+			dev_err(hm1092->dev,
+				"failed to stop sensor during remove: %d\n",
+				sensor_ret);
+	}
+	if (!ret && !sensor_ret) {
+		hm1092->streaming = false;
+		hm1092->cleanup_pending = false;
+		hm1092->cleanup_release_pm = false;
+		hm1092->cleanup_restore_stream = false;
+	}
+	mutex_unlock(hm1092->sd.state_lock);
+
+	pm_runtime_disable(hm1092->dev);
+	if (!pm_runtime_status_suspended(hm1092->dev)) {
+		power_ret = hm1092_power_off(hm1092->dev);
+		if (!power_ret)
+			pm_runtime_set_suspended(hm1092->dev);
+		else
+			hm1092_teardown_ir_off(hm1092,
+						"failed remove power-off");
+	}
+	if (!power_ret) {
+		mutex_lock(hm1092->sd.state_lock);
+		hm1092->streaming = false;
+		hm1092->cleanup_pending = false;
+		hm1092->cleanup_release_pm = false;
+		hm1092->cleanup_restore_stream = false;
+		mutex_unlock(hm1092->sd.state_lock);
+	}
+	if (release_pm)
+		pm_runtime_put_noidle(hm1092->dev);
+
 	v4l2_subdev_cleanup(sd);
 	media_entity_cleanup(&sd->entity);
 	v4l2_ctrl_handler_free(sd->ctrl_handler);
-	pm_runtime_disable(hm1092->dev);
-	if (!pm_runtime_status_suspended(hm1092->dev)) {
-		hm1092_power_off(hm1092->dev);
-		pm_runtime_set_suspended(hm1092->dev);
-	}
 }
 
 static int hm1092_probe(struct i2c_client *client)
@@ -439,6 +755,7 @@ static int hm1092_probe(struct i2c_client *client)
 		return -ENOMEM;
 
 	hm1092->dev = dev;
+	INIT_DELAYED_WORK(&hm1092->ir_cleanup_work, hm1092_ir_cleanup_worker);
 
 	hm1092->xvclk = devm_v4l2_sensor_clk_get(dev, "xvclk");
 	if (IS_ERR(hm1092->xvclk))
@@ -458,6 +775,26 @@ static int hm1092_probe(struct i2c_client *client)
 	if (IS_ERR(hm1092->reset))
 		return dev_err_probe(dev, PTR_ERR(hm1092->reset),
 				     "failed to get reset gpio\n");
+
+	hm1092->ir_led = devm_of_led_get(dev, 0);
+	if (IS_ERR(hm1092->ir_led))
+		return dev_err_probe(dev, PTR_ERR(hm1092->ir_led),
+				     "failed to get IR illuminator\n");
+	if (!hm1092->ir_led->dev || !hm1092->ir_led->dev->parent ||
+	    !hm1092->ir_led->dev->parent->parent)
+		return dev_err_probe(dev, -ENODEV,
+				     "IR illuminator provider is incomplete\n");
+	hm1092->ir_provider_regmap =
+		dev_get_regmap(hm1092->ir_led->dev->parent->parent, NULL);
+	if (!hm1092->ir_provider_regmap)
+		return dev_err_probe(dev, -ENODEV,
+				     "failed to get IR provider regmap\n");
+	ret = device_property_read_u32(hm1092->ir_led->dev->parent,
+				       "reg", &hm1092->ir_provider_base);
+	if (ret || hm1092->ir_provider_base != HM1092_FLASH_BASE)
+		return dev_err_probe(dev, ret ?: -EINVAL,
+				     "unexpected IR provider base %#x\n",
+				     hm1092->ir_provider_base);
 
 	for (i = 0; i < ARRAY_SIZE(hm1092_supply_names); i++)
 		hm1092->supplies[i].supply = hm1092_supply_names[i];
@@ -523,8 +860,69 @@ probe_error_power_off:
 	return ret;
 }
 
-static DEFINE_RUNTIME_DEV_PM_OPS(hm1092_pm_ops, hm1092_power_off,
-				 hm1092_power_on, NULL);
+static int hm1092_system_suspend(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct hm1092 *hm1092 = to_hm1092(sd);
+	int ret;
+
+	mutex_lock(hm1092->sd.state_lock);
+	ret = hm1092_force_ir_off(hm1092, "system suspend");
+	mutex_unlock(hm1092->sd.state_lock);
+	if (ret)
+		return ret;
+
+	return pm_runtime_force_suspend(dev);
+}
+
+static int hm1092_system_resume(struct device *dev)
+{
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct hm1092 *hm1092 = to_hm1092(sd);
+	bool sensor_active;
+	int ret;
+
+	ret = pm_runtime_force_resume(dev);
+	if (ret)
+		return ret;
+
+	mutex_lock(hm1092->sd.state_lock);
+	if (!hm1092->streaming || hm1092->cleanup_pending) {
+		ret = 0;
+		goto unlock;
+	}
+
+	ret = hm1092_start_streaming_hw(hm1092, &sensor_active);
+	if (ret)
+		hm1092_schedule_ir_cleanup(hm1092, sensor_active, false, true);
+
+unlock:
+	mutex_unlock(hm1092->sd.state_lock);
+
+	return ret;
+}
+
+static void hm1092_shutdown(struct i2c_client *client)
+{
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct hm1092 *hm1092 = to_hm1092(sd);
+	int ret;
+
+	mutex_lock(hm1092->sd.state_lock);
+	hm1092->removing = true;
+	mutex_unlock(hm1092->sd.state_lock);
+	cancel_delayed_work_sync(&hm1092->ir_cleanup_work);
+	mutex_lock(hm1092->sd.state_lock);
+	ret = hm1092_teardown_ir_off(hm1092, "shutdown");
+	if (!ret)
+		hm1092->streaming = false;
+	mutex_unlock(hm1092->sd.state_lock);
+}
+
+static const struct dev_pm_ops hm1092_pm_ops = {
+	SET_SYSTEM_SLEEP_PM_OPS(hm1092_system_suspend, hm1092_system_resume)
+	SET_RUNTIME_PM_OPS(hm1092_power_off, hm1092_power_on, NULL)
+};
 
 static const struct of_device_id hm1092_of_match[] = {
 	{ .compatible = "himax,hm1092" },
@@ -535,11 +933,12 @@ MODULE_DEVICE_TABLE(of, hm1092_of_match);
 static struct i2c_driver hm1092_i2c_driver = {
 	.driver = {
 		.name = "hm1092",
-		.pm = pm_sleep_ptr(&hm1092_pm_ops),
+		.pm = pm_ptr(&hm1092_pm_ops),
 		.of_match_table = hm1092_of_match,
 	},
 	.probe = hm1092_probe,
 	.remove = hm1092_remove,
+	.shutdown = hm1092_shutdown,
 };
 
 module_i2c_driver(hm1092_i2c_driver);
@@ -547,3 +946,4 @@ module_i2c_driver(hm1092_i2c_driver);
 MODULE_AUTHOR("Pir0c0pter0");
 MODULE_DESCRIPTION("Himax HM1092 IR sensor driver");
 MODULE_LICENSE("GPL");
+MODULE_SOFTDEP("pre: leds_qcom_flash");

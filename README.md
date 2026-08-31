@@ -60,7 +60,7 @@ USB boot and installation cycle is still pending.
 ## Current status
 
 The table describes the installed Fedora system validated on the X1407QA on
-August 24, 2026. It does not replace the pending physical test of the latest
+August 31, 2026. It does not replace the pending physical test of the latest
 ISO rebuild.
 
 | Area | State |
@@ -72,11 +72,25 @@ ISO rebuild.
 | GPU acceleration and Vulkan | ✅ Working |
 | Audio | ✅ Working |
 | RGB camera and PipeWire | ✅ Working |
-| IR camera stream | ⚠️ Working without an IR illuminator |
+| IR camera and illuminator | ✅ Working; 700 mA PM8550 IR torch follows the stream lifecycle |
 | CDSP and QNN/HTP NPU inference | ✅ Working |
 | Suspend | ✅ `s2idle` only; `deep` is unsafe |
 | USB-C, USB 3 and DisplayPort | ✅ Working |
 | USB4 / Thunderbolt tunneling | ❌ Waiting for the upstream Qualcomm host-router stack |
+
+The IR result was verified after a clean reboot with 30-frame
+dark → illuminated → dark captures. Mean luminance changed
+`7.98 → 14.17 → 7.98` and p95 changed `9 → 36 → 9`; direct PM8550
+readback showed the module/channels active only during the illuminated stream
+and back at `ee46=00`, `ee4e=00` after close. Capture a contrast-stretched PNG
+through V4L2 with:
+
+```bash
+sudo tools/ir-camera-capture.sh 30 /tmp/camera-ir.png
+```
+
+The native libcamera soft-ISP still rejects monochrome `R10_CSI2P`; this is a
+userspace format limitation, not a sensor or illuminator failure.
 
 ## Quick start
 
@@ -104,7 +118,7 @@ sudo rescue-installed-boot --repair
 |---|---|
 | [Current build state](BUILD-STATE.md) | Exact validated state, release hashes, and remaining work |
 | [Detailed technical guide](docs/TECHNICAL-GUIDE.md) | Full installation history, fix guide, commands, and implementation notes |
-| [August 24 build report](docs/BUILD-REPORT-2026-08-24.md) | Latest hardware validation evidence |
+| [August 24 build report](docs/BUILD-REPORT-2026-08-24.md) | Full-system ISO/build validation baseline; IR hardware proof is documented above |
 | [Firmware extraction guide](docs/GUIA-EXTRAIR-FIRMWARE.md) | Recovering Qualcomm firmware from Windows |
 | [Post-install guide](docs/GUIA-POS-INSTALACAO.md) | Current post-install checks and accelerator validation |
 | [USB4/TB3 investigation](USB4-TB3-investigation.md) | Host-router reverse engineering and upstream blockers |

@@ -55,6 +55,22 @@ CORE_DKMS_PACKAGES=(
     "vivobook-bl-fix:vivobook_bl_fix.c:vivobook_bl_fix"
     "vivobook-hotkey-fix:vivobook_hotkey_fix.c:vivobook_hotkey_fix"
 )
+CAMERA_DKMS_PACKAGES=(
+    "vivobook-cam-fix:2.0:vivobook_cam_fix"
+    "vivobook-ir-cam:1.0:hm1092"
+)
+CAMERA_DKMS_FILES=(
+    "vivobook-cam-fix-2.0/Makefile"
+    "vivobook-cam-fix-2.0/dkms.conf"
+    "vivobook-cam-fix-2.0/vivobook_cam_fix.c"
+    "vivobook-cam-fix-2.0/vivobook_cam_phase1.dts"
+    "vivobook-cam-fix-2.0/vivobook_cam_phase2.dts"
+    "vivobook-ir-cam-1.0/Makefile"
+    "vivobook-ir-cam-1.0/dkms.conf"
+    "vivobook-ir-cam-1.0/hm1092.c"
+    "vivobook-ir-cam-1.0/hm1092_ir_sequence.h"
+    "vivobook-ir-cam-1.0/hm1092_regs.h"
+)
 CORE_SOURCE_MANIFEST=(
     "modules/wcn-regulator-fix-1.0/wcn_regulator_fix.c:471793ec12df3785b652857aec4800c957fe3518bc33bae229daf1f326ce4180"
     "modules/wcn-regulator-fix-1.0/Makefile:2c73bfe02197b0fc21d9fe3e3a430cdc679374754425bb16e4036b72accb945e"
@@ -79,7 +95,7 @@ fi
 # ─── Dependencies ────────────────────────────────────────────────────────────
 install_exact_dependencies() {
     local scope=${1:-setup} package command_name
-    local -a build_packages=(gcc make dkms perl elfutils-libelf-devel openssl-devel flex bison bc)
+    local -a build_packages=(gcc cpp make dkms perl elfutils-libelf-devel openssl-devel flex bison bc dtc xxd)
     local -a runtime_packages=(curl tar xz dracut kmod util-linux)
     if [[ $scope == setup ]]; then
         runtime_packages+=(
@@ -111,8 +127,8 @@ install_exact_dependencies() {
         fi
     done
     for command_name in \
-        awk bc curl depmod dkms dnf dracut flock grep install lsinitrd make \
-        modinfo mount mv rpm sha256sum systemctl tar unshare xz; do
+        awk bc cpp curl depmod dkms dnf dracut dtc fdtget flock grep install lsinitrd make \
+        modinfo mount mv rpm sha256sum systemctl tar unshare xz xxd; do
         if ! command -v "$command_name" &>/dev/null; then
             err "Comando obrigatório ausente: $command_name"
             return 1
@@ -706,6 +722,367 @@ stage_bundled() {
     fi
     stage_bundled_firmware
 }
+
+stage_camera_dkms_sources() (
+    local source_root=${CAMERA_DKMS_SOURCE_ROOT:-/usr/src}
+    local keep_backups=${CAMERA_DKMS_KEEP_BACKUPS:-0}
+    local transaction_id=${CAMERA_DKMS_TRANSACTION_ID:-$$}
+    local stage_marker=${CAMERA_DKMS_STAGE_MARKER:-}
+    local package_record module version package_dir relative source
+    local destination stage_dir backup_dir index published=0
+    local committed=0 publication_active=0 publication_had_destination=0
+    local publication_index=-1
+    local -a destinations=() stage_dirs=() backup_dirs=()
+
+    cleanup_camera_stage() {
+        local path
+
+        for path in "${stage_dirs[@]}"; do
+            [[ -z $path || (! -e $path && ! -L $path) ]] || rm -rf -- "$path"
+        done
+    }
+    cleanup_camera_backups() {
+        local path
+
+        for path in "${backup_dirs[@]}"; do
+            if [[ -n $path && (-e $path || -L $path) ]] &&
+                ! rm -rf -- "$path"; then
+                warn "Backup DKMS recuperável não removido: $path"
+            fi
+        done
+    }
+    rollback_camera_publication() {
+        local rollback_destination rollback_backup
+
+        if ((publication_active && publication_index >= published)); then
+            rollback_destination=${destinations[publication_index]}
+            rollback_backup=${backup_dirs[publication_index]}
+            if ((publication_had_destination)); then
+                if [[ -d $rollback_backup ]]; then
+                    rm -rf -- "$rollback_destination"
+                    mv -T -- "$rollback_backup" "$rollback_destination" ||
+                        err "Falha crítica ao restaurar DKMS: $rollback_destination"
+                fi
+            elif [[ ! -e ${stage_dirs[publication_index]} &&
+                    ! -L ${stage_dirs[publication_index]} ]]; then
+                rm -rf -- "$rollback_destination"
+            fi
+            publication_active=0
+        fi
+
+        while ((published > 0)); do
+            published=$((published - 1))
+            rollback_destination=${destinations[published]}
+            rollback_backup=${backup_dirs[published]}
+            rm -rf -- "$rollback_destination"
+            if [[ -d $rollback_backup ]]; then
+                mv -T -- "$rollback_backup" "$rollback_destination" ||
+                    err "Falha crítica ao restaurar DKMS: $rollback_destination"
+            fi
+        done
+    }
+    finish_camera_stage() {
+        local status=$?
+
+        trap - EXIT HUP INT TERM
+        if ((committed && (status == 0 || !keep_backups))); then
+            ((keep_backups)) || cleanup_camera_backups
+        else
+            rollback_camera_publication
+            [[ -z $stage_marker || (! -e $stage_marker && ! -L $stage_marker) ]] ||
+                rm -f -- "$stage_marker"
+        fi
+        cleanup_camera_stage
+        exit "$status"
+    }
+    trap finish_camera_stage EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    if [[ $source_root != /* || $source_root == / ]]; then
+        err "Raiz DKMS da câmera insegura: $source_root"
+        return 1
+    fi
+    mkdir -p "$source_root" || return 1
+
+    for package_record in "${CAMERA_DKMS_PACKAGES[@]}"; do
+        IFS=: read -r module version _ <<< "$package_record"
+        package_dir="${module}-${version}"
+        destination="${source_root}/${package_dir}"
+        stage_dir="${destination}.new.${transaction_id}"
+        backup_dir="${destination}.old.${transaction_id}"
+
+        if [[ -L $destination ]] ||
+            [[ -e $destination && ! -d $destination ]] ||
+            [[ -e $stage_dir || -L $stage_dir || -e $backup_dir || -L $backup_dir ]]; then
+            err "Destino DKMS da câmera inseguro: $destination"
+            return 1
+        fi
+        mkdir "$stage_dir" || return 1
+        destinations+=("$destination")
+        stage_dirs+=("$stage_dir")
+        backup_dirs+=("$backup_dir")
+
+        for relative in "${CAMERA_DKMS_FILES[@]}"; do
+            [[ $relative == "$package_dir/"* ]] || continue
+            source="${SCRIPT_DIR}/modules/${relative}"
+            if [[ ! -f $source || -L $source ]]; then
+                err "Fonte DKMS da câmera ausente ou insegura: $source"
+                return 1
+            fi
+            install -m 0644 "$source" \
+                "$stage_dir/${relative#*/}" || return 1
+        done
+    done
+
+    for index in "${!destinations[@]}"; do
+        destination=${destinations[index]}
+        stage_dir=${stage_dirs[index]}
+        backup_dir=${backup_dirs[index]}
+        publication_index=$index
+        publication_had_destination=0
+        [[ ! -d $destination ]] || publication_had_destination=1
+        publication_active=1
+
+        if [[ -d $destination ]]; then
+            if ! mv -T -- "$destination" "$backup_dir"; then
+                return 1
+            fi
+        fi
+        if ! mv -T -- "$stage_dir" "$destination"; then
+            return 1
+        fi
+        stage_dirs[index]=
+        ((++published))
+        publication_active=0
+    done
+
+    if [[ -n $stage_marker ]]; then
+        if [[ $stage_marker != "${source_root}/"* ||
+              -e $stage_marker || -L $stage_marker ]]; then
+            err "Marcador inseguro da transação DKMS: $stage_marker"
+            return 1
+        fi
+        (set -o noclobber; : > "$stage_marker") || return 1
+    fi
+    committed=1
+    ((keep_backups)) || cleanup_camera_backups
+    log "  Fontes DKMS de câmera atualizadas"
+)
+
+verify_camera_dkms_vermagic() {
+    local kernel=$1 state_root=${CAMERA_DKMS_STATE_ROOT:-/var/lib/dkms}
+    local package_record module version artifact path vermagic release
+    local -a artifacts
+
+    for package_record in "${CAMERA_DKMS_PACKAGES[@]}"; do
+        IFS=: read -r module version artifact <<< "$package_record"
+        mapfile -t artifacts < <(find \
+            "${state_root}/${module}/${version}/${kernel}" -type f \
+            -path '*/module/*.ko*' -name "${artifact}.ko*" -print 2>/dev/null)
+        if [[ ${#artifacts[@]} -ne 1 ]]; then
+            err "Artefato DKMS único não encontrado para ${module}: ${#artifacts[@]}"
+            return 1
+        fi
+        path=${artifacts[0]}
+        vermagic=$(modinfo -F vermagic "$path") || return 1
+        release=${vermagic%% *}
+        if [[ $release != "$kernel" ]]; then
+            err "Vermagic incorreto para ${module}: $vermagic"
+            return 1
+        fi
+    done
+}
+
+install_camera_dkms_modules() {
+    local kernel=$1 source_root=${CAMERA_DKMS_SOURCE_ROOT:-/usr/src}
+    local config_dir=${MODPROBE_CONFIG_DIR:-/etc/modprobe.d}
+    local package_record module version artifact package source config_content
+
+    for package_record in "${CAMERA_DKMS_PACKAGES[@]}"; do
+        IFS=: read -r module version artifact <<< "$package_record"
+        source="${source_root}/${module}-${version}"
+        if [[ ! -d $source || -L $source ]]; then
+            err "Fonte DKMS da câmera ausente ou insegura: $source"
+            return 1
+        fi
+    done
+
+    for package_record in "${CAMERA_DKMS_PACKAGES[@]}"; do
+        IFS=: read -r module version artifact <<< "$package_record"
+        package="${module}/${version}"
+        source="${source_root}/${module}-${version}"
+
+        if ! dkms status "$package" -k "$kernel" 2>/dev/null |
+            grep -qE 'added|built|installed'; then
+            run_dkms_without_runtime_hooks dkms add "$source" || return 1
+        fi
+        run_dkms_without_runtime_hooks dkms build --force \
+            "$package" -k "$kernel" || return 1
+    done
+
+    verify_camera_dkms_vermagic "$kernel" || return 1
+
+    for package_record in "${CAMERA_DKMS_PACKAGES[@]}"; do
+        IFS=: read -r module version artifact <<< "$package_record"
+        package="${module}/${version}"
+        run_dkms_without_runtime_hooks dkms install --no-depmod --force \
+            "$package" -k "$kernel" || return 1
+        log "  ${package} atualizado para ${kernel}"
+    done
+
+    config_content=$(<"${SCRIPT_DIR}/modules/vivobook-ir-cam-1.0/hm1092-ir.conf") ||
+        return 1
+    mkdir -p "$config_dir" || return 1
+    atomic_write_config "${config_dir}/hm1092-ir.conf" 0644 \
+        "${config_content}"$'\n' || return 1
+    log "  Configuração do iluminador IR instalada"
+}
+
+update_camera_dkms_transaction() (
+    local kernel=$1 source_root=${CAMERA_DKMS_SOURCE_ROOT:-/usr/src}
+    local config_dir=${MODPROBE_CONFIG_DIR:-/etc/modprobe.d}
+    local transaction_id=$BASHPID config_path config_backup stage_marker
+    local package_record module version package source destination backup index
+    local committed=0 rollback_status=0 config_had_file=0 dkms_status
+    local -a packages=() sources=() destinations=() backups=()
+    local -a source_existed=() dkms_state_before=()
+
+    config_path="${config_dir}/hm1092-ir.conf"
+    config_backup="${config_path}.old.${transaction_id}"
+    stage_marker="${source_root}/.vivobook-camera-dkms-staged.${transaction_id}"
+
+    if [[ $source_root != /* || $source_root == / ||
+          $config_dir != /* || $config_dir == / ]]; then
+        err "Raiz insegura na transação DKMS das câmeras"
+        return 1
+    fi
+
+    for package_record in "${CAMERA_DKMS_PACKAGES[@]}"; do
+        IFS=: read -r module version _ <<< "$package_record"
+        package="${module}/${version}"
+        source="${source_root}/${module}-${version}"
+        destination=$source
+        backup="${destination}.old.${transaction_id}"
+        packages+=("$package")
+        sources+=("$source")
+        destinations+=("$destination")
+        backups+=("$backup")
+        if [[ -d $destination && ! -L $destination ]]; then
+            source_existed+=(1)
+        else
+            source_existed+=(0)
+        fi
+        dkms_status=$(dkms status "$package" -k "$kernel" 2>/dev/null || true)
+        if grep -q 'installed' <<< "$dkms_status"; then
+            dkms_state_before+=(installed)
+        elif grep -q 'built' <<< "$dkms_status"; then
+            dkms_state_before+=(built)
+        elif grep -q 'added' <<< "$dkms_status"; then
+            dkms_state_before+=(added)
+        else
+            dkms_state_before+=(absent)
+        fi
+    done
+
+    mkdir -p "$config_dir" || return 1
+    if [[ -e $config_path || -L $config_path ]]; then
+        if [[ ! -f $config_path || -L $config_path ||
+              -e $config_backup || -L $config_backup ]]; then
+            err "Configuração HM1092 insegura para backup: $config_path"
+            return 1
+        fi
+        cp -a -- "$config_path" "$config_backup" || return 1
+        config_had_file=1
+    fi
+
+    rollback_camera_transaction() {
+        local rollback_package rollback_source rollback_destination
+        local rollback_backup
+
+        for index in "${!destinations[@]}"; do
+            rollback_destination=${destinations[index]}
+            rollback_backup=${backups[index]}
+            rm -rf -- "$rollback_destination"
+            if [[ ${source_existed[index]} == 1 ]]; then
+                if ! mv -T -- "$rollback_backup" "$rollback_destination"; then
+                    err "Falha crítica ao restaurar fonte DKMS: $rollback_destination"
+                    rollback_status=1
+                fi
+            fi
+        done
+
+        for index in "${!packages[@]}"; do
+            rollback_package=${packages[index]}
+            run_dkms_without_runtime_hooks dkms remove \
+                "$rollback_package" -k "$kernel" >/dev/null 2>&1 || true
+        done
+        for index in "${!packages[@]}"; do
+            [[ ${dkms_state_before[index]} != absent ]] || continue
+            rollback_package=${packages[index]}
+            rollback_source=${sources[index]}
+            if ! dkms status "$rollback_package" -k "$kernel" 2>/dev/null |
+                grep -qE 'added|built|installed'; then
+                run_dkms_without_runtime_hooks dkms add "$rollback_source" ||
+                    rollback_status=1
+            fi
+            if [[ ${dkms_state_before[index]} == built ||
+                  ${dkms_state_before[index]} == installed ]]; then
+                run_dkms_without_runtime_hooks dkms build --force \
+                    "$rollback_package" -k "$kernel" || rollback_status=1
+            fi
+        done
+        for index in "${!packages[@]}"; do
+            [[ ${dkms_state_before[index]} == installed ]] || continue
+            rollback_package=${packages[index]}
+            run_dkms_without_runtime_hooks dkms install --no-depmod --force \
+                "$rollback_package" -k "$kernel" || rollback_status=1
+        done
+
+        if ((config_had_file)); then
+            if ! mv -T -- "$config_backup" "$config_path"; then
+                err "Falha crítica ao restaurar configuração HM1092"
+                rollback_status=1
+            fi
+        else
+            rm -f -- "$config_path"
+        fi
+        rm -f -- "$stage_marker"
+    }
+
+    finish_camera_transaction() {
+        local status=$? cleanup_path
+
+        trap - EXIT HUP INT TERM
+        if ((committed)); then
+            for cleanup_path in "${backups[@]}" "$config_backup" \
+                "$stage_marker"; do
+                [[ ! -e $cleanup_path && ! -L $cleanup_path ]] ||
+                    rm -rf -- "$cleanup_path"
+            done
+        elif [[ -f $stage_marker && ! -L $stage_marker ]]; then
+            rollback_camera_transaction
+            ((rollback_status == 0)) ||
+                err "Rollback da transação DKMS das câmeras ficou incompleto"
+        else
+            [[ ! -e $config_backup && ! -L $config_backup ]] ||
+                rm -f -- "$config_backup"
+        fi
+        exit "$status"
+    }
+    trap finish_camera_transaction EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+
+    CAMERA_DKMS_KEEP_BACKUPS=1 \
+    CAMERA_DKMS_TRANSACTION_ID=$transaction_id \
+    CAMERA_DKMS_STAGE_MARKER=$stage_marker \
+        stage_camera_dkms_sources || return 1
+    install_camera_dkms_modules "$kernel" || return 1
+    committed=1
+)
 
 # ─── Firmware runtime / initramfs contract ──────────────────────────────────
 # Fedora packages may store firmware compressed, while vendor extracts usually
@@ -1484,20 +1861,10 @@ udevadm control --reload-rules 2>/dev/null || true
 log "  Charge limit 80% + freq cap 2.38GHz na bateria"
 
 # ─── 17. Câmera RGB — DKMS + systemd no boot gráfico ────────────────────────
-log "Câmera RGB (vivobook_cam_fix — autostart gráfico)..."
-# Camera module is version 2.0
-CAM_SRC="/usr/src/vivobook-cam-fix-2.0"
-if [[ -d "$CAM_SRC" ]]; then
-    if ! dkms status 2>/dev/null | grep -q "vivobook-cam-fix.*installed"; then
-        run_dkms_without_runtime_hooks dkms add "$CAM_SRC" 2>/dev/null || true
-        run_dkms_without_runtime_hooks dkms build "vivobook-cam-fix/2.0" &&
-            run_dkms_without_runtime_hooks dkms install --no-depmod \
-                "vivobook-cam-fix/2.0" && \
-            log "  vivobook-cam-fix compilado e instalado" || \
-            warn "  vivobook-cam-fix FALHOU"
-    else
-        log "  vivobook-cam-fix já instalado"
-    fi
+log "Câmeras RGB/IR (DKMS + autostart gráfico)..."
+if ! update_camera_dkms_transaction "$ACTIVE_KERNEL"; then
+    err "Falha na transação de atualização DKMS das câmeras"
+    exit 1
 fi
 
 # Install and enable the service for the next graphical boot. Do not start it

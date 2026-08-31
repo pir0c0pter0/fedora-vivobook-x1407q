@@ -512,10 +512,20 @@ whole regulator block down, which was read as "the camera PMIC is not on the boa
 
 **How it was fixed:** a dedicated `hm1092` V4L2 driver (`himax,hm1092`) plus a sensor node
 on CCI0 bus 0. Result: 560×360 Y10 at ~29.7 fps over
-`hm1092 → csiphy0 → csid0 → vfe0_rdi0`. Still missing: an IR illuminator (a PMIC flash LED
-at 700 mA per `qccamflash_ext8380`, with no DTB node), and libcamera capture — the sensor
-enumerates but the soft-ISP rejects `R10_CSI2P` since its debayer does not handle
-monochrome RAW10.
+`hm1092 → csiphy0 → csid0 → vfe0_rdi0`. The PM8550 IR illuminator uses ganged sources
+1+4, is capped at the ASUS BSP value of 700 mA, and follows the sensor stream lifecycle.
+The driver extinguishes it before sensor stop and has explicit retrying cleanup,
+system-suspend, shutdown, and removal paths. If the synchronous LED-class path
+keeps failing during shutdown/removal, a PM8550 regmap fallback clears and reads
+back the channel/module enable bits before teardown continues.
+Libcamera capture is still missing: the sensor enumerates but the soft-ISP rejects
+`R10_CSI2P` since its debayer does not handle monochrome RAW10.
+
+**Hardware proof (2026-08-31):** after a clean reboot, 30-frame
+dark → illuminated → dark captures changed mean luminance
+`7.98 → 14.17 → 7.98` and p95 `9 → 36 → 9`. PM8550 readback was
+`ee46=80`, `ee4e=09` while illuminated and `00/00` immediately after close;
+the HM1092 then runtime-suspended with no driver error or kernel Oops.
 
 **What Fedora could do:** nothing packaging-side. This one is a device driver that belongs
 upstream once the Purwa CAMSS DT lands.
@@ -566,8 +576,10 @@ Mesa: 26.0.3
 - **Camera RGB:** Functional via DKMS two-phase DT overlay, with a clean log on the
   patched 7.2 kernel and libcamera 0.7.1.
 - **Camera IR:** Functional via the out-of-tree `hm1092` driver — 560×360 Y10 at
-  ~29.7 fps. No IR illuminator yet, and libcamera's soft-ISP cannot consume monochrome
-  RAW10, so capture goes through V4L2 directly.
+  ~29.7 fps. The PM8550 700 mA IR illuminator follows the stream automatically,
+  with direct on/off register readback and clean post-stream runtime suspend;
+  libcamera's soft-ISP still cannot consume monochrome RAW10, so capture goes through
+  V4L2 directly.
 - **Camera (upstream):** Bryan O'Donoghue (Linaro) v9 patches (7 patches, reduzido de v8's 18) in LKML review (Feb 2026). Expected merge ~6.21/6.22. **Note:** patches only cover x1e80100 (Hamoa) — not Purwa/x1p42100. Our DKMS overlay remains the only working path for this SoC.
 - **Suspend:** s2idle is physically validated on `7.2.0-x1407qa` at ~0.80W;
   deep/S3 still crashes and remains disabled.

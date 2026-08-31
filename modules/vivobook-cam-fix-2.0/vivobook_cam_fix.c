@@ -40,6 +40,7 @@
 #include <linux/platform_device.h>
 #include <linux/of_platform.h>
 #include <linux/pm_runtime.h>
+#include <linux/spmi.h>
 
 #include "vivobook_cam_phase1.dtbo.h"
 #include "vivobook_cam_phase2.dtbo.h"
@@ -158,6 +159,62 @@ static void release_runtime_pm_refs(void)
 	}
 }
 
+/*
+ * The generic OF overlay notifier only knows about platform buses.  A child
+ * added dynamically below an SPMI PMIC is therefore created under the global
+ * platform bus, where leds-qcom-flash cannot inherit the PMIC regmap.  Replace
+ * that one device with an otherwise identical platform device whose Linux
+ * parent is the real SPMI slave.
+ */
+static int repair_pm8550_flash_parent(void)
+{
+	static const char flash_path[] =
+		"/soc@0/arbiter@c400000/spmi@c42d000/pmic@1/"
+		"led-controller@ee00";
+	struct platform_device *pdev, *replacement;
+	struct device_node *flash_np, *pmic_np;
+	struct spmi_device *sdev;
+
+	flash_np = of_find_node_by_path(flash_path);
+	if (!flash_np)
+		return -ENODEV;
+
+	pmic_np = of_get_parent(flash_np);
+	if (!pmic_np) {
+		of_node_put(flash_np);
+		return -ENODEV;
+	}
+
+	sdev = spmi_find_device_by_of_node(pmic_np);
+	of_node_put(pmic_np);
+	if (!sdev) {
+		of_node_put(flash_np);
+		return -EPROBE_DEFER;
+	}
+
+	pdev = of_find_device_by_node(flash_np);
+	if (pdev && pdev->dev.parent == &sdev->dev) {
+		platform_device_put(pdev);
+		spmi_device_put(sdev);
+		of_node_put(flash_np);
+		return 0;
+	}
+
+	if (pdev) {
+		of_platform_device_destroy(&pdev->dev, NULL);
+		platform_device_put(pdev);
+	}
+
+	replacement = of_platform_device_create(flash_np, NULL, &sdev->dev);
+	spmi_device_put(sdev);
+	of_node_put(flash_np);
+	if (!replacement)
+		return -ENODEV;
+
+	pr_info("PM8550 flash device reparented to SPMI USID 0-01\n");
+	return 0;
+}
+
 static int __init vivobook_cam_fix_init(void)
 {
 	int ret;
@@ -177,6 +234,14 @@ static int __init vivobook_cam_fix_init(void)
 			    &overlay_phase1_id, "phase1");
 	if (ret)
 		return ret;
+
+	ret = repair_pm8550_flash_parent();
+	if (ret) {
+		pr_err("PM8550 flash reparent failed (%d), removing phase1\n",
+		       ret);
+		of_overlay_remove(&overlay_phase1_id);
+		return ret;
+	}
 
 	/*
 	 * Grab CAMCC and CAMSS immediately after phase1. A blind sleep here

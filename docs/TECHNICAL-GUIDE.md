@@ -9,9 +9,10 @@
 
 **Author:** Pir0c0pter0 — pir0c0pter0000@gmail.com
 
-> **Build reproduzível e validado em 2026-08-24:** consulte o
+> **Baseline completa da ISO/build validada em 2026-08-24:** consulte o
 > [relatório completo do Fedora 44 com Linux 7.2](BUILD-REPORT-2026-08-24.md)
-> e o [estado final da construção](../BUILD-STATE.md).
+> e o [estado final da construção](../BUILD-STATE.md). A validação física
+> posterior do iluminador IR, feita em 2026-08-31, está na seção da câmera IR.
 
 > **Regra de recuperação:** USB e USB tethering são infraestrutura crítica.
 > Kernels experimentais devem herdar a configuração do kernel estável e são
@@ -109,7 +110,7 @@ instalado com validação física da reconstrução atual.
 | **USB-C DP alt-mode** | :white_check_mark: Working | Both ports, tested DP-2 up to 2560×1600. Device link errors at boot are cosmetic ([#6](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/6)) |
 | **USB4 / TB3 tunneling** | :x: Not working | DP alt-mode and plain USB-C docks work (Dell SD25: 10 Gbps hub + 2.5GbE + charging + display). Firmware and hardware map were recovered from Windows/BIOS, but the Qualcomm host-router driver and final DT stack are not public (Aug 2026). See [USB4/TB3 Status](#usb4tb3-status-aug-2026) |
 | **Camera RGB** | :white_check_mark: Working | Late graphical autostart validated after reboot; upright image, still/video and PipeWire work. CAMCC clock and libcamera metadata warnings are gone with the patched 7.2 kernel and libcamera (see [Camera Fix](#17-rgb-camera-fix)) |
-| **Camera IR** | :white_check_mark: Working | Himax HM1092 streams 560×360 Y10 at ~29.7 fps through `csiphy0 → csid0 → vfe0_rdi0`; own `hm1092` driver. pm8010 is present after all — LDO7 only registers at 2.912 V, the value ASUS' own `CAMI_RES_QRD.bin` asks for. No IR illuminator yet, so only IR sources show up (see [Camera Research](#camera-research)) |
+| **Camera IR** | :white_check_mark: Working | Himax HM1092 streams 560×360 Y10 at ~29.7 fps through `csiphy0 → csid0 → vfe0_rdi0`; own `hm1092` driver. pm8010 LDO7 runs at 2.912 V. The PM8550 700 mA IR illuminator is driven through `leds-qcom-flash` and follows the stream lifecycle (see [Camera Research](#camera-research)) |
 | **Display color control** | :white_check_mark: Working | CTM saturation + contrast via DKMS module (see [Display Color Control Fix](#18-display-color-control-fix)) |
 
 ### Accelerator validation snapshot — 2026-08-24
@@ -127,8 +128,7 @@ cannot be mistaken for NPU acceleration.
 
 The hardware audit passed all 16 checks it had at the time, after the autostart
 reboot; it now runs 18 (see [Step 7](#step-7--reboot-and-verify)). The status
-table still marks USB4/TB3 and the IR camera as unsolved rather than presenting
-them as done.
+table still marks USB4/TB3 as unsolved rather than presenting it as done.
 
 ---
 
@@ -1549,11 +1549,48 @@ this was written up as "the pm8010 camera PMIC is not physically on the board".
 
 **Solution:** a dedicated `hm1092` V4L2 driver (`modules/vivobook-ir-cam-1.0/`,
 compatible `himax,hm1092`) plus a sensor node on CCI0 bus 0 in the camera overlay.
+The overlay also enables the PM8550 flash controller with the board's ganged LED
+sources 1 and 4, capped at the ASUS BSP value of 700 mA. Because a dynamic OF
+overlay initially creates this platform device under the wrong parent, the camera
+fix module reparents it to SPMI device `0-01` before probing `leds-qcom-flash`.
+The HM1092 driver turns the illuminator on only after sensor streaming starts and
+turns it off before stopping, on start failure, during runtime/system suspend,
+shutdown, and removal. Failed off operations are retried without dropping the
+sensor's runtime-PM reference; a freezable cleanup worker completes transient
+failures while preventing a new stream from starting early. During shutdown or
+driver removal, a persistent LED-class error activates a synchronous PM8550
+regmap fallback that clears channels 1+4 and the module-enable bit, then reads
+both registers back before reporting the fallback successful. A recovered
+LED-class failure then continues the sensor reset, clock disable, and regulator
+shutdown instead of abandoning the rest of power-off. Since the regulator core
+rolls already-disabled rails back on if a bulk disable fails, the driver also
+restores clock/reset before returning that error to runtime PM.
+
+The setup installs `cpp`, `dtc` and `xxd` explicitly. Camera updates keep the
+previous two source trees and module configuration until both DKMS builds pass,
+both vermagic values match, and both installs plus configuration complete. If
+the second install or configuration fails, the transaction restores the old
+sources/configuration and reinstalls the modules that were present beforehand;
+the exact prior DKMS state (`absent`, `added`, `built`, or `installed`) is
+restored. A retained handoff marker closes the signal window between the inner
+atomic publisher and the outer transaction, while a staging failure remains
+owned by the inner publisher so it cannot be rolled back twice.
 
 ```bash
-# capture (releases the RGB link first — both sensors share CSID0)
-tools/ir-camera-capture.sh
+# capture a 30-frame sample and write a contrast-stretched PNG
+# (releases the RGB link first — both sensors share CSID0)
+sudo tools/ir-camera-capture.sh 30 /tmp/camera-ir.png
+
+# full optical and PMIC on/off validation
+sudo tests/test-live-ir-illumination.sh
 ```
+
+The final hardware validation on 2026-08-31 used a clean boot with the DKMS
+module loaded. Dark → illuminated → dark mean luminance was
+`7.98 → 14.17 → 7.98`, while p95 was `9 → 36 → 9`. Direct PM8550 regmap
+polling observed `ee46=80` and `ee4e=09` only while the illuminated stream was
+open; both returned to `00` after close. The device then runtime-suspended and
+the kernel log contained no HM1092 error or Oops.
 
 | Property | Value |
 |----------|-------|
@@ -1568,14 +1605,10 @@ tools/ir-camera-capture.sh
 | **Init sequence** | 185 writes from `com.qti.sensormodule.hm1092.bin`, in `hm1092_regs.h` |
 | **Exposure** | 0x0202/0x0203, in lines — monotonic and verified against a fixed scene |
 | **Gain** | 0x020E/0x020F, 8.8 format, 10-bit field. Usable `0x100`–`0x3ff`; above `0x400` the sensor outputs a flat black-level frame. Exposed as `V4L2_CID_ANALOGUE_GAIN` because libcamera drops any sensor without that control, and SMIA analogue gain (0x0204/0x0205) is not implemented on this part |
+| **IR illuminator** | PM8550 `leds-qcom-flash`, ganged sources 1+4, `ir:torch`, 700 mA maximum; automatic stream lifecycle, system-sleep/shutdown callbacks, retrying fail-safe off |
 
 **Still missing:**
 
-- **IR illuminator** — this is why the image is dark: without it only IR light sources
-  (lamps) appear. Not a GPIO — `qccamflash_ext8380` declares
-  `IrLedCurrentMilliampere = 700`, i.e. a PMIC flash LED. The kernel ships
-  `leds-qcom-flash.ko`, but there is no flash node in the DTB and the PMIC and
-  register base are still unknown.
 - **libcamera capture** — the sensor *enumerates* (`cam -l` shows
   `/base/soc@0/cci@ac15000/i2c-bus@0/camera@24`), but the soft-ISP answers
   `Unsupported input format R10_CSI2P`: the debayer does not handle monochrome RAW10.
@@ -1875,7 +1908,7 @@ Submit Device Tree patches for the Vivobook X1407QA to the mainline Linux kernel
 - **~~Camera RGB warnings~~**: Fixed — the 7.2 build applies `kernel/linux-7.2-camera-warning-fix.patch` and the patched `libcamera` 0.7.1 registers `ov02c10`, so the CAMCC clock and static-property warnings are gone. Late graphical autostart still drives 1080p still, 720p30 video and PipeWire, and `rmmod` remains unsafe — reboot to unload (see [Camera Fix](#17-rgb-camera-fix))
 - **~~Boot-time regression~~**: Fixed — installed zram/Plymouth waits removed; current boot is 7.301s total with `graphical.target` at 3.278s userspace, while `rd.live.ram` remains exclusive to the main live entry.
 - **~~Firewall~~**: Fixed — the custom 7.2 config now builds nftables, FIB/reject/NAT expressions, and the NetBIOS conntrack helper required by the FedoraWorkstation zone. `firewalld` is `active/running` and the generated ruleset is loaded.
-- **~~Camera IR~~**: Fixed — the HM1092 streams 560×360 Y10 at ~29.7 fps through its own `hm1092` driver; pm8010 was never absent (see [IR Camera Fix](#19-ir-camera-hm1092-fix)). Two gaps remain: there is no IR illuminator node yet (PMIC flash LED at 700mA), so only IR light sources show up, and libcamera enumerates the sensor but its soft-ISP rejects `R10_CSI2P` — capture goes through `tools/ir-camera-capture.sh`
+- **~~Camera IR~~**: Fixed — the HM1092 streams 560×360 Y10 at ~29.7 fps through its own `hm1092` driver, and the PM8550 700 mA IR illuminator follows the stream automatically (see [IR Camera Fix](#19-ir-camera-hm1092-fix)). The remaining limitation is libcamera's soft-ISP rejecting monochrome `R10_CSI2P`; capture goes through `tools/ir-camera-capture.sh`
 - **Suspend**: `deep` (S3) still crashes and stays disabled. `s2idle` validated 2026-08-24 on the installed `7.2.0-x1407qa` — 2 clean cycles, ~0.80W suspended (see [Lid Close Fix](#13-lid-close-fix)). No RTC alarm on pm8xxx — wake by lid/power button only ([#4](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/4))
 - **USB4 / Thunderbolt 3**: Plain DP alt-mode works, but TB3 tunneling is blocked. Reverse engineering recovered the embedded MCU firmware and exact HR/QMP identity; public upstream has non-PCI NHI prep and a pending PHY v4, but still lacks the Qualcomm host-router driver and final DT graph as of Aug 2026. See [USB4/TB3 Status](#usb4tb3-status-aug-2026)
 - **~~cpufreq~~**: Fixed — `scmi_cpufreq` autoload via `/etc/modules-load.d/` ([#2](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/2))
