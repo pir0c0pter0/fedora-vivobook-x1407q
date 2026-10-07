@@ -1,5 +1,64 @@
 # USB4 / Thunderbolt 3 — Investigação (Vivobook X1407QA)
 
+## Estado revalidado em 2026-10-07
+
+**Conclusão:** USB4 e tunneling Thunderbolt ainda não podem ser habilitados de
+forma funcional e segura no Linux deste notebook com código público. O suporte
+à PHY avançou e já está no `linux-next`, mas o driver Qualcomm do host-router,
+o binding/DTS das instâncias e a integração final dos protocolos nativos ainda
+não foram publicados.
+
+Snapshot somente leitura do X1407QA físico:
+
+| Item | Estado observado |
+|------|------------------|
+| Firmware | Insyde `X1407QA.314`, 2026-05-22 |
+| Sistema | Fedora 44 AArch64 |
+| Kernel | `7.3.0-rc6-x1407qa-perf` |
+| `CONFIG_USB4` | `is not set` |
+| `CONFIG_TYPEC_TBT_ALTMODE` | `is not set` |
+| `thunderbolt.ko` | ausente |
+| `/sys/bus/{thunderbolt,usb4}` | ausentes |
+| Portas Type-C | `port0` e `port1` presentes via `pmic_glink.ucsi.0` |
+| Altmodes locais | SVID `8087` (TBT) e `ff01` (DP) nas duas portas |
+| Dispositivo conectado | parceiro PD em `port1`, sem topologia USB/TBT enumerada |
+| `boltd` | ativo, mas `boltctl list` sem domínio ou dispositivo |
+| DT em uso | três QMPs USB3+DP, quatro clocks cada, nenhum host-router |
+
+Não havia dock Thunderbolt conectado durante esta captura. Isso impede um novo
+teste de hotplug, mas não muda o diagnóstico estrutural: sem driver e nó do
+host-router não existe domínio ao qual o dock possa se conectar.
+
+### Avanço de upstream desde 2026-08-24
+
+- A série [QMP USB4 PHY v5](https://patchew.org/linux/20260908-topic-usb4phy-v5-0-73aac69578ef%40oss.qualcomm.com/)
+  foi aceita. O `linux-next` de 2026-10-07, commit
+  `b018686719706a781c45a874ed51374a2dc4b767`, contém `PHY_MODE_TBT`, a terceira
+  PHY `QMP_USB43DP_USB4_PHY`, as tabelas USB4/TBT3 de Hamoa/Purwa e o clock
+  `p2rr2p_pipe` nos três QMPs de `hamoa.dtsi`.
+- A preparação genérica NHI não-PCI está presente: `struct tb_nhi_ops` e
+  `nhi_probe()` permitem que um futuro driver de plataforma registre o NHI sem
+  fingir que o host-router é um dispositivo PCI.
+- O mesmo `linux-next` ainda mantém `CONFIG_USB4` dependente da infraestrutura
+  PCI, não contém driver/objeto Qualcomm em `drivers/thunderbolt/` e não contém
+  `qcom,usb4-hr` nem nós `usb4-host-router` no DTS Qualcomm.
+- A série [PS883x v5](https://patchew.org/linux/20260922-ps883x-disable-usb4-v5-0-02c0414978e6%40oldschoolsolutions.biz/)
+  adicionou um quirk temporário para `qcom,x1e80100`, `qcom,x1p42100`, Hamoa e
+  Purwa. O retimer retorna `-EOPNOTSUPP` para `TYPEC_MODE_USB4` nessas máquinas
+  até o stack da plataforma ficar completo, preservando o fallback USB3 + DP.
+
+O avanço da PHY elimina o antigo blocker 2 **no upstream**, mas não no kernel
+instalado. Mesmo um kernel novo com essa série continuaria sem um consumidor
+para a PHY e sem `/sys/bus/thunderbolt`.
+
+### USB4 versus Thunderbolt 4
+
+A ASUS anuncia duas portas **USB4 de até 40 Gbit/s**, não certificação
+Thunderbolt 4. O objetivo verificável deste projeto é criar o domínio USB4 e
+habilitar tunneling USB3, PCIe e DisplayPort, incluindo compatibilidade com
+docks Thunderbolt 3/4. Nenhuma mudança de software, por si só, concede
+certificação comercial Thunderbolt 4 ao notebook.
+
 ## Hardware
 
 - **Dock**: Elgato Thunderbolt 3 Dock — USB ID `0fd9:005f`, bcdDevice 4.51
@@ -12,18 +71,22 @@
 
 ## Blockers identificados
 
-A primeira barreira observada foi atribuída ao PHY, mas a investigação de
-2026-08-24 isolou três peças concretas:
+A primeira barreira observada foi atribuída ao PHY, mas as investigações de
+2026-08-24 e 2026-10-07 separaram as peças concretas:
 
 - **Blocker 1 — driver host-router Qualcomm ainda privado**: o suporte NHI
   não-PCI genérico já entrou no upstream, mas o driver de plataforma que tira
   o router do reset, carrega o MCU e registra o domínio USB4 não foi publicado.
-- **Blocker 2 — PHY USB4 ainda em review**: a série v4 de 2026-08-20 adiciona
-  o terceiro PHY (`QMP_USB43DP_USB4_PHY`), modo TBT e o quinto clock
-  `p2rr2p_pipe`. O kernel/DT vivo ainda têm somente o caminho USB3+DP.
+- **Dependência resolvida upstream, ainda ausente no instalado — PHY USB4**:
+  a série v5 foi aceita e chegou ao `linux-next`; o kernel/DT vivo continuam
+  anteriores a ela e têm somente o caminho USB3+DP.
 - **Blocker 3 — DT/graph do router incompletos publicamente**: o RFC publicou
   um exemplo do HR0; os recursos e a topologia final das duas instâncias ainda
   não existem em um DTS upstream utilizável.
+- **Blocker 4 — integração dos protocolos nativos e PM**: o driver precisa
+  ligar DWC3, PCIe RC, DP, retimer, interrupções, MCU e suspend/resume ao
+  domínio. Existem preparações parciais públicas e testes Qualcomm com stack
+  out-of-tree, mas não um conjunto aplicável ao X1P42100.
 
 A ausência de `ALT_MODE_OVERRIDE` no UCSI é um achado real, mas **não é um
 blocker independente comprovado**. O firmware Qualcomm também conduz altmodes
@@ -41,28 +104,30 @@ SoC continua sendo `qcom,x1e80100-qmp-usb3-dp-phy`. Em outras palavras:
 inventar `qcom,x1e80100-qmp-usb43dp-phy` num overlay local não alinha com o
 que existe hoje upstream.
 
-O driver atual contém a configuração USB3+DP usada pelo `compatible` acima.
-As tabelas e o terceiro PHY específicos de USB4/TBT3 só aparecem na série PHY
-v4 ainda não mergeada. Portanto, também não adianta procurar um `compatible`
-"mágico": é necessário aplicar a série real e, depois, o driver do router.
+O kernel instalado contém somente a configuração USB3+DP usada pelo
+`compatible` acima. As tabelas e o terceiro PHY USB4/TBT3 já existem no
+`linux-next`, usando o mesmo `compatible`; portanto não há um `compatible`
+"mágico" a inventar. É necessário um kernel com a série real e, principalmente,
+o futuro driver do router.
 
-## Thunderbolt no kernel: ausente no 7.2 (e inútil se ligado)
+## Thunderbolt no kernel instalado: ausente no 7.3-rc6
 
-O bloco abaixo descrevia o Fedora 6.19.8. **No kernel instalado hoje
-(`7.2.0-x1407qa`) o USB4 nem é compilado:**
+No kernel instalado em 2026-10-07 o USB4 não é compilado:
 
 ```
-CONFIG_USB4                 ✗ "is not set" em /boot/config-7.2.0-x1407qa
+CONFIG_USB4                 ✗ "is not set"
+CONFIG_TYPEC_TBT_ALTMODE    ✗ "is not set"
 /sys/bus/thunderbolt/       ✗ não existe
+/sys/bus/usb4/              ✗ não existe
 thunderbolt.ko              ✗ não existe em /lib/modules
 ```
 
 Isso **não é regressão a corrigir**. A refatoração genérica para NHI não-PCI
 foi mergeada em maio de 2026, mas `CONFIG_USB4` ainda depende de PCI e a árvore
-não contém nenhum objeto Qualcomm/platform no `Makefile`. O host-router deste
-SoC é MMIO; ligar a opção sem o driver Qualcomm não cria domínio nenhum — foi
-o que já acontecia no 6.19.8, onde `CONFIG_USB4=y` convivia com
-`/sys/bus/thunderbolt/` inexistente.
+não contém nenhum objeto Qualcomm/platform no `Makefile`. O X1407QA tem PCI,
+então a opção poderia ser compilada, mas isso não cria o host-router MMIO sem o
+driver Qualcomm — foi o que já acontecia no 6.19.8, onde `CONFIG_USB4=y`
+convivia com `/sys/bus/thunderbolt/` inexistente.
 
 No teste de 2026-03-24, nenhum altmode TB3 de partner foi registrado/entrado;
 portanto o caminho `typec_thunderbolt` não avançou até um túnel. Isso descreve
@@ -234,7 +299,7 @@ Não causam falha funcional.
 Com dock plugado durante o boot, o sistema trava por 2-3 minutos e não inicia.
 Sempre desconectar o dock antes de reiniciar. Conectar só após o boot completo.
 
-## Estado fechado em 2026-08-24
+## Snapshot histórico fechado em 2026-08-24
 
 O tunneling ainda não pode funcionar, mas a investigação avançou muito além do
 diagnóstico de março: a preparação NHI não-PCI já foi mergeada, apareceu uma
@@ -247,7 +312,7 @@ da série correspondente de binding/DTS e do graph final.
 | USB3 SuperSpeed via USB-C | ✅ Funciona a 10 Gbps |
 | DP Alt Mode | ✅ Funciona |
 | Firmware do MCU USB4 | ✅ Localizado e extraído do driver Windows |
-| PHY USB4/TBT no upstream | 🟡 Série v4 pública, ainda não mergeada |
+| PHY USB4/TBT no upstream | 🟡 Série v4 pública, ainda não mergeada naquele snapshot |
 | Host-router Qualcomm no upstream | ❌ Driver ainda não publicado |
 | **USB4 / TB3 tunneling** | ❌ Sem domínio/driver para criar o túnel |
 
@@ -271,14 +336,14 @@ com contagem zero e consumer `deviceless`. USB3/DP usam os mesmos QMPs e estão
 ativos. Portanto o silício e a infraestrutura GCC existem; faltam consumidores
 DT/driver.
 
-### Upstream avançou, mas ainda não chegou ao driver
+### Upstream naquele snapshot ainda não havia chegado ao driver
 
 - A série [non-PCI NHI prep v4](https://patchew.org/linux/20260515-topic-usb4._5Fnonpcie._5Fprepwork-v4-0-5c818378243e@oss.qualcomm.com/)
   foi mergeada em 2026-05-21. Ela remove pressupostos PCI da parte comum, mas
   não adiciona um probe Qualcomm; `CONFIG_USB4` ainda depende de PCI.
 - A série [QMP USB4 PHY v4](https://lkml.iu.edu/hypermail/linux/kernel/2608.2/08363.html)
   foi postada em 2026-08-20. Ela adiciona `PHY_MODE_TBT`, o terceiro PHY USB4,
-  suporte Hamoa herdado por Purwa e `p2rr2p_pipe`; ainda não está no master.
+  suporte Hamoa herdado por Purwa e `p2rr2p_pipe`; ainda não estava no master.
 - O cover da própria série diz que o driver do host-router será publicado
   separadamente. Não há objeto Qualcomm em `drivers/thunderbolt/` no master,
   linux-next ou árvore do mantenedor.
@@ -489,9 +554,10 @@ solução porque roteia *tudo* por dentro do túnel Thunderbolt.
 
 **Próximo passo aprovado em março de 2026 — supersedido.**
 
-Já existe preparação pública NHI e PHY, mas ainda não existe um patch stack
-completo que possa produzir tunneling. Buildar kernel custom hoje só permitiria
-testar infraestrutura sem consumer; não criaria `/sys/bus/thunderbolt`.
+Já existe preparação pública NHI e a PHY chegou ao `linux-next`, mas ainda não
+existe um patch stack público completo que possa produzir tunneling. Buildar
+kernel custom hoje só permitiria testar infraestrutura sem consumer; não
+criaria `/sys/bus/thunderbolt`.
 
 `docs/research/2026-03-24-usb4-custom-kernel-plan.md` e
 `docs/research/2026-03-24-usb4-upstream-patch-checklist.md` continuam válidos
@@ -500,11 +566,29 @@ como *procedimento*, para o dia em que a série sair. Não são acionáveis agor
 **O que dá para fazer enquanto isso:**
 
 - usar dock USB-C sem túnel (USB3 + DP alt mode funcionam);
-- acompanhar a série Qualcomm e `westeri/thunderbolt.git`;
-- reabrir quando `drivers/thunderbolt/Makefile` ganhar um objeto Qualcomm e a
-  série trouxer driver + binding/DT compatíveis;
-- então aplicar NHI + PHY + HR/DT, compilar, instalar e reiniciar uma única vez
-  para o primeiro teste real.
+- acompanhar a série Qualcomm, `linux-next` e `westeri/thunderbolt.git`;
+- reabrir quando houver driver Qualcomm público em `drivers/thunderbolt/`,
+  binding revisado e DTS/graph para os dois routers;
+- confirmar como o driver espera receber o firmware do MCU; o blob extraído
+  localmente não tem licença/nome redistribuível e não pode entrar na ISO;
+- então aplicar NHI + PHY + HR/DT, habilitar `CONFIG_USB4` e
+  `CONFIG_TYPEC_TBT_ALTMODE`, compilar um kernel alternativo com entrada de
+  fallback e fazer o primeiro teste real;
+- só remover o quirk do PS8833 quando a série do host-router determinar que a
+  plataforma está completa; removê-lo isoladamente pode quebrar o DP.
+
+### Critério mínimo para o próximo teste funcional
+
+Não reiniciar nem carregar os caminhos experimentais apenas porque uma nova
+PHY apareceu. O próximo teste só é acionável quando todos os itens abaixo
+existirem no mesmo patch stack:
+
+1. driver Qualcomm de plataforma/NHI com MCU, IRQ, reset, clocks e PM;
+2. binding aceito ou suficientemente estável para `qcom,x1e80100-usb4-hr`;
+3. DTS das duas instâncias com graph Type-C, DWC3, PCIe e DP;
+4. ABI/formato de firmware conhecido para usar uma extração local legítima;
+5. orientação upstream para o quirk `ps883x_disable_usb4_compats`;
+6. entrada BLS de teste separada e kernel/DTB anterior preservado para rollback.
 
 ## Artefatos iniciados no repositório
 

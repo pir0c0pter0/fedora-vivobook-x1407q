@@ -97,7 +97,10 @@ patches, commands, evidence, and rollback boundary.
 - **Upstream the local kernel fixes:** battery chemistry `OOD` handling and
   the WCD938x read-only control semantics remain local patches.
 - **USB4 / Thunderbolt tunneling:** USB-C, USB 3, charging, and DisplayPort
-  work, but Qualcomm's upstream host-router stack is still incomplete.
+  work. Qualcomm's QMP USB4 PHY v5 has reached `linux-next`, but the public
+  host-router driver, binding/DTS, firmware interface, and native-protocol
+  integration are still incomplete. Do not remove the X1P42100 PS8833 USB4
+  fallback quirk or enable the repository's unsafe synthetic-altmode path.
 - **Deep suspend:** `deep` remains unsafe; keep `s2idle` selected.
 - **Native X1P42100 QNN identification:** the current Qualcomm runtime does
   not recognize SoC ID `635`; NPU applications still use the per-process
@@ -129,7 +132,7 @@ ISO build.
 | CDSP and QNN/HTP NPU inference | ✅ Working; clean cold boot with zero CDSP restarts |
 | Suspend | ✅ `s2idle` only; `deep` is unsafe |
 | USB-C, USB 3 and DisplayPort | ✅ Working |
-| USB4 / Thunderbolt tunneling | ❌ Waiting for the upstream Qualcomm host-router stack |
+| USB4 / Thunderbolt tunneling | ❌ PHY is in `linux-next`; still waiting for the public Qualcomm host-router stack |
 
 The IR result was verified after a clean reboot with 30-frame
 dark → illuminated → dark captures. Mean luminance changed
@@ -175,7 +178,7 @@ sudo rescue-installed-boot --repair
 | [August 24 build report](docs/BUILD-REPORT-2026-08-24.md) | Full-system ISO/build validation baseline; IR hardware proof is documented above |
 | [Firmware extraction guide](docs/GUIA-EXTRAIR-FIRMWARE.md) | Recovering Qualcomm firmware from Windows |
 | [Post-install guide](docs/GUIA-POS-INSTALACAO.md) | Current post-install checks and accelerator validation |
-| [USB4/TB3 investigation](USB4-TB3-investigation.md) | Host-router reverse engineering and upstream blockers |
+| [USB4/TB3 investigation](USB4-TB3-investigation.md) | October 7 live evidence, QMP PHY v5/PS8833 upstream status, host-router reverse engineering, safety gates, and remaining blockers |
 | [Research archive](docs/research/) | Camera, Wi-Fi, suspend, USB4, and hardware notes |
 
 ## Testing another Snapdragon X device?

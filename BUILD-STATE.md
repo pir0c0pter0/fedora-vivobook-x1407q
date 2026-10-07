@@ -49,6 +49,32 @@
   instalação e recuperação físicas, publicar hashes/artefatos e enviar os
   patches genéricos do kernel upstream.
 
+## 2026-10-07 — Revalidação USB4 / Thunderbolt
+
+- O notebook foi inspecionado localmente no kernel
+  `7.3.0-rc6-x1407qa-perf`, BIOS `X1407QA.314`: `CONFIG_USB4` e
+  `CONFIG_TYPEC_TBT_ALTMODE` continuam desligados, `thunderbolt.ko` e os
+  barramentos
+  `/sys/bus/{thunderbolt,usb4}` não existem e o DT ativo não contém host-router.
+- `port0` e `port1` aparecem via UCSI, com os altmodes locais `8087` (TBT) e
+  `ff01` (DP). Havia somente um parceiro PD em `port1`, sem topologia USB/TBT;
+  `boltd` estava ativo, mas sem domínio ou dispositivo listado.
+- Avanço upstream: a série QMP USB4 PHY v5 foi aceita e o `linux-next`
+  `b018686719706a781c45a874ed51374a2dc4b767` contém a terceira PHY USB4/TBT,
+  `PHY_MODE_TBT` e `p2rr2p_pipe` para Hamoa/Purwa.
+- Bloqueio restante: ainda não há driver de plataforma Qualcomm, binding/DTS
+  completo dos dois routers, interface pública de firmware nem integração
+  DWC3/PCIe/DP/PM aplicável ao X1P42100.
+- O `linux-next` também contém um quirk temporário do PS8833 que rejeita
+  `TYPEC_MODE_USB4` em X1E80100/X1P42100/Hamoa/Purwa até o stack ficar
+  completo. Não remover esse quirk isoladamente: ele preserva USB3 + DP e
+  evita negociar USB4 sem suporte de tunneling.
+- Conclusão operacional: não buildar/reiniciar apenas para a PHY, não habilitar
+  `attempt_usb4`/`emulate_tb3_port_ops` e não inventar nó de host-router. O
+  gatilho para retomar é a publicação conjunta de driver Qualcomm, binding,
+  DTS/graph e contrato de firmware. Detalhes em
+  [`USB4-TB3-investigation.md`](USB4-TB3-investigation.md).
+
 - Linux `7.2.0-x1407qa` foi reconstruído do zero para AArch64 e verificado.
 - Quatro correções locais foram compiladas para o kernel final e integradas ao
   live/initramfs: reguladores do WCN6855, teclado I2C-HID, backlight PMK8550 e
@@ -288,6 +314,10 @@ zstd --long=31 -t windows-drivers/X1407QA_DRV-full-2026-08-19.tar.zst
   oficialmente X1P42100/SoC ID `635`. Até lá o override fica escopado por
   processo em `tools/npu-run`; não persistir `soc_model`/`htp_arch` falsos nem
   spoof global de SoC.
+- USB4/Thunderbolt: a PHY v5 já está no `linux-next`, mas não instalar um
+  kernel de teste até existir driver Qualcomm host-router + binding/DTS/graph
+  dos dois routers + interface de firmware. Preservar o quirk de fallback
+  PS8833 e os caminhos experimentais de escrita desligados.
 
 Consulte [`docs/BUILD-REPORT-2026-08-24.md`](docs/BUILD-REPORT-2026-08-24.md)
 para a memória completa desta execução. Os relatórios anteriores foram

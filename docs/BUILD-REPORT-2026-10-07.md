@@ -302,6 +302,48 @@ systemd-analyze verify x1407qa-cdsp-prepare.service cdsprpcd.service adsprpcd_au
 git diff --check
 ```
 
+## USB4 / Thunderbolt status revalidated on October 7
+
+This kernel refresh does not enable USB4 tunneling. A read-only inspection of
+the running notebook established the following baseline:
+
+| Check | Result |
+|---|---|
+| Firmware | Insyde `X1407QA.314`, dated 2026-05-22 |
+| Kernel | `7.3.0-rc6-x1407qa-perf` |
+| `CONFIG_USB4` | Not set |
+| `CONFIG_TYPEC_TBT_ALTMODE` | Not set |
+| Thunderbolt module/bus | `thunderbolt.ko`, `/sys/bus/thunderbolt`, and `/sys/bus/usb4` absent |
+| Device tree | Three USB3+DP QMP nodes with four clocks; no Qualcomm host-router node |
+| Type-C | Two UCSI ports; local TBT (`8087`) and DP (`ff01`) altmodes present |
+| Connected topology | A PD partner on port 1; no downstream USB4/Thunderbolt domain |
+| Userspace | `boltd` active, with no domain or device returned by `boltctl list` |
+
+The upstream position did improve after the kernel used by this report was
+built. QMP USB4 PHY v5 was accepted, and the October 7 `linux-next` snapshot
+`b018686719706a781c45a874ed51374a2dc4b767` contains the third USB4 PHY,
+`PHY_MODE_TBT`, Hamoa/Purwa USB4/TBT3 tables, and the `p2rr2p_pipe` clock in
+`hamoa.dtsi`. It still has no Qualcomm platform driver or host-router DTS node.
+
+That snapshot also carries a temporary PS8833 quirk for X1E80100/X1P42100 and
+Hamoa/Purwa. It rejects `TYPEC_MODE_USB4` while the platform stack is
+incomplete so capable docks fall back to the already working USB3 + DP path.
+Removing this quirk alone would not create a tunnel and could regress display
+output.
+
+The remaining functional gate is publication of the Qualcomm host-router
+driver together with its binding, both router nodes/graphs, firmware loading
+contract, native DWC3/PCIe/DP integration, and power-management sequence. The
+firmware stream extracted from the Windows filter proves that the MCU payload
+exists, but it has no redistributable filename/license and cannot be shipped in
+an ISO. Until that stack is public, enabling only `CONFIG_USB4`, applying only
+the PHY series, or creating a speculative overlay cannot produce a domain and
+must not be treated as a functional test.
+
+The complete evidence, historical experiments, Windows resource map, firmware
+format, safety constraints, and test-entry criteria are maintained in
+[`USB4-TB3-investigation.md`](../USB4-TB3-investigation.md).
+
 ## Remaining work
 
 1. Build and publish a refreshed Fedora image containing the validated 7.3
@@ -310,6 +352,8 @@ git diff --check
 2. Send the battery chemistry and WCD938x control fixes upstream.
 3. Keep `s2idle`; `deep` suspend remains unsafe on this platform.
 4. Continue tracking upstream Qualcomm USB4/Thunderbolt host-router support.
+   Start a new kernel/DTB test only when driver, binding, dual-router graph,
+   firmware contract, and PS8833 quirk transition are available together.
 5. Remove the per-process QNN SoC-ID workaround only after the vendor runtime
    recognizes X1P42100 ID `635` natively.
 6. Add native monochrome `R10_CSI2P` support to the libcamera soft ISP; the
