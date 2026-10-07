@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+device=${1:?usage: x1407qa-wait-fastrpc-stable DEVICE [SECONDS]}
+minimum_age=${2:-10}
+uptime_file=${X1407QA_UPTIME_FILE:-/proc/uptime}
+udevadm_command=${X1407QA_UDEVADM:-/usr/bin/udevadm}
+sleep_command=${X1407QA_SLEEP:-/usr/bin/sleep}
+
+[[ -e $device ]] || {
+    echo "FastRPC device disappeared before stability check: $device" >&2
+    exit 1
+}
+
+initialized_usec=$(
+    "$udevadm_command" info --query=property --name="$device" |
+        awk -F= '$1 == "USEC_INITIALIZED" { print $2; exit }'
+)
+[[ $initialized_usec =~ ^[0-9]+$ ]] || {
+    echo "Missing USEC_INITIALIZED for $device" >&2
+    exit 1
+}
+
+uptime_seconds=$(awk 'NR == 1 { print $1; exit }' "$uptime_file")
+remaining=$(awk -v now="$uptime_seconds" -v initialized="$initialized_usec" \
+    -v minimum="$minimum_age" 'BEGIN {
+        wait = minimum - (now - initialized / 1000000)
+        if (wait > 0)
+            printf "%.6f", wait
+        else
+            print "0"
+    }')
+
+if awk -v remaining="$remaining" 'BEGIN { exit !(remaining > 0) }'; then
+    "$sleep_command" "$remaining"
+fi
+
+[[ -e $device ]] || {
+    echo "FastRPC device disappeared during stability check: $device" >&2
+    exit 1
+}
+
+current_initialized=$(
+    "$udevadm_command" info --query=property --name="$device" |
+        awk -F= '$1 == "USEC_INITIALIZED" { print $2; exit }'
+)
+[[ $current_initialized == "$initialized_usec" ]] || {
+    echo "FastRPC device was recreated during stability check: $device" >&2
+    exit 1
+}

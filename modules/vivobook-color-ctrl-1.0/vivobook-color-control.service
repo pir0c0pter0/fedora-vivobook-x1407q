@@ -1,0 +1,12 @@
+[Unit]
+Description=ASUS Vivobook X1407QA display color controls
+After=display-manager.service vivobook-camera.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/sbin/modprobe vivobook_color_ctrl
+ExecStop=/bin/true
+
+[Install]
+WantedBy=graphical.target

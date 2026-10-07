@@ -1839,23 +1839,13 @@ if ! busctl call org.freedesktop.UPower \
 fi
 
 # Freq cap na bateria (plano de bateria Fase 3): 2.38GHz na bateria, 2.96GHz no AC/USB
-cat > /usr/local/bin/vivobook-battery-freq-cap << 'EOF'
-#!/bin/sh
-# vivobook-battery-freq-cap: cap CPU max freq on battery, restore on AC/USB power.
-# 2380800 = highest OPP <= 2.4GHz on X1-26-100; 2956800 = cpuinfo_max_freq.
-ac=$(cat /sys/class/power_supply/qcom-battmgr-ac/online 2>/dev/null)
-usb=$(cat /sys/class/power_supply/qcom-battmgr-usb/online 2>/dev/null)
-if [ "$ac" = 1 ] || [ "$usb" = 1 ]; then
-    freq=2956800
-else
-    freq=2380800
-fi
-for p in /sys/devices/system/cpu/cpufreq/policy*/scaling_max_freq; do
-    echo "$freq" > "$p" 2>/dev/null || true
-done
-EOF
-chmod 755 /usr/local/bin/vivobook-battery-freq-cap
+install -m 0755 "${SCRIPT_DIR}/tools/vivobook-battery-freq-cap" \
+    /usr/local/bin/vivobook-battery-freq-cap
 echo 'SUBSYSTEM=="power_supply", KERNEL=="qcom-battmgr-*", RUN+="/usr/local/bin/vivobook-battery-freq-cap"' > /etc/udev/rules.d/99-battery-freq-cap.rules
+echo 'install_items+=" /usr/local/bin/vivobook-battery-freq-cap "' > \
+    /etc/dracut.conf.d/91-x1407qa-battery-freq-cap.conf
+echo 'force_drivers+=" snd_seq_device snd_seq "' >> \
+    /etc/dracut.conf.d/91-x1407qa-battery-freq-cap.conf
 udevadm control --reload-rules 2>/dev/null || true
 /usr/local/bin/vivobook-battery-freq-cap || true
 log "  Charge limit 80% + freq cap 2.38GHz na bateria"
@@ -1875,6 +1865,18 @@ write_camera_dma_heap_rule || warn "  Regra uaccess do DMA heap não instalada"
 udevadm control --reload-rules 2>/dev/null || true
 systemctl daemon-reload 2>/dev/null || true
 systemctl enable vivobook-camera.service 2>/dev/null || warn "  Autostart da câmera não habilitado"
+
+# Load color control only after DRM and the graphical camera setup are ready.
+# Loading it through modules-load.d also copies it into the initramfs, where
+# the msm DRM device does not exist yet and module initialization fails.
+if install -m 0644 \
+        "${SCRIPT_DIR}/modules/vivobook-color-ctrl-1.0/vivobook-color-control.service" \
+        /etc/systemd/system/vivobook-color-control.service; then
+    systemctl enable vivobook-color-control.service 2>/dev/null ||
+        warn "  Autostart do controle de cor não habilitado"
+else
+    warn "  Serviço do controle de cor não instalado"
+fi
 
 # Install user command
 cp "${SCRIPT_DIR}/modules/vivobook-cam-fix-2.0/vivobook-camera" /usr/local/bin/vivobook-camera 2>/dev/null || true
@@ -1970,6 +1972,7 @@ echo "              npu-run ~/.local/share/vivobook-qnn/bin/python ${SCRIPT_DIR}
 echo "    Carga:    cat /sys/class/power_supply/qcom-battmgr-bat/charge_control_end_threshold"
 echo "    Suspend:  systemctl suspend  (s2idle; hibernate.target deve seguir masked)"
 echo "    Câmera:   systemctl status vivobook-camera.service"
+echo "    Cor:      systemctl status vivobook-color-control.service"
 echo ""
 
 if [[ $desktop_extension_status -eq 3 ]]; then

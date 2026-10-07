@@ -1,0 +1,33 @@
+diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
+index 7716eb9e1..9a1935fa1 100644
+--- a/drivers/power/supply/qcom_battmgr.c
++++ b/drivers/power/supply/qcom_battmgr.c
+@@ -1242 +1242,2 @@ static unsigned int qcom_battmgr_sc8280xp_parse_technology(const char *chemistry
+-	    (!strncmp(chemistry, "OOI", 3)))
++	    (!strncmp(chemistry, "OOI", 3)) ||
++	    (!strncmp(chemistry, "OOD", 3)))
+diff --git a/sound/soc/codecs/wcd938x.c b/sound/soc/codecs/wcd938x.c
+index 9a9ea37ec..03b328c02 100644
+--- a/sound/soc/codecs/wcd938x.c
++++ b/sound/soc/codecs/wcd938x.c
+@@ -2530,0 +2531,6 @@ static int wcd938x_hph_impedance_get(struct snd_kcontrol *kcontrol,
++#define WCD938X_SINGLE_EXT_RO(xname, xshift, xmax, xhandler_get) \
++{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname, \
++	.access = SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE, \
++	.info = snd_soc_info_volsw, .get = xhandler_get, \
++	.private_value = SOC_SINGLE_VALUE(0, xshift, 0, xmax, 0, 0) }
++
+@@ -2532,2 +2538,2 @@ static const struct snd_kcontrol_new hph_type_detect_controls[] = {
+-	SOC_SINGLE_EXT("HPH Type", 0, 0, WCD_MBHC_HPH_STEREO, 0,
+-		       wcd938x_get_hph_type, NULL),
++	WCD938X_SINGLE_EXT_RO("HPH Type", 0, WCD_MBHC_HPH_STEREO,
++			      wcd938x_get_hph_type),
+@@ -2537,4 +2543,4 @@ static const struct snd_kcontrol_new impedance_detect_controls[] = {
+-	SOC_SINGLE_EXT("HPHL Impedance", 0, 0, INT_MAX, 0,
+-		       wcd938x_hph_impedance_get, NULL),
+-	SOC_SINGLE_EXT("HPHR Impedance", 0, 1, INT_MAX, 0,
+-		       wcd938x_hph_impedance_get, NULL),
++	WCD938X_SINGLE_EXT_RO("HPHL Impedance", 0, INT_MAX,
++			      wcd938x_hph_impedance_get),
++	WCD938X_SINGLE_EXT_RO("HPHR Impedance", 1, INT_MAX,
++			      wcd938x_hph_impedance_get),

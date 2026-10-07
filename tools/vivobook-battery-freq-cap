@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+
+power_supply_root=${VIVOBOOK_POWER_SUPPLY_ROOT:-/sys/class/power_supply}
+cpufreq_root=${VIVOBOOK_CPUFREQ_ROOT:-/sys/devices/system/cpu/cpufreq}
+
+read_online() {
+    value=0
+    if [ -r "$1/online" ]; then
+        IFS= read -r value < "$1/online" || value=0
+    fi
+    printf '%s\n' "$value"
+}
+
+ac=$(read_online "$power_supply_root/qcom-battmgr-ac")
+usb=$(read_online "$power_supply_root/qcom-battmgr-usb")
+
+if [ "$ac" = 1 ] || [ "$usb" = 1 ]; then
+    frequency=2956800
+else
+    frequency=2380800
+fi
+
+for policy_max in "$cpufreq_root"/policy*/scaling_max_freq; do
+    [ -e "$policy_max" ] || continue
+    printf '%s\n' "$frequency" > "$policy_max" 2>/dev/null || true
+done

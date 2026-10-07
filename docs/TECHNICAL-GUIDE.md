@@ -538,6 +538,55 @@ systemd-analyze
 wpctl status | grep -A5 Sinks
 ```
 
+### Linux 7.3-rc6 development upgrade (installed system only)
+
+On October 7, 2026, the installed X1407QA was upgraded and physically
+validated with `7.3.0-rc6-x1407qa-perf`. This does not change the Linux 7.2
+kernel in the published ISO. The complete source baseline, configuration,
+package transactions, patches, boot timeline, rollback path, and remaining
+work are recorded in
+[`BUILD-REPORT-2026-10-07.md`](BUILD-REPORT-2026-10-07.md).
+
+Apply the versioned source/config changes to the exact validated Linux 7.3-rc6
+commit. The build directory must already contain a known-good X1407QA AArch64
+`.config`; the helper verifies the commit, applies both the runtime and camera
+patches, and normalizes every performance/RFCOMM/Landlock option listed here:
+
+```bash
+kernel/apply-linux-7.3-x1407qa-runtime-fixes.sh \
+  /path/to/linux/source /path/to/linux/build
+make -C /path/to/linux/source O=/path/to/linux/build \
+  LOCALVERSION= -j"$(nproc)" Image modules
+```
+
+The runtime patch recognizes battery chemistry `OOD` as lithium-ion and makes the
+WCD938x headphone type/impedance controls read-only and volatile. The helper
+also applies `linux-7.2-camera-warning-fix.patch`, which is compatible with the
+pinned 7.3-rc6 tree, disables `LOCALVERSION_AUTO`, fixes the active LSM list,
+and requires the exact release `7.3.0-rc6-x1407qa-perf`. Build and install the image and the complete module set
+together; do not combine modules from the old same-release build with the new
+image.
+
+The FastRPC setup now installs a corrected ADSP unit plus a separate,
+non-restarting CDSP preparation unit required by the daemon. On the first CDSP
+service start of each boot it atomically records the attempt before performing
+one clean remoteproc cycle, waits for `/dev/fastrpc-cdsp` to remain the same
+udev device for ten seconds, and only then launches `cdsprpcd`. Even a failed
+attempt cannot cause another hardware cycle in the same boot. Verify the
+cold-boot contract with:
+
+```bash
+test -e /run/x1407qa/remoteproc-cycled-cdsp
+test -d /run/x1407qa/remoteproc-cycle-cdsp.attempted
+systemctl show x1407qa-cdsp-prepare.service -p ActiveState -p Result
+systemctl show cdsprpcd.service -p ActiveState -p NRestarts
+journalctl -b | grep -E 'sleep_statsi|crash detected in cdsp'
+tools/npu-run ~/.local/share/vivobook-qnn/bin/python tools/verify-qnn-npu.py
+```
+
+Expected: marker present, service active, `NRestarts=0`, no crash matches, and
+HTP inference passing with CPU fallback disabled.
+
 ---
 
 ## Setup Scripts
@@ -563,9 +612,11 @@ sudo bash setup-vivobook.sh
 
 Run **after** installing Fedora and (if needed) extracting the firmware. Applies
 every hardware fix on the running system: DKMS modules, firmware initramfs,
-GRUB params, suspend/lid, UCM2 audio, Vulkan fix, GNOME
-extension, charge control, cpufreq, dconf defaults, graphical camera autostart. Auto-stages
-bundled modules/firmware and cleans up deprecated scripts.
+GRUB params, suspend/lid, UCM2 audio, Vulkan fix, GNOME extension, charge
+control, tested power-dependent cpufreq helper, dconf defaults, late display
+color control, graphical camera autostart, and hardened ADSP/CDSP FastRPC
+services. Auto-stages bundled modules/firmware and cleans up deprecated
+scripts.
 
 ### Windows firmware dump
 

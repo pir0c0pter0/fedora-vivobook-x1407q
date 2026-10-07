@@ -9,11 +9,12 @@
 
   <h1>Fedora 44 on the ASUS VivoBook 14 X1407QA</h1>
 
-  <p><strong>Linux 7.2 · Snapdragon X · AArch64 hardware enablement</strong></p>
+  <p><strong>Published Linux 7.2 ISO · Linux 7.3-rc6 development kernel · Snapdragon X</strong></p>
 
   <p>
     <img src="https://img.shields.io/badge/Fedora-44-51A2DA?style=flat-square&logo=fedora&logoColor=white" alt="Fedora 44">
     <img src="https://img.shields.io/badge/Linux-7.2-FCC624?style=flat-square&logo=linux&logoColor=black" alt="Linux 7.2">
+    <img src="https://img.shields.io/badge/tested-7.3--rc6-f59e0b?style=flat-square&logo=linux&logoColor=white" alt="Linux 7.3-rc6 tested">
     <img src="https://img.shields.io/badge/Architecture-AArch64-111827?style=flat-square" alt="AArch64">
     <a href="https://github.com/pir0c0pter0/fedora-vivobook-x1407q/releases/latest"><img src="https://img.shields.io/github/v/release/pir0c0pter0/fedora-vivobook-x1407q?style=flat-square&label=release" alt="Latest release"></a>
   </p>
@@ -57,23 +58,80 @@ The rebuilt ISO passed filesystem, boot layout, kernel, initramfs, firmware,
 permissions, payload, archive, and checksum validation. Its first physical
 USB boot and installation cycle is still pending.
 
+## Linux 7.3-rc6 development update — October 7, 2026
+
+The installed X1407QA now runs the speed-oriented development kernel
+`7.3.0-rc6-x1407qa-perf`. This kernel is validated on the physical notebook,
+but it is **not yet the kernel shipped by the downloadable ISO above**. The
+public ISO remains the published Linux 7.2 baseline. Its automated artifact
+checks passed, but its first physical USB boot and installation are pending.
+
+### What improved
+
+| Area | Improvement in the 7.3-rc6 development build | Validation |
+|---|---|---|
+| Fedora userspace | Refreshed the Fedora 44 installation in one successful 825-package DNF transaction; installed the native kernel build toolchain | DNF transactions 22 and 23 completed with `Status: Ok` |
+| Kernel responsiveness | Built from upstream `v7.3-rc6` with `CONFIG_PREEMPT=y`, 250 Hz timer, `schedutil`, performance compiler optimization, 4 KiB pages, and no LTO | Booted as `7.3.0-rc6-x1407qa-perf`; graphical target reached in 3.762 s |
+| Battery reporting | Recognizes the ASUS firmware chemistry code `OOD` as lithium-ion | `/sys/class/power_supply/qcom-battmgr-bat/technology` reports `Li-ion` |
+| Battery performance policy | Moved the 2.3808 GHz battery / 2.9568 GHz external-power cap into a tested helper, udev coldplug path, and initramfs | Both CPU-frequency policies switch to the expected limit in regression tests |
+| Audio codec controls | Marks WCD938x headphone type and impedance controls read-only and volatile, matching their hardware-detection role | Rebuilt module loads with exact kernel vermagic; speakers and microphones are published by PipeWire |
+| Bluetooth | Enables RFCOMM as a kernel module, restoring the Bluetooth serial profile expected by BlueZ | `rfcomm` is loaded after a clean boot; Bluetooth has zero service restarts |
+| Desktop sandboxing | Enables the Landlock LSM, which was listed in `CONFIG_LSM` but missing from the old build | Kernel reports `capability,landlock`; LocalSearch starts normally |
+| NPU / CDSP boot | Replaces the repeatable first-client CDSP firmware crash with one controlled remoteproc cycle in a separate non-restarting unit, waits 10 seconds for the new FastRPC device, and starts `cdsprpcd` once | Cold boot has no `sleep_statsi` crash, CDSP is `running`, and `NRestarts=0`; a failed attempt cannot cycle it again in the same boot |
+| ADSP FastRPC | Starts `adsprpcd` with the explicit `audiopd adsp` arguments instead of relying on an invalid/default domain | `adsprpcd_audiopd.service` is active with zero restarts |
+| QNN/HTP inference | Preserves real Hexagon execution after the boot hardening | ONNX Runtime reports `NPU devices: 1` and passes with CPU fallback disabled |
+| Display color control | Loads the color-control module at `graphical.target`, after DRM and the camera service, instead of too early in the initramfs | Dedicated systemd unit and regression test verify ordering |
+
+The final cold-boot audit found zero failed systemd units. Audio, Bluetooth,
+battery, both cameras, Landlock/LocalSearch, CDSP, and QNN/HTP inference were
+all exercised on the notebook. See the
+[October 7 build report](docs/BUILD-REPORT-2026-10-07.md) for the build inputs,
+patches, commands, evidence, and rollback boundary.
+
+### What is still missing
+
+- **Cold-boot the final CDSP unit layout:** the separate non-restarting
+  preparation unit was installed and started successfully without disturbing
+  the running daemon, and its success/failure paths pass regression tests. A
+  new cold boot is still required to validate this final systemd layout from
+  firmware startup.
+- **Publish a refreshed ISO:** package the validated Linux 7.3 kernel and new
+  service/runtime fixes into an ISO, then repeat physical USB boot,
+  installation, recovery, and checksum validation. The Linux 7.2 image above
+  remains the published artifact, not yet physically validated recovery media.
+- **Upstream the local kernel fixes:** battery chemistry `OOD` handling and
+  the WCD938x read-only control semantics remain local patches.
+- **USB4 / Thunderbolt tunneling:** USB-C, USB 3, charging, and DisplayPort
+  work, but Qualcomm's upstream host-router stack is still incomplete.
+- **Deep suspend:** `deep` remains unsafe; keep `s2idle` selected.
+- **Native X1P42100 QNN identification:** the current Qualcomm runtime does
+  not recognize SoC ID `635`; NPU applications still use the per-process
+  `tools/npu-run` override. No global SoC spoof is installed.
+- **Monochrome IR in libcamera soft-ISP:** the hardware and V4L2 capture path
+  work, but native `R10_CSI2P` soft-ISP support is still missing.
+- **Harmless boot-log noise:** PMIC device-link retries, device-tree overlay
+  removal warnings, optional FastRPC `.farf` lookups, and an early PipeWire
+  route probe remain visible even though the corresponding hardware is
+  operational. They are documented rather than hidden.
+
 ## Current status
 
 The table describes the installed Fedora system validated on the X1407QA on
-August 31, 2026. It does not replace the pending physical test of the latest
-ISO rebuild.
+October 7, 2026. It does not replace the pending physical test of a refreshed
+ISO build.
 
 | Area | State |
 |---|---|
+| Linux 7.3-rc6 development kernel | ✅ Working on the installed notebook; not yet published as an ISO |
 | Fedora boot and NVMe | ✅ Working |
 | Wi-Fi and Bluetooth | ✅ Working |
 | Keyboard, touchpad, brightness and hotkeys | ✅ Working |
-| Battery reporting and charge limit | ✅ Working |
+| Battery reporting, charge limit and power-dependent CPU cap | ✅ Working; chemistry now reports `Li-ion` |
 | GPU acceleration and Vulkan | ✅ Working |
 | Audio | ✅ Working |
 | RGB camera and PipeWire | ✅ Working |
 | IR camera and illuminator | ✅ Working; 700 mA PM8550 IR torch follows the stream lifecycle |
-| CDSP and QNN/HTP NPU inference | ✅ Working |
+| CDSP and QNN/HTP NPU inference | ✅ Working; clean cold boot with zero CDSP restarts |
 | Suspend | ✅ `s2idle` only; `deep` is unsafe |
 | USB-C, USB 3 and DisplayPort | ✅ Working |
 | USB4 / Thunderbolt tunneling | ❌ Waiting for the upstream Qualcomm host-router stack |
@@ -118,6 +176,7 @@ sudo rescue-installed-boot --repair
 |---|---|
 | [Current build state](BUILD-STATE.md) | Exact validated state, release hashes, and remaining work |
 | [Detailed technical guide](docs/TECHNICAL-GUIDE.md) | Full installation history, fix guide, commands, and implementation notes |
+| [October 7 kernel 7.3 build report](docs/BUILD-REPORT-2026-10-07.md) | Package refresh, kernel configuration, runtime fixes, boot evidence, and remaining work |
 | [August 24 build report](docs/BUILD-REPORT-2026-08-24.md) | Full-system ISO/build validation baseline; IR hardware proof is documented above |
 | [Firmware extraction guide](docs/GUIA-EXTRAIR-FIRMWARE.md) | Recovering Qualcomm firmware from Windows |
 | [Post-install guide](docs/GUIA-POS-INSTALACAO.md) | Current post-install checks and accelerator validation |

@@ -1,0 +1,9 @@
+[Unit]
+Description=Prepare the X1407QA CDSP before its first FastRPC client
+Before=cdsprpcd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/x1407qa-cycle-remoteproc-once cdsp /dev/fastrpc-cdsp
+ExecStart=/usr/local/libexec/x1407qa-wait-fastrpc-stable /dev/fastrpc-cdsp 10
+RemainAfterExit=yes

@@ -87,7 +87,7 @@ fi
 setup="$repo/setup-vivobook.sh"
 require_file "$setup"
 for token in 'snd_soc_wcd938x' 'HandleLidSwitch=suspend' 'vivobook-battery-freq-cap' \
-    '99-battery-freq-cap.rules' '2380800' 'mem_sleep_default=s2idle' \
+    '99-battery-freq-cap.rules' 'mem_sleep_default=s2idle' \
     '--remove-args="rd.live.ram pd_ignore_unused mem_sleep_default systemd.zram plymouth.enable"'; do
     require_token "$setup" "$token"
 done

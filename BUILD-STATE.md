@@ -1,8 +1,52 @@
 # Estado da construção personalizada
 
-Última atualização: **2026-08-24**
+Última atualização: **2026-10-07**
 
 ## Estado atual
+
+- O notebook instalado roda agora o kernel de desenvolvimento
+  `7.3.0-rc6-x1407qa-perf`; a ISO pública continua em Linux 7.2 até uma nova
+  reconstrução e validação física completa.
+- O Fedora 44 foi atualizado com sucesso: a transação DNF 22 alterou 825
+  pacotes, e a transação 23 completou as dependências nativas de compilação do
+  kernel.
+- O kernel 7.3-rc6 habilita preempção, HZ 250, `schedutil`, otimização de
+  compilador para desempenho, páginas de 4 KiB, RFCOMM e Landlock.
+- Correções locais reconhecem a química de bateria `OOD` como `Li-ion` e
+  expõem tipo/impedância do WCD938x como controles ALSA somente leitura e
+  voláteis.
+- O primeiro cliente FastRPC não derruba mais o CDSP. Um ciclo remoto
+  controlado ocorre uma única vez por boot, seguido de 10 segundos de
+  estabilidade do device node; o cold boot final teve zero crashes e
+  `cdsprpcd` com `NRestarts=0`.
+- `adsprpcd_audiopd.service` seleciona explicitamente `audiopd adsp`.
+- O cap de CPU por fonte de energia saiu do heredoc do setup e virou helper
+  testável/persistente no initramfs. O controle de cor ganhou serviço tardio
+  em `graphical.target`, depois de DRM/câmera.
+- Auditoria física final: zero unidades systemd falhas, `graphical.target` em
+  3.762 s, Landlock ativo, bateria `Li-ion`, RFCOMM/áudio/câmeras ativos e
+  inferência QNN/HTP real com fallback de CPU desabilitado.
+- Após essa auditoria, o ciclo CDSP foi isolado em uma unidade `oneshot` sem
+  reinício; ela foi instalada/testada em runtime, mas o layout systemd final
+  ainda precisa de um cold boot adicional.
+- Relatório completo: [`docs/BUILD-REPORT-2026-10-07.md`](docs/BUILD-REPORT-2026-10-07.md).
+
+## 2026-10-07 — Linux 7.3-rc6 e hardening do boot CDSP
+
+- Baseline upstream: tag `v7.3-rc6`, commit
+  `a90ee4305c4a5df72c11b31dacfdc76e00fcf78a`.
+- Release instalada: `7.3.0-rc6-x1407qa-perf`; imagem com SHA-256
+  `dfc38d0d032a56bdf89f3ec5f8568eb5c3a5798c5718829fb3d54a83da9454db`.
+- `kernel/apply-linux-7.3-x1407qa-runtime-fixes.sh` exige o commit upstream
+  validado, aplica de forma idempotente os patches de runtime e câmera e
+  normaliza todos os parâmetros de desempenho/RFCOMM/Landlock documentados
+  sobre uma configuração AArch64 funcional existente, incluindo a lista LSM e
+  o release exato sem sufixo automático `-dirty`.
+- Backup anterior à substituição de artefatos da mesma release:
+  `/var/lib/x1407qa-kernel-7.3/runtime-fixes-backup/pre-full-rebuild-20261007-1040/`.
+- O que falta para promover esta versão: reconstruir a ISO, repetir boot USB,
+  instalação e recuperação físicas, publicar hashes/artefatos e enviar os
+  patches genéricos do kernel upstream.
 
 - Linux `7.2.0-x1407qa` foi reconstruído do zero para AArch64 e verificado.
 - Quatro correções locais foram compiladas para o kernel final e integradas ao

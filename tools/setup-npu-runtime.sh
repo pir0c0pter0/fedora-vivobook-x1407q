@@ -42,6 +42,9 @@ DT_MODEL="ASUS Zenbook A14 (UX3407QA)"
 CDSP_MBN="${NPU_CDSP_MBN:-/usr/lib/firmware/qcom/x1p42100/ASUSTeK/zenbook-a14/qccdsp8380.mbn}"
 AUTHCHECK="${SCRIPT_DIR}/lib/hexagon-authcheck.py"
 REPO_HEXAGON_DIR="${NPU_HEXAGON_DIR:-${REPO_ROOT}/hexagon-dsp/cdsp}"
+SYSTEMD_SYSTEM_DIR="${NPU_SYSTEMD_SYSTEM_DIR:-/etc/systemd/system}"
+LOCAL_LIBEXEC_DIR="${NPU_LOCAL_LIBEXEC_DIR:-/usr/local/libexec}"
+SYSTEMCTL="${NPU_SYSTEMCTL:-systemctl}"
 BUILD_DEPS=(autoconf automake libtool libyaml-devel libmd-devel libbsd-devel gcc gcc-c++ make git)
 TOTAL_STEPS=6
 
@@ -209,6 +212,33 @@ build_fastrpc() {
     log "fastrpc instalado em /usr/local"
 }
 
+install_fastrpc_services() {
+    local audiopd_unit="${REPO_ROOT}/systemd/adsprpcd_audiopd.service"
+    local cdsp_dropin="${REPO_ROOT}/systemd/cdsprpcd.service.d/10-x1407qa-stability.conf"
+    local cdsp_prepare_unit="${REPO_ROOT}/systemd/x1407qa-cdsp-prepare.service"
+    local stability_helper="${REPO_ROOT}/tools/x1407qa-wait-fastrpc-stable"
+    local cycle_helper="${REPO_ROOT}/tools/x1407qa-cycle-remoteproc-once"
+
+    for path in "$audiopd_unit" "$cdsp_dropin" "$cdsp_prepare_unit" "$stability_helper" "$cycle_helper"; do
+        [[ -f $path ]] || { err "Arquivo de servico ausente: $path"; return 1; }
+    done
+
+    install -d -m 0755 "$LOCAL_LIBEXEC_DIR" \
+        "$SYSTEMD_SYSTEM_DIR/cdsprpcd.service.d"
+    install -m 0755 "$stability_helper" \
+        "$LOCAL_LIBEXEC_DIR/x1407qa-wait-fastrpc-stable"
+    install -m 0755 "$cycle_helper" \
+        "$LOCAL_LIBEXEC_DIR/x1407qa-cycle-remoteproc-once"
+    install -m 0644 "$audiopd_unit" \
+        "$SYSTEMD_SYSTEM_DIR/adsprpcd_audiopd.service"
+    install -m 0644 "$cdsp_prepare_unit" \
+        "$SYSTEMD_SYSTEM_DIR/x1407qa-cdsp-prepare.service"
+    install -m 0644 "$cdsp_dropin" \
+        "$SYSTEMD_SYSTEM_DIR/cdsprpcd.service.d/10-x1407qa-stability.conf"
+    "$SYSTEMCTL" daemon-reload
+    log "Servicos FastRPC endurecidos para o boot do X1407QA"
+}
+
 # ─── 4. Binarios Hexagon do CDSP ─────────────────────────────────────────────
 # O firmware CDSP assinado so executa binarios cujos segmentos ELF estejam no
 # whitelist de SHA-256 embutido no .mbn. Shell de outra build = falha.
@@ -363,6 +393,7 @@ install_build_deps
 
 step 3 "fastrpc / libcdsprpc.so"
 build_fastrpc
+install_fastrpc_services
 
 step 4 "Binarios Hexagon do CDSP"
 install_hexagon_binaries

@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+remoteproc_name=${1:?usage: x1407qa-cycle-remoteproc-once NAME DEVICE}
+device=${2:?usage: x1407qa-cycle-remoteproc-once NAME DEVICE}
+remoteproc_root=${X1407QA_REMOTEPROC_ROOT:-/sys/class/remoteproc}
+run_dir=${X1407QA_RUN_DIR:-/run/x1407qa}
+state_control=${X1407QA_REMOTE_STATE_CONTROL:-}
+sleep_command=${X1407QA_SLEEP:-/usr/bin/sleep}
+timeout_seconds=${X1407QA_REMOTEPROC_TIMEOUT:-15}
+
+[[ $remoteproc_name =~ ^[A-Za-z0-9._-]+$ ]] || {
+    echo "Invalid remoteproc name: $remoteproc_name" >&2
+    exit 2
+}
+
+success_marker="$run_dir/remoteproc-cycled-$remoteproc_name"
+attempt_marker="$run_dir/remoteproc-cycle-$remoteproc_name.attempted"
+if [[ -e $success_marker ]]; then
+    exit 0
+fi
+if [[ -e $attempt_marker ]]; then
+    echo "Remote processor cycle was already attempted this boot: $remoteproc_name" >&2
+    exit 1
+fi
+
+remoteproc=""
+for candidate in "$remoteproc_root"/remoteproc*; do
+    [[ -r $candidate/name && -r $candidate/state ]] || continue
+    [[ $(<"$candidate/name") == "$remoteproc_name" ]] || continue
+    remoteproc=$candidate
+    break
+done
+[[ -n $remoteproc ]] || {
+    echo "Remote processor not found: $remoteproc_name" >&2
+    exit 1
+}
+
+state_file="$remoteproc/state"
+set_state() {
+    local action=$1
+    if [[ -n $state_control ]]; then
+        "$state_control" "$state_file" "$action"
+    else
+        printf '%s\n' "$action" > "$state_file"
+    fi
+}
+
+wait_for_state() {
+    local expected=$1 elapsed=0 state
+    while (( elapsed < timeout_seconds * 20 )); do
+        state=$(<"$state_file")
+        [[ $state == "$expected" ]] && return 0
+        "$sleep_command" 0.05
+        ((elapsed += 1))
+    done
+    echo "$remoteproc_name did not reach state $expected" >&2
+    return 1
+}
+
+install -d -m 0755 "$run_dir"
+if ! mkdir "$attempt_marker" 2>/dev/null; then
+    echo "Remote processor cycle was already attempted this boot: $remoteproc_name" >&2
+    exit 1
+fi
+
+echo "Clean-cycling $remoteproc_name before its first FastRPC client"
+set_state stop
+wait_for_state offline
+set_state start
+wait_for_state running
+
+elapsed=0
+while [[ ! -e $device && $elapsed -lt $((timeout_seconds * 20)) ]]; do
+    "$sleep_command" 0.05
+    ((elapsed += 1))
+done
+[[ -e $device ]] || {
+    echo "FastRPC device did not reappear after cycling $remoteproc_name: $device" >&2
+    exit 1
+}
+
+touch "$success_marker"
