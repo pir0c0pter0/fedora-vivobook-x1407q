@@ -25,7 +25,7 @@ new 7.3 ISO has been published.
   as one consistent set; the eight existing X1407QA extra modules were
   preserved.
 - A physical cold boot completed with zero failed systemd units. The graphical
-  target was reached after 3.762 seconds.
+  target was reached after 3.764 seconds.
 - Landlock, RFCOMM, lithium-ion battery reporting, PipeWire audio, both camera
   sensors, FastRPC, CDSP, and QNN/HTP inference were validated.
 - The repeatable first-client CDSP firmware crash was eliminated. The service
@@ -197,16 +197,20 @@ verification.
 The validating boot showed:
 
 ```text
-  6.451990  systemd: Starting cdsprpcd.service
-  6.457482  helper: Clean-cycling cdsp before its first FastRPC client
- 16.662965  systemd: Started cdsprpcd.service
- 16.663168  cdsprpcd: CDSP daemon starting
+ 10.919306  systemd: Starting x1407qa-cdsp-prepare.service
+ 10.931780  helper: Clean-cycling cdsp before its first FastRPC client
+ 21.108188  systemd: Finished x1407qa-cdsp-prepare.service
+ 21.109795  systemd: Starting cdsprpcd.service
+ 21.131212  cdsprpcd: CDSP daemon starting
+ 21.131329  systemd: Started cdsprpcd.service
 ```
 
 Final state:
 
 ```text
 remoteproc cdsp state: running
+x1407qa-cdsp-prepare ActiveState: active (exited)
+x1407qa-cdsp-prepare NRestarts:   0
 cdsprpcd ActiveState: active
 cdsprpcd NRestarts:   0
 CDSP crash matches:  0
@@ -266,8 +270,8 @@ vice versa.
 | Kernel release | `7.3.0-rc6-x1407qa-perf` |
 | Kernel image/config/System.map | Byte-for-byte matched the completed build before reboot |
 | systemd failed units | 0 |
-| Kernel/initrd/userspace total | 16.663 s |
-| Graphical target | 3.762 s in userspace |
+| Kernel/initrd/userspace total | 21.131 s |
+| Graphical target | 3.764 s in userspace |
 | Active LSMs | `capability,landlock` |
 | Battery technology | `Li-ion` |
 | RFCOMM | Module loaded |
@@ -279,12 +283,13 @@ vice versa.
 | LocalSearch | Active under Landlock-enabled kernel |
 | QNN/HTP | Real NPU inference passed with CPU fallback disabled |
 
-This cold boot validated the same cycle and stability-gate behavior while it
-was still attached to `cdsprpcd` as `ExecStartPre`. The subsequent review
-isolated that behavior in the non-restarting preparation unit so a failed
-attempt cannot be repeated by the daemon's restart policy. The final unit was
-installed, started successfully against the already prepared boot, and
-verified with success/failure-path tests; one additional cold boot remains.
+Boot ID `25334202-039b-4474-90d6-28d80acd5987` validated the final separate
+oneshot topology from firmware startup. The attempt and success markers were
+created once, the device stability gate took the expected ten seconds, the
+preparation unit completed before `cdsprpcd` started, and all FastRPC services
+remained active with zero restarts. A journal-wide scan found no CDSP crash
+signature, and real QNN/HTP inference passed afterward with CPU fallback
+disabled.
 
 Automated checks used for the final gate:
 
@@ -299,18 +304,16 @@ git diff --check
 
 ## Remaining work
 
-1. Cold-boot once more to validate the final separate
-   `x1407qa-cdsp-prepare.service` layout from firmware startup.
-2. Build and publish a refreshed Fedora image containing the validated 7.3
+1. Build and publish a refreshed Fedora image containing the validated 7.3
    kernel and runtime files, then repeat physical USB boot, installation,
    recovery, archive, and checksum tests.
-3. Send the battery chemistry and WCD938x control fixes upstream.
-4. Keep `s2idle`; `deep` suspend remains unsafe on this platform.
-5. Continue tracking upstream Qualcomm USB4/Thunderbolt host-router support.
-6. Remove the per-process QNN SoC-ID workaround only after the vendor runtime
+2. Send the battery chemistry and WCD938x control fixes upstream.
+3. Keep `s2idle`; `deep` suspend remains unsafe on this platform.
+4. Continue tracking upstream Qualcomm USB4/Thunderbolt host-router support.
+5. Remove the per-process QNN SoC-ID workaround only after the vendor runtime
    recognizes X1P42100 ID `635` natively.
-7. Add native monochrome `R10_CSI2P` support to the libcamera soft ISP; the
+6. Add native monochrome `R10_CSI2P` support to the libcamera soft ISP; the
    existing V4L2 IR capture path already works.
-8. Keep the known non-fatal boot messages visible and documented: PMIC
+7. Keep the known non-fatal boot messages visible and documented: PMIC
    device-link retries, runtime device-tree overlay removal warnings, optional
    FastRPC `.farf` lookups, and the early PipeWire route probe.

@@ -24,11 +24,12 @@
   testável/persistente no initramfs. O controle de cor ganhou serviço tardio
   em `graphical.target`, depois de DRM/câmera.
 - Auditoria física final: zero unidades systemd falhas, `graphical.target` em
-  3.762 s, Landlock ativo, bateria `Li-ion`, RFCOMM/áudio/câmeras ativos e
+  3.764 s, Landlock ativo, bateria `Li-ion`, RFCOMM/áudio/câmeras ativos e
   inferência QNN/HTP real com fallback de CPU desabilitado.
-- Após essa auditoria, o ciclo CDSP foi isolado em uma unidade `oneshot` sem
-  reinício; ela foi instalada/testada em runtime, mas o layout systemd final
-  ainda precisa de um cold boot adicional.
+- O layout systemd final também passou por cold boot: a unidade `oneshot` fez
+  exatamente um ciclo controlado, aguardou 10 segundos, terminou com sucesso
+  e liberou o `cdsprpcd`, que permaneceu ativo com `NRestarts=0` e inferência
+  HTP funcional.
 - Relatório completo: [`docs/BUILD-REPORT-2026-10-07.md`](docs/BUILD-REPORT-2026-10-07.md).
 
 ## 2026-10-07 — Linux 7.3-rc6 e hardening do boot CDSP

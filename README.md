@@ -90,11 +90,6 @@ patches, commands, evidence, and rollback boundary.
 
 ### What is still missing
 
-- **Cold-boot the final CDSP unit layout:** the separate non-restarting
-  preparation unit was installed and started successfully without disturbing
-  the running daemon, and its success/failure paths pass regression tests. A
-  new cold boot is still required to validate this final systemd layout from
-  firmware startup.
 - **Publish a refreshed ISO:** package the validated Linux 7.3 kernel and new
   service/runtime fixes into an ISO, then repeat physical USB boot,
   installation, recovery, and checksum validation. The Linux 7.2 image above
