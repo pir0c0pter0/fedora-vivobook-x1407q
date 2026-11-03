@@ -179,6 +179,7 @@ sudo rescue-installed-boot --repair
 | [Firmware extraction guide](docs/GUIA-EXTRAIR-FIRMWARE.md) | Recovering Qualcomm firmware from Windows |
 | [Post-install guide](docs/GUIA-POS-INSTALACAO.md) | Current post-install checks and accelerator validation |
 | [USB4/TB3 investigation](USB4-TB3-investigation.md) | October 7 live evidence, QMP PHY v5/PS8833 upstream status, host-router reverse engineering, safety gates, and remaining blockers |
+| [EDL 9008 recovery status](docs/research/2026-11-03-edl-9008-recovery.md) | Live Sahara identity, firmware/loader validation, safety boundary, and USB recovery order for an X1407QA that no longer boots |
 | [Research archive](docs/research/) | Camera, Wi-Fi, suspend, USB4, and hardware notes |
 
 ## Testing another Snapdragon X device?
