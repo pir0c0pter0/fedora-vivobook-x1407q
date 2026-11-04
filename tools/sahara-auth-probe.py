@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Oferece o RAM-dump MELF oficial ao Sahara sem permitir execução."""
+"""Oferece componentes autorizados ao Sahara sem enviar SAHARA_DONE_REQ.
+
+Isso não garante ausência de execução ou efeitos colaterais no alvo.
+"""
 
 from __future__ import annotations
 
@@ -257,9 +260,12 @@ def main() -> int:
         f"requests={result.requests} bytes={result.bytes_sent} max_end={result.max_end}"
     )
     if result.status == 0:
-        print("AUTENTICADO, NÃO EXECUTADO: SAHARA_DONE_REQ não foi enviado")
+        print("AUTENTICADO PELO PBL")
+        print(
+            "SAHARA_DONE_REQ não foi enviado; isso não garante ausência de execução ou efeitos colaterais"
+        )
         return 0
-    print("REJEITADO PELO PBL; nenhum comando de execução foi enviado")
+    print("REJEITADO PELO PBL; SAHARA_DONE_REQ não foi enviado")
     return 1
 
 

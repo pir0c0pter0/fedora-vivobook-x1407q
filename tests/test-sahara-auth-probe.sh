@@ -6,6 +6,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 python3 - "$repo_root" <<'PY'
 import hashlib
 import importlib.util
+import inspect
 import struct
 import sys
 from pathlib import Path
@@ -15,6 +16,12 @@ spec = importlib.util.spec_from_file_location("sahara_auth_probe", tool)
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
+
+main_source = inspect.getsource(module.main)
+assert "SAHARA_DONE_REQ não foi enviado" in main_source
+assert "não garante ausência de execução ou efeitos colaterais" in main_source
+assert "AUTENTICADO, NÃO EXECUTADO" not in main_source
+assert "não garante ausência de execução ou efeitos colaterais" in module.__doc__
 
 
 class FakeTransport:
