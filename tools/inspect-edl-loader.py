@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Filtro offline conservador para programmers EDL do ASUS X1407QA."""
+"""Triagem estrutural offline de programmers EDL; não autoriza transmissão."""
 
 from __future__ import annotations
 
@@ -258,7 +258,11 @@ def main() -> int:
         print(f"ERRO: {exc}")
         return 2
 
-    print("CANDIDATO COMPATÍVEL" if result.compatible else "REJEITADO")
+    print(
+        "PASSOU NA TRIAGEM ESTRUTURAL"
+        if result.compatible
+        else "REJEITADO NA TRIAGEM ESTRUTURAL"
+    )
     print(f"Motivo: {result.reason}")
     print(
         f"ELFs: {result.elf_count}; "
@@ -275,8 +279,7 @@ def main() -> int:
     storage = ", ".join(result.storage_markers) or "não identificado"
     print(f"Armazenamento citado: {storage}")
     print(
-        "Aviso: isto não valida a assinatura do código; "
-        "somente o PBL decide se pode executá-lo."
+        "Aviso: assinaturas de todo o código e de todos os estágios não foram validadas; este resultado não autoriza transmissão."
     )
     return 0 if result.compatible else 1
 

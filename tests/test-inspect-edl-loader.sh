@@ -13,6 +13,7 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-384 \
 python3 - "$repo_root" "$tmpdir" <<'PY'
 import hashlib
 import importlib.util
+import inspect
 import struct
 import sys
 from pathlib import Path
@@ -24,6 +25,12 @@ spec = importlib.util.spec_from_file_location("inspect_edl_loader", tool)
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
+
+main_source = inspect.getsource(module.main)
+assert "PASSOU NA TRIAGEM ESTRUTURAL" in main_source
+assert "assinaturas de todo o código e de todos os estágios não foram validadas" in main_source
+assert "não autoriza transmissão" in main_source
+assert "CANDIDATO COMPATÍVEL" not in main_source
 
 
 def elf(payload=b"", signed=b""):
