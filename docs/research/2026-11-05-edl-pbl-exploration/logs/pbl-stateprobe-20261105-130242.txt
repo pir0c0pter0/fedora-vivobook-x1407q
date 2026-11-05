@@ -1,0 +1,2 @@
+=== x1407qa-sahara-stateprobe 20261105-130242 ===
+ERRO: nao foi possivel abrir o USB EDL: [Errno None] Other error

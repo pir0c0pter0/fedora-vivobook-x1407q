@@ -1,0 +1,20 @@
+=== x1407qa-sahara-mem2 20261105-125923 ===
+HELLO_REQ: version=3
+  [hello m3] cmd=0xb len=8B 0b00000008000000
+SWITCH_MODE(2):
+  [pos SWITCH_MODE(2)] cmd=0x1 len=48B 010000003000000003000000010000000004000002000000000000000000000000000000000000000000000000000000
+Variante A: HELLO_RSP(mode=2)
+  [resposta A] cmd=0x4 len=16B 04000000100000000d0000001b000000
+  A: NAK status=0x1b
+Variante B: leitura extra
+  [resposta B] timeout
+Variante C: MEMORY_DEBUG 64-bit (0x10) do host
+  [resposta C] cmd=0x4 len=16B 04000000100000000d00000001000000
+  C: NAK status=0x01
+Variante D: MEMORY_READ 64-bit @0x0 (64B)
+  [resposta D] cmd=0x4 len=16B 04000000100000000d00000001000000
+  D: NAK status=0x01
+Variante E: MEMORY_DEBUG 32-bit (0x09) do host
+  [resposta E] cmd=0x4 len=16B 04000000100000000d00000001000000
+  E: NAK status=0x01
+RESULTADO: nenhuma variante retornou tabela de memoria

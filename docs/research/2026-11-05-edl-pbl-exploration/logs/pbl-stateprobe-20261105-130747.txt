@@ -1,0 +1,14 @@
+=== x1407qa-sahara-stateprobe 20261105-130747 ===
+HELLO_REQ: version=3 cmd_packet_length=1024 mode=0
+  [drain hello m3 (skip-baseline)] cmd=0xb len=8B 0b00000008000000
+Varredura client commands 0x0d..0x40:
+  exec 0x0d: NAK image_id=13 status=0x1f
+  [drain cmd_ready] cmd=0xb len=8B 0b00000008000000
+  exec 0x0e: NAK image_id=13 status=0x1f
+  [drain cmd_ready] cmd=0xb len=8B 0b00000008000000
+  exec 0x0f: NAK image_id=13 status=0x1f
+  [drain cmd_ready] cmd=0xb len=8B 0b00000008000000
+  exec 0x10: NAK image_id=13 status=0x1f
+  recovery_lean: sem HELLO apos 0x13: timeout
+  recuperacao falhou no meio da varredura; encerrando
+pos-varredura omitida (--no-post)

@@ -1,0 +1,7 @@
+=== x1407qa-sahara-stateprobe 20261105-130847 ===
+HELLO_REQ: version=3 cmd_packet_length=1024 mode=0
+  [drain hello m3 (skip-baseline)] cmd=0xb len=8B 0b00000008000000
+Varredura client commands 0x04..0x05:
+  exec 0x04: NAK image_id=13 status=0x1f
+  [drain cmd_ready] cmd=0xb len=8B 0b00000008000000
+pos-varredura omitida (--no-post)

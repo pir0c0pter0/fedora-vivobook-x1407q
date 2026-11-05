@@ -1,0 +1,3 @@
+=== x1407qa-sahara-stateprobe 20261105-111845 ===
+sem HELLO em 5s; tentando HELLO_RSP proativo (estado pendente)
+ERRO: falha de escrita USB: [Errno 110] Operation timed out

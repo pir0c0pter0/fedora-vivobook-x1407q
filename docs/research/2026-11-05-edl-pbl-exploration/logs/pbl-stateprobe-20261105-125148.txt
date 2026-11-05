@@ -1,0 +1,2 @@
+=== x1407qa-sahara-stateprobe 20261105-125148 ===
+ERRO: dispositivo 05c6:9008 nao encontrado; replugue o cabo

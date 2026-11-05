@@ -1,0 +1,27 @@
+=== x1407qa-sahara-modes 20261105-125736 ===
+HELLO_REQ: version=3
+  CMD_READY
+SWITCH_MODE 0:
+  PBL resetou e enviou HELLO (mode=0); entrando em command mode...
+  CMD_READY
+SWITCH_MODE 1:
+  PBL resetou e enviou HELLO (mode=1); entrando em command mode...
+  CMD_READY
+SWITCH_MODE 2:
+  PBL resetou e enviou HELLO (mode=2); entrando em command mode...
+  CMD_READY
+SWITCH_MODE 3:
+  PBL resetou e enviou HELLO (mode=3); entrando em command mode...
+  CMD_READY
+MEMORY_DEBUG (HELLO mode=2):
+  NAK status=0x01
+MEMORY_READ 64-bit @0x0 (64B):
+  entrando em command mode...
+  0x13 -> HELLO novo
+  CMD_READY
+  NAK status=0x01
+MEMORY_READ 64-bit @0x14000000 (64B):
+  entrando em command mode...
+  0x13 -> HELLO novo
+  CMD_READY
+  NAK status=0x01

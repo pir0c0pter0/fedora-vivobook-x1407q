@@ -1,0 +1,61 @@
+=== x1407qa-sahara-stateprobe 20261105-111645 ===
+HELLO_REQ: version=3 cmd_packet_length=1024 mode=0
+Baseline (fresh state):
+  [drain hello m3 inicial] cmd=0xb len=8B 0b00000008000000
+  exec 0x00: OK client=0x0 data_len=0 payload=0B sha256[:16]=-
+  exec 0x01: OK client=0x1 data_len=8 payload=8B sha256[:16]=0e1a26987be6122e
+    payload: eed4ec3c60040000
+NAK intencional (exec 0x02):
+  exec 0x02: NAK image_id=13 status=0x1f
+Canario apos NAK (exec 0x01):
+  exec 0x01: NAK image_id=13 status=0x01
+Estado perdido apos NAK; testando recuperacoes...
+  [rec A] RESET_STATE_MACHINE (0x13)
+  [drain pos 0x13] cmd=0x1 len=48B 010000003000000003000000010000000004000000000000000000000000000000000000000000000000000000000000
+  [drain hello m3] cmd=0xb len=8B 0b00000008000000
+  exec 0x01: OK client=0x1 data_len=8 payload=8B sha256[:16]=0e1a26987be6122e
+    payload: eed4ec3c60040000
+RECUPERACAO FUNCIONA; varrendo client commands...
+  exec 0x00: OK client=0x0 data_len=0 payload=0B sha256[:16]=-
+  [rec A] RESET_STATE_MACHINE (0x13)
+  [drain pos 0x13] cmd=0x1 len=48B 010000003000000003000000010000000004000000000000000000000000000000000000000000000000000000000000
+  [drain hello m3] cmd=0xb len=8B 0b00000008000000
+  exec 0x01: OK client=0x1 data_len=8 payload=8B sha256[:16]=0e1a26987be6122e
+    payload: eed4ec3c60040000
+  exec 0x01: OK client=0x1 data_len=8 payload=8B sha256[:16]=0e1a26987be6122e
+    payload: eed4ec3c60040000
+  [rec A] RESET_STATE_MACHINE (0x13)
+  [drain pos 0x13] cmd=0x1 len=48B 010000003000000003000000010000000004000000000000000000000000000000000000000000000000000000000000
+  [drain hello m3] cmd=0xb len=8B 0b00000008000000
+  exec 0x01: OK client=0x1 data_len=8 payload=8B sha256[:16]=0e1a26987be6122e
+    payload: eed4ec3c60040000
+  exec 0x02: NAK image_id=13 status=0x1f
+  [rec A] RESET_STATE_MACHINE (0x13)
+  [drain pos 0x13] cmd=0x1 len=48B 010000003000000003000000010000000004000000000000000000000000000000000000000000000000000000000000
+  [drain hello m3] cmd=0xb len=8B 0b00000008000000
+  exec 0x01: OK client=0x1 data_len=8 payload=8B sha256[:16]=0e1a26987be6122e
+    payload: eed4ec3c60040000
+  exec 0x03: OK client=0x3 data_len=48 payload=48B sha256[:16]=63c7e1007d603bc6
+    payload: fd5f133f0db1b89904e66a74d242fb5edc5760b35d24793ffc7cc077b73fdcadd70f59436a9dd53f8004c37e3340e1f7
+  [rec A] RESET_STATE_MACHINE (0x13)
+  [drain pos 0x13] cmd=0x1 len=48B 010000003000000003000000010000000004000000000000000000000000000000000000000000000000000000000000
+  [drain hello m3] cmd=0xb len=8B 0b00000008000000
+  exec 0x01: OK client=0x1 data_len=8 payload=8B sha256[:16]=0e1a26987be6122e
+    payload: eed4ec3c60040000
+  exec 0x04: omitido
+  exec 0x05: omitido
+  exec 0x06: OK client=0x6 data_len=11808 payload=0B sha256[:16]=-
+  [rec A] RESET_STATE_MACHINE (0x13)
+  [drain pos 0x13] cmd=0x1 len=48B 010000003000000003000000010000000004000000000000000000000000000000000000000000000000000000000000
+  [drain hello m3] cmd=0xb len=8B 0b00000008000000
+  exec 0x01: OK client=0x1 data_len=8 payload=8B sha256[:16]=0e1a26987be6122e
+    payload: eed4ec3c60040000
+  exec 0x07: NAK image_id=13 status=0x1f
+  [rec A] RESET_STATE_MACHINE (0x13)
+  [drain pos 0x13] cmd=0x1 len=48B 010000003000000003000000010000000004000000000000000000000000000000000000000000000000000000000000
+  [drain hello m3] cmd=0xb len=8B 0b00000008000000
+  exec 0x01: OK client=0x1 data_len=8 payload=8B sha256[:16]=0e1a26987be6122e
+    payload: eed4ec3c60040000
+  exec 0x08: NAK image_id=13 status=0x1f
+  [rec A] RESET_STATE_MACHINE (0x13)
+ERRO: falha de escrita USB: [Errno 110] Operation timed out
