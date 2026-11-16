@@ -14,11 +14,19 @@ associação a uma rede. O teste offline e o gatilho udev `add|move` no slot
 `try` e no boot normal pelo `current` passaram: o USB subiu antes da conexão
 Wi-Fi, preservando vídeo, bateria e NVMe.
 
-**Próxima sessão: USB 3 SuperSpeed**, antes de som, GPU e kernel R4.
-O estado está em [docs/ESTADO-ATUAL.md](docs/ESTADO-ATUAL.md) e o processo
-de teste em [WORKFLOW.md](WORKFLOW.md#atual--próxima-sessão-usb-3).
-As portas continuam limitadas a USB2 no DT; root hubs anunciando `10000M`
-não comprovam um dispositivo externo em USB3. Nenhum teste USB3 foi iniciado.
+**Pausa em 16/11/2026:** USB3 passou nas duas portas da esquerda a 10 Gbit/s,
+nas duas orientações, com leituras de 548–615 MB/s e hashes iguais.
+A direita enumerou, mas apresentou resets e erros de leitura tanto a
+10 Gbit/s quanto no teste a 5 Gbit/s. **Decisão: direita em USB2 por enquanto.**
+A Lenovo especifica as três portas como [USB4 de 40 Gbit/s](https://psref.lenovo.com/Product/Yoga_Slim_7_14Q8Y11?tab=spec);
+essa capacidade do hardware ainda não está habilitada neste porte Linux.
+
+Nenhum USB3 foi promovido: `current`/`good` intactos e `try` restaurado à base
+USB2, sem boot experimental armado. Amanhã: integrar USB3 automático só nas
+duas portas da esquerda, revisar e validar antes de promover. Fontes dos
+experimentos, logs e patch PHY candidato permanecem locais; esta atualização
+publica apenas documentação. Detalhes em [ESTADO-ATUAL](docs/ESTADO-ATUAL.md)
+e [WORKFLOW](WORKFLOW.md#atual--pausa-após-os-testes-usb3).
 
 ## O que funciona
 
@@ -44,6 +52,7 @@ Provado em boot de teste, ainda não promovido ao boot normal:
 
 | Item | Observação |
 |---|---|
+| USB 3.2 Gen 2x1 | Duas portas da esquerda a 10 Gbit/s nas duas orientações; leitura sem gravar; serviço automático passou no `try`, ainda sem promoção |
 | Som nos 4 alto-falantes | ADSP + LPASS + 4 amplificadores WSA884x; microfones e fone não testados |
 | Controle Type-C das portas (UCSI) | Registra as três portas; carga e troca de papel não testadas |
 
@@ -53,7 +62,7 @@ Provado em boot de teste, ainda não promovido ao boot normal:
 - **Kernel novo:** o R4 (`install/kernel-r4/`, base v7.4-rc3) traz firewall, zram e o módulo de som que falta; nunca deu boot e ainda precisa do patch completo do vídeo.
 - **Câmeras (RGB e infravermelha):** só a chave de privacidade. Falta o driver do PMIC das câmeras e a confirmação de três GPIOs.
 - **Suspensão:** mascarada; não testada.
-- **USB 3, saída de vídeo USB-C, microfones, fone.**
+- **Promover USB3 automático nas duas portas da esquerda; manter a direita em USB2 por enquanto.** USB4, saída de vídeo USB-C, microfones e fone seguem pendentes.
 - **Firewall:** o kernel em uso não tem `nf_tables`.
 
 ## Causas-raiz encontradas

@@ -1,8 +1,20 @@
 # USB2 com a placa Wi-Fi ativa no Yoga X2 Plus
 
-Esta pasta documenta a base USB2 permanente. O próximo trabalho é USB3 em
-uma porta por vez, conforme o [processo atual](../../WORKFLOW.md#atual--próxima-sessão-usb-3);
-não basta retirar `maximum-speed` do DT nem observar root hubs `10000M`.
+Esta pasta documenta a base USB2 permanente, mantida após a pausa de 16/11.
+As duas portas da esquerda passaram em USB3 experimental a 10 Gbit/s nas
+duas orientações; a direita falhou em 10 Gbit/s e no ensaio a 5 Gbit/s.
+**Decisão do usuário: direita em USB2 por enquanto.**
+
+A automação candidata passou no `try`, mas não foi promovida. `try` foi
+restaurado à base USB2; `current` e `good` seguem intactos. Fontes candidatas
+e logs permanecem locais. A regra/unidade publicadas aqui continuam sendo
+a base USB2; a unidade USB3 instalada no aparelho fica condicionada a um
+argumento ausente nos slots restaurados.
+
+Retomar preparando USB3 automático só nas duas esquerdas, revisar e testar
+antes de promover, conforme [WORKFLOW](../../WORKFLOW.md#atual--pausa-após-os-testes-usb3)
+e [ESTADO-ATUAL](../../docs/ESTADO-ATUAL.md). O hardware possui três portas
+USB4 de 40 Gbit/s; USB4 não foi ativado neste porte.
 
 Unidade preparada para o DTB `gwnx2d1`; validar primeiro no slot `try`.
 A regra udev pede a unidade na criação ou renomeação (`add|move`) da interface

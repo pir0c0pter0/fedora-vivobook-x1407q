@@ -1,6 +1,29 @@
 # Workflow do porte Lenovo X2 Plus
 
-## Atual — próxima sessão USB 3
+## Atual — pausa após os testes USB3
+
+Pausa pedida pelo usuário em 16/11; continuar em **17/11/2026**.
+As duas portas da esquerda passaram em USB3 a 10 Gbit/s nas duas orientações,
+com leituras de 548–615 MB/s e hashes iguais; a ativação automática passou
+no `try`. A direita apresentou resets/erros de leitura em 10 Gbit/s e no
+ensaio de 5 Gbit/s. **Decisão: direita em USB2 por enquanto.**
+
+A Lenovo especifica três USB4 de 40 Gbit/s. Esses testes cobrem o caminho
+USB3 experimental no Linux; USB4 e DP alt-mode não foram habilitados.
+Não houve promoção: `current`/`good` intactos, `try` restaurado como cópia do
+`current` USB2 e nenhuma tentativa armada. O próximo boot é a base USB2.
+A unidade candidata fica instalada, porém sua condição `yoga.usb3=1` está
+ausente dos slots restaurados. Logs/fontes experimentais ficam locais;
+esta passagem publica só documentação.
+
+Retomar preparando USB3 automático **somente nas duas portas da esquerda**,
+com direita USB2; revisar, testar no `try` e só então promover. Manter as
+guardas de Wi-Fi/NVMe/eDP/SoCCP e dos trilhos compartilhados, sem espera por
+associação à rede. O candidato de ajuste PHY upstream não foi aplicado;
+a causa da falha da direita continua aberta. Detalhes, hashes, backups e
+limites no topo de [ESTADO-ATUAL](docs/ESTADO-ATUAL.md).
+
+### Preparação de referência anterior ao teste
 
 Passagem preparada em 16/11/2026. A fonte do estado é o topo de
 [docs/ESTADO-ATUAL.md](docs/ESTADO-ATUAL.md), resumido no [README](README.md).

@@ -6,9 +6,41 @@ Consolidado em 2026-11-16 (sessão de bring-up físico). Fonte de verdade para r
 
 Caminhos: `R` = `<workspace>`; `P` = `R/fedora-vivobook-x1407q/.worktrees/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11`; `B` = `P/local/iso-build`; `OUT` = `P/local/dtb-bisect-r5`; `D` = `P/local/physical-2026-11-16` (todos os logs de hardware).
 
-### Próxima sessão — USB3 SuperSpeed
+### Pausa após os testes USB3 — 16/11, 19:57 UTC
 
-**Prioridade do usuário após limpar o contexto: USB3**, antes de som, GPU e R4. O suporte USB2 permanente foi publicado na `main` em `f8a334f`; esta passagem só atualiza documentação, sem iniciar teste USB3. Seguir o [processo atual em WORKFLOW.md](../WORKFLOW.md#atual--próxima-sessão-usb-3); o restante daquele documento continua como histórico de 13/11.
+**Decisão final do usuário: manter a porta direita em USB2 por enquanto e continuar em 17/11.** As duas portas da esquerda passaram em USB3; a direita enumerou, mas falhou em leitura. Nenhuma configuração USB3 foi promovida ao boot normal.
+
+A [especificação oficial Lenovo](https://psref.lenovo.com/Product/Yoga_Slim_7_14Q8Y11?tab=spec) confirma **três portas USB4 de 40 Gbit/s**, inclusive neste modelo Plus. Os resultados abaixo descrevem o suporte Linux experimental ao caminho USB3; não são limites físicos das portas. USB4/DP alt-mode não foram ativados.
+
+| Porta / controlador | Resultado físico, sem gravar |
+|---|---|
+| Esquerda junto à dobradiça / usb_0, a600000 | Variante de uma porta: folha JMicron 152d:0583 a 10000M nas duas orientações; 1 GiB lido a 615/587 MB/s. Quatro hashes de 256 MiB iguais. Pendrive via adaptador na mesma porta: 480M, 256 MiB a 33,5 MB/s, dois hashes de 16 MiB iguais |
+| Esquerda dianteira / usb_1, a800000 | Boot automático da variante de três portas: 10000M normal e invertido; 1 GiB a 548/590 MB/s, hashes de 256 MiB iguais ao teste de usb_0 |
+| Direita / usb_2, a000000 | 10000M nas duas orientações, porém resets e erros de leitura já durante o scan do udev. Ensaio limitado a 5000M também falhou em leitura na orientação invertida. Reduzir a geração não resolveu; não foi feito benchmark nesse caminho com erro |
+
+Os discos externos não foram montados nem receberam escrita de dados: `udisks2` ficou mascarado só no `try`, e os discos dos testes bem-sucedidos foram identificados e colocados em RO após cada conexão. Os erros da direita ocorreram nas leituras de identificação do udev, antes de qualquer `dd` nosso. Nas portas que passaram, `Synchronize Cache(10) failed` apareceu ao remover fisicamente o cabo, após concluir as leituras. O fallback USB2 comprovado foi do pendrive, não do próprio enclosure M.2.
+
+**Boot seguro para a pausa:** `current` permanece `gwnx2d1` (a48b6c543bb0b40be7b4590a4cec36675713be29dffb85b9a34449f943fb4875), `good` permanece `gwnb1`, e `try` foi restaurado como cópia do `current`, com seus argumentos USB2 originais. `saved_entry=current`, sem `next_entry`; os manifestos de `current/good` foram conferidos intactos. O próximo boot normal é USB2 nas três portas. No instante da pausa ainda estava em execução o último boot experimental, com M.2 retirado, eDP conectado e SoCCP anexado; restaurar arquivos do slot não troca o DT em execução. Não foram iniciados novos testes após o pedido de pausa.
+
+A unidade candidata `yoga-usb3.service` e a regra udev foram instaladas no aparelho e permanecem preparadas apenas para experimentos: sem `yoga.usb3=1` nos slots restaurados, a unidade USB3 não executa. As fontes experimentais de DTS/unidade/regra continuam locais e **não são publicadas nesta passagem documental**. Backups: `/root/usb3-auto-all/current-before`, `try-before`, `try-gen1p2-paused` e regra anterior; primeira tentativa também em `/root/usb3-m2-p0/try-before`. O `try` final seguro está registrado em `D/usb3-m2/pause-safe-final.txt`.
+
+**O que foi preparado e revisado separadamente:** variante `gwnx2d1-usb3p0` (hash 3c2375984e9f6e4ddc09746ba6903dd7429332ba3c94475861bd49fac51a0b6b), variante automática das três portas (2de7fd0e8edceb2ce576358aad9d48002647f6d8eb97f71aa1655dfbc96788c7) e ensaio Gen1 só na direita (0a5f45a995b39af9c27b4ce05438abdb3119cd740cbb44ec4ac4d21ef0331551), em `OUT/` e nas cópias de `D/usb3-m2/`. Comparações estruturais, argumentos GRUB, unidade e regra udev passaram; 60 casos das guardas/espera passaram. O schema completo não estava disponível. Isso não substitui os resultados físicos, que reprovaram a direita.
+
+A automação carrega combo QMP e depois UCSI, após USB2, SoCCP, eDP e PCIe Wi-Fi/NVMe ativos, verificando uso positivo de l3f0/l4h0/l2f0/l1f1/l2f1/l4f1. Na variante de três portas, `regulator-always-on` diretamente no RPMh `vreg_l3f0` mantém um voto real, sem mudar os 912 mV existentes; o fixed `HOLD_L3F0` sozinho não protege. Supplies do combo0 são l3f0/l4h0/**l2f0 (refgen)**; combo1 usa l1h0/l4h0/l2f0; combo2 usa l4c1/l4f1/l4f1. A unidade terminou active/success/0 no boot automático e todos os hosts subiram, sem carga manual nem espera por associação Wi-Fi.
+
+O boot automático mediu 23,507 s, contra 13,196 s da base anterior. Os ~10 s adicionais antecedem o serviço USB3: o vídeo esperou probes GPU/SMMU, e o serviço USB3 completou em ~0,1 s. Não alterar dependências de vídeo para compensar isso nesta pausa. `NetworkManager-wait-online` continua desabilitado; a rede conecta em paralelo.
+
+DSDT identifica três retimers PS8830; permaneceram sob controle do firmware. Não foram alterados GPIOs, tensões, retimers ou SoCCP; `pmic_glink_altmode` não foi carregado. Permaneceram avisos de device-link (0x180) e aux-bridges DP adiados, sem perda de vídeo, rede, NVMe ou bateria. A causa da falha da direita continua aberta.
+
+Há uma [série proposta de atualização dos ajustes USB3 Glymur](https://lore.kernel.org/linux-phy/20261102-topic-usb3_sequence-v1-1-5b144f5e6865@oss.qualcomm.com/), de Konrad Dybcio/Qualcomm, com 27 valores de tabelas PHY. O patch foi baixado em `D/usb3-m2/upstream-konrad-glymur-usb3-settings.patch` e passou em `git apply --check`; **não foi aplicado, compilado nem testado**. Não há confirmação de merge nesta sessão; não tratar como cura comprovada. Afeta os três combos e exigiria revalidar também a esquerda. O segundo patch da série é SC8280XP e fica fora deste porte.
+
+**Retomada em 17/11:** preparar a variante com USB3 automático somente nas duas portas da esquerda e direita preservada em USB2; revisar, testar no `try` e só depois promover. Preservar a base e não reutilizar o ensaio de 5 Gbit/s como solução. A investigação do PHY/retimer da direita fica para depois, conforme a decisão do usuário.
+
+Evidências privadas em `D/usb3-m2/`: `baseline-readonly.txt`, `orientation-normal-read.txt`, `orientation-reverse-read.txt`, `usb2-fallback-read.txt`, `all-auto-try-boot-full.txt`, `all-auto-port1-{normal,reverse}-read.txt`, `all-auto-port2-{normal,reverse,gen1}-failure.txt`, laudos estruturais e `pause-safe-final.txt`.
+
+### Preparação anterior — USB3 SuperSpeed
+
+**Prioridade do usuário após limpar o contexto: USB3**, antes de som, GPU e R4. O suporte USB2 permanente foi publicado na `main` em `f8a334f`; esta passagem só atualiza documentação, sem iniciar teste USB3. Seguir o [processo atual em WORKFLOW.md](../WORKFLOW.md#atual--pausa-após-os-testes-usb3); o restante daquele documento continua como histórico de 13/11.
 
 A linha de base somente de leitura foi capturada em 16/11 às 19:21 UTC em `D/handoff-usb3/baseline-readonly.txt`: `gwnx2d1`, vídeo real, USB ativo, SoCCP anexado, `NetworkManager-wait-online` desabilitado/inativo, só `7760000.pinctrl` adiado, hashes/argumentos dos slots preservados e `next_entry` vazio. `lsusb -t` mostrou seis root hubs a `480M`/`10000M`, **sem periféricos externos**: isso não comprova link USB3. O último boot normal mediu 13,196 s pelo systemd.
 
@@ -95,7 +127,7 @@ Logs em `D/gwnx2/` e `D/gwnx2-live-dmesg.txt`. Fragmentos em `P/dts/fragments/`;
 
 ### Próximos passos, em ordem sugerida
 
-1. **USB3 SuperSpeed**, prioridade escolhida pelo usuário para a próxima sessão: seguir a seção atual de `WORKFLOW.md`, começando pela auditoria de uma porta e preservando a base USB2. Ainda não testado; não incluir USB4 ou DP alt-mode nesta rodada.
+1. **USB3 automático nas duas portas da esquerda; direita em USB2**, decisão final de 16/11 para retomar em 17/11. As duas esquerdas passaram em leitura; direita falhou em Gen2 e Gen1. Preparar/revisar variante, testar no `try` e só então promover. Ver a seção de pausa acima; USB4/DP alt-mode seguem fora.
 2. Som permanente: serviço que sobe a cadeia na ordem do `yoga-audio.sh`, mantém as macros com `power/control=on`, baixa os volumes antes de liberar a placa ao PipeWire/WirePlumber; depois microfones e fone.
 3. GPU: testar o Mesa de `/opt/mesa-x2-45` (destrava Niri).
 4. Kernel R4 com o patch v2 do PHY (traz firewall, zram, snd-seq) no slot `try`.
@@ -129,7 +161,7 @@ Logs em `D/gwnx2/` e `D/gwnx2-live-dmesg.txt`. Fragmentos em `P/dts/fragments/`;
 - **Fedora 45 live sobe até o GNOME** no Lenovo, em Device Tree, carregado em RAM pelo pendrive. Teclado interno, touchpad e botão de energia funcionam. Entrada do menu: `G3`.
 - **Vídeo:** só o framebuffer do firmware (GOP) exposto como `simple-framebuffer` + `simpledrm`, renderização por software. GNOME funciona; **Niri não roda sem GPU** (`Error::DeviceMissing`, não abre `/dev/dri/card0`). Os módulos de vídeo reais (`msm`, `dispcc_glymur`, `gpucc_glymur` etc.) ficam bloqueados por `modprobe.blacklist`, porque sem painel no DT eles apagam a tela.
 - **Wi-Fi interno e SSH sobem sozinhos** (entrada `W6`, comprovado num boot do zero em 16/11): WCN7850 em pcie4, `PCIe Gen.3 x2 link up` aos 5,5 s, `ath12k` com firmware `WLAN.HMT.1.1.c7-00108`, `board_id 0xff`, interface `wlP4p1s0`, conexão automática em `<rede Wi-Fi>` aos ~21 s, `sshd` ativo, login root do PC com a chave `id_ed25519`. O IP muda entre boots (<ip-do-notebook>, depois .232). `firewalld.service` e `geoclue.service` falham no live; **não há firewall ativo**.
-- **SSD interno funciona** (entrada `N1`, DTB `gwn1`, 16/11): `PCIe Gen.4 x4 link up` em pcie5, Samsung MZAMX512HDLV serial `S8G8NF1L462342`, SMART sem alertas, 3 GiB lidos a 1,3–2,5 GB/s sem erro, tela e Wi-Fi intactos. Nada foi escrito nele. Layout encontrado: ESP 450 MiB, MSR 16 MiB, Windows com BitLocker 474,5 GiB, WinRE 2 GiB. Backup da tabela, do primeiro 1 MiB e da ESP do Windows em `local/physical-2026-11-16/nvme-backup/`.
+- **SSD interno funciona** (entrada `N1`, DTB `gwn1`, 16/11): `PCIe Gen.4 x4 link up` em pcie5, Samsung MZAMX512HDLV serial preservado somente nos logs privados, SMART sem alertas, 3 GiB lidos a 1,3–2,5 GB/s sem erro, tela e Wi-Fi intactos. Nada foi escrito nele. Layout encontrado: ESP 450 MiB, MSR 16 MiB, Windows com BitLocker 474,5 GiB, WinRE 2 GiB. Backup da tabela, do primeiro 1 MiB e da ESP do Windows em `local/physical-2026-11-16/nvme-backup/`.
 - Bluetooth e USB ainda não funcionam em Device Tree. Logs completos desse boot: `local/physical-2026-11-16/w6-dmesg.txt` e `w6-journal.txt`.
 - **Sensores térmicos do SoC leem valores plausíveis** (35–40 °C em repouso, shell do initrd). Único dispositivo em `devices_deferred` no shell: `7760000.pinctrl` (LPASS).
 - Secure Boot desativado desde o primeiro teste. Windows/NVMe não foram alterados; nenhuma instalação Linux foi feita. O único dispositivo gravado é o pendrive, e nele só a ESP de 30 MB.
