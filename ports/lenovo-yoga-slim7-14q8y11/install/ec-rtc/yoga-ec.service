@@ -1,0 +1,15 @@
+[Unit]
+Description=Yoga X2 Plus: registrar o controlador embarcado (sensores, ventoinha, luz do teclado)
+# Mantem o modo bus nos DTBs antigos; com o cliente criado pelo DT, nao o duplica.
+ConditionPathExistsGlob=/sys/devices/platform/soc@0/ac0000.geniqup/a84000.i2c/i2c-*
+After=systemd-udev-settle.service systemd-modules-load.service
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# $$ deixa as expansoes com o shell, inclusive ${B#i2c-}.
+ExecStart=/bin/sh -c "B=$$(basename /sys/devices/platform/soc@0/ac0000.geniqup/a84000.i2c/i2c-*); [ -e /sys/bus/i2c/devices/$${B#i2c-}-0070 ] || echo slim7x-gen11-ec 0x70 > /sys/bus/i2c/devices/$$B/new_device"
+
+[Install]
+WantedBy=multi-user.target

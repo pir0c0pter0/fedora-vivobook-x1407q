@@ -6,6 +6,10 @@ Esta pasta é independente do projeto ASUS Vivobook X1407QA que ocupa o resto do
 
 **Estado em 16/11/2026:** o Fedora está instalado no SSD interno e liga sozinho em um desktop utilizável. É um trabalho em andamento, feito num único aparelho; não há ISO pronta para instalar.
 
+A integração `gwnx2d1` passou no slot `try` e no boot normal pelo `current`,
+com vídeo, EC, RTC e USB automáticos.
+O Wi-Fi conecta em paralelo ao desktop, sem espera por link online.
+
 ## O que funciona
 
 Sobe sozinho no boot normal:
@@ -20,19 +24,17 @@ Sobe sozinho no boot normal:
 | NVMe | Raiz btrfs no SSD interno |
 | Bateria | `pmic-glink`, anexando ao coprocessador que o firmware já iniciou |
 | Frequência do processador | SCMI, 355 MHz a 4,03 GHz |
-| Sensores, ventoinha, luz do teclado | Controlador embarcado |
-| USB 2.0 | Duas portas da esquerda |
+| Sensores, ventoinha, luz do teclado e teclas de função | EC embutido, com interrupção no `gwnx2d1` |
+| USB 2.0 | Três portas; PHYs carregados após o evento de conexão Wi-Fi |
+| Tampa e chave de privacidade da câmera | `gpio-keys`; tampa ignorada pelo logind, suspensão mascarada |
+| Relógio de hardware | `rtc1` + offset em arquivo, serviço automático |
+| Proteção térmica | 24 zonas de CPU com trip passivo de 105 °C; carga anterior atingiu 61 °C |
 
 Provado em boot de teste, ainda não promovido ao boot normal:
 
 | Item | Observação |
 |---|---|
 | Som nos 4 alto-falantes | ADSP + LPASS + 4 amplificadores WSA884x; microfones e fone não testados |
-| Terceira porta USB (direita) | As três portas enumeram dispositivo em USB 2.0 |
-| Tampa e chave de privacidade da câmera | `gpio-keys` |
-| Teclas de função | Controlador embarcado com interrupção |
-| Relógio de hardware | Sem deslocar o relógio do sistema |
-| Proteção térmica | 61 °C no máximo com todos os núcleos a 100% por 3 minutos |
 | Controle Type-C das portas (UCSI) | Registra as três portas; carga e troca de papel não testadas |
 
 ## O que falta
@@ -57,11 +59,12 @@ Provado em boot de teste, ainda não promovido ao boot normal:
 |---|---|
 | [`docs/ESTADO-ATUAL.md`](docs/ESTADO-ATUAL.md) | Estado completo, mecanismo de cada item, armadilhas e próximos passos. Comece pela seção "COMECE AQUI" |
 | [`docs/ROTEIRO-TESTE-GWNX2.md`](docs/ROTEIRO-TESTE-GWNX2.md) | Roteiro do boot de teste combinado de 16/11 |
-| `dts/` | Device Trees do porte. Em uso: `gwnxd1`. Próximo candidato: `gwnx2d1` |
+| `dts/` | Device Trees do porte. Em uso: `gwnx2d1`, validado no `try` e no boot normal; reserva `gwnb1` |
 | `dts/fragments/` | Um fragmento por subsistema (som, USB, EC, RTC, tampa, térmica, câmera, toque, Bluetooth) |
 | `patches/` | Correção do PHY eDP para a árvore do kernel |
 | `install/install-yoga.sh` | Instalador usado no SSD interno (apaga o disco de destino) |
 | `install/video/` | Instalação do vídeo real e script de diagnóstico do eDP |
+| [`install/usb/`](install/usb/) | USB após conexão Wi-Fi, por dispatcher assíncrono; sem espera de rede no boot |
 | `install/audio/` | Subida da cadeia de som e ajuste do mixer |
 | `install/ec-rtc/`, `install/power/`, `install/camera/` | Teclas de função e relógio, tampa e térmica, câmera |
 | `install/kernel-r2/`, `kernel-r3/`, `kernel-r4/` | Configuração, patches e scripts dos kernels candidatos |

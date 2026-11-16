@@ -1,0 +1,5 @@
+#!/bin/sh
+case "$1:$2" in
+	wlP4p1s0:up) exec /usr/bin/systemctl --no-block start yoga-usb.service ;;
+	*) exit 0 ;;
+esac

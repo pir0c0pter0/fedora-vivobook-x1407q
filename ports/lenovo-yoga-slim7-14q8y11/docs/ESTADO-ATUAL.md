@@ -12,9 +12,9 @@ Caminhos: `R` = `<workspace>`; `P` = `R/fedora-vivobook-x1407q/.worktrees/lenovo
 - O usuário autorizou reiniciar sem avisar. Travamento duro exige ele no botão de energia (segurar ~10 s).
 - Fedora 45 aarch64 no SSD interno (Windows apagado com autorização). Raiz btrfs em `nvme0n1p4`, `/boot` ext4 em `p2`, ESP em `p1`. Kernel em uso: `7.4.0-rc1-yoga-kalambo+` (qcom for-next 6a876df46), sem nf_tables (firewalld falha; única unidade em falha), sem zram, sem firmware `.xz`.
 - Boot por slots em `/boot/yoga/{current,good,try}` (vmlinuz, board.dtb, initramfs.img, args.cfg), menu em `/boot/efi/EFI/BOOT/grub.cfg`. `yoga-boot-once try` arma UMA tentativa; qualquer reboot volta ao `current`. O `args.cfg` do slot só ACRESCENTA à cmdline base (que bloqueia `qcom_q6v5_pas,msm,dispcc_glymur,gpucc_glymur,camcc_glymur,videocc_glymur,evacc_glymur,av1ecc_glymur` e usa `rd.driver.pre=simpledrm`); blacklist só impede carga por alias, `modprobe` pelo nome carrega.
-- Slots agora: `current` = `gwnxd1` (87d1a723…, vídeo real); `good` = `gwnb1` (be2fae8e…, simpledrm, só bateria: reserva comprovada); `try` = `gwnx2` (e281bc20…, último teste). Cópia do `gwnx1` em `/root/slot-backup`.
+- Slots agora: `current` = `gwnx2d1` (a48b6c543bb0b40be7b4590a4cec36675713be29dffb85b9a34449f943fb4875), promovido e comprovado em boot normal; `good` = `gwnb1` (be2fae8e…, simpledrm, reserva preservada); `try` = `gwnx2d1`. `current` usa `yoga.video=1 yoga.usb=1`, sem `yoga.video.failreboot=1`. Backup completo do `current` anterior (`gwnxd1`, 87d1a723…) em `/root/resume-gwnx2d1/current-before`; do `try` anterior em `/root/resume-gwnx2d1/try-before`. Cópia mais antiga do `gwnx1` em `/root/slot-backup`.
 - Build de módulo fora da árvore: `podman exec yoga-iso-build bash -c 'make -C /work/kernel O=/work/kernel-out-edp M=/work/<dir> ARCH=arm64 LLVM=1 -j4 modules'` (`B` montado em `/work`). Build de DTB: `cpp` + `dtc` de `B/kernel-out/scripts/dtc` (receita na seção "DTS e DTBs").
-- Regras do usuário: usar a ferramenta Workflow para edição de código/testes (quem edita não verifica); respostas em português direto; não mexer nos M.2 do PC; pendrive de recuperação serial <serial-do-pendrive> (menu R8, entrada `N1`, pelo F12); nunca imprimir a senha do Wi-Fi (`local/live-updates/` a contém em texto puro: não publicar).
+- Regras do usuário: usar a ferramenta Workflow para edição de código/testes (quem edita não verifica); nesta sessão, com Workflow indisponível, o usuário autorizou agentes separados para edição e revisão; Wi-Fi deve conectar em paralelo, sem espera por link online no boot; respostas em português direto; não mexer nos M.2 do PC; pendrive de recuperação serial <serial-do-pendrive> (menu R8, entrada `N1`, pelo F12); nunca imprimir a senha do Wi-Fi (`local/live-updates/` a contém em texto puro: não publicar).
 
 ### Funciona no boot normal (slot `current`), sem intervenção
 
@@ -27,18 +27,32 @@ Caminhos: `R` = `<workspace>`; `P` = `R/fedora-vivobook-x1407q/.worktrees/lenovo
 | Bluetooth | `hci0`, firmware `qca/hmtbtfw20.tlv` + `hmtnv20.b112` descomprimidos |
 | Bateria | pmic-glink + `yoga-soccp.service` (anexa ao SoCCP iniciado pelo UEFI; nunca reiniciar/parar o SoCCP; recovery desabilitado) |
 | cpufreq | SCMI, 355 MHz–4,03 GHz, schedutil |
-| EC (modo bus) | `yoga-ec.service` cria `slim7x-gen11-ec` em i2c9 0x70: 4 temperaturas, RPM, `platform::kbd_backlight` (0–2) |
-| USB2 host | portas da esquerda (a600000, a800000) |
+| EC com IRQ | Driver embutido dá probe no nó DT em I²C 0x70, TLMM 66 com pull-up, sem `initcall_blacklist`: 4 temperaturas, RPM, `platform::kbd_backlight` (0–2) e teclas de função. `yoga-ec.service` permanece habilitado para os slots antigos e não recria o dispositivo que já existe; escapes `$$` corrigidos na unidade |
+| USB2 host | Três controladores (a600000, a800000, a000000), seis root hubs; `90-yoga-usb` dispara `yoga-usb.service` sem bloquear o boot quando o Wi-Fi conecta. PHYs eUSB2 ficam na blacklist por alias e são carregados pelo nome após as guardas |
+| RTC plano B | `yoga-rtc.service`, condicionado ao alias DT `rtc1`, aplica o offset de `/var/lib/yoga-rtc/offset`; só `rtc1` registrado |
+| Tampa, chave da câmera e térmica | `gpio-keys` para TLMM 92/99; 24 zonas de CPU com trip passivo de 105 °C e cdev de cpufreq. Suspensão mascarada; tampa ignorada pelo logind |
 | Autologin, tela apaga em 60 s sem bloqueio, papel de parede, Claude Code instalado | — |
 
-### Provado em boot de teste (gwnx2, 16/11 à noite), AINDA NÃO permanente
+### Integração permanente gwnx2d1 (16/11, retomada)
 
-Logs em `D/gwnx2/` e `D/gwnx2-live-dmesg.txt`. Fragmentos em `P/dts/fragments/`; DTB `OUT/kalambo-gwnx2.dtb` (sem vídeo) e `OUT/kalambo-gwnx2d1.dtb` (a48b6c54…, gwnx2 + vídeo; compilado, delta de vídeo conferido, nunca deu boot). Roteiro e revisão final: `D/gwnx2/gwnx2-runbook.txt` e `D/gwnx2/gwnx2-final-review.txt`; projetos de cada frente no journal do workflow `wf_b1a3bd27-044` em `<sessao-claude>/f247ff19-fc71-41d0-8a7b-335b801e041d/subagents/workflows/wf_b1a3bd27-044/journal.jsonl`.
+O `gwnx2d1` passou no `try` e depois em boot normal pelo `current`, sem trocar o kernel ou firmware. `yoga-video`, `yoga-usb`, `yoga-rtc`, `yoga-ec` e GDM terminaram ativos, com resultado de sucesso. eDP conectado, SoCCP anexado e bateria presente (90% no registro final); três xHCI e seis root hubs; apenas `firewalld` em falha e `7760000.pinctrl` em `devices_deferred`. O usuário confirmou imagem normal no primeiro `try`; após a promoção foram conferidos serviços e DRM, sem nova confirmação visual. A enumeração física nas três portas já havia sido provada no `gwnx2`, sem repetir inserções nesta integração.
+
+**Rede em paralelo:** `NetworkManager-wait-online.service` está desabilitado/inativo e não chegou a iniciar no boot final. `install/usb/90-yoga-usb`, instalado em `/etc/NetworkManager/dispatcher.d/`, reage somente a `wlP4p1s0:up` com `systemctl --no-block start yoga-usb.service`. A unidade não participa do caminho de boot e respeita `After=NetworkManager.service yoga-video.service`. Mantém as guardas `operstate=up` e uso maior que zero dos trilhos l1f1/l2f1/l4f1 antes de carregar repetidor e PHY eUSB2; sem Wi-Fi, a primeira carga USB não ocorre. A conclusão do startup do NetworkManager não bastava: acontecia antes de a interface Wi-Fi aparecer. O dispatcher elimina essa corrida sem esperar a conexão durante o boot.
+
+O boot normal final mediu 13,154 s pelo systemd (184 ms de kernel, 2,019 s de initrd, 10,950 s de userspace). No `try` com dispatcher foram 13,190 s, contra 21,409 s na variante com espera online, removida a pedido do usuário. Tampa segue ignorada e suspensão mascarada; a tecla de modo avião conserva o comportamento rfkill e pode derrubar o SSH.
+
+Evidências privadas: `D/resume-gwnx2d1/current-final-results.txt` e `try-dispatcher-results.txt`. A revisão separada cobriu a unidade, 21 casos das guardas e o dispatcher; os boots reais comprovaram sua integração. Som permanente continua como próximo passo.
+
+### Resultados originais do gwnx2 (16/11 à noite)
+
+EC, USB, RTC, tampa, chave e térmica abaixo foram integrados ao `gwnx2d1`; som e UCSI ainda dependem dos testes manuais descritos aqui.
+
+Logs em `D/gwnx2/` e `D/gwnx2-live-dmesg.txt`. Fragmentos em `P/dts/fragments/`; DTB `OUT/kalambo-gwnx2.dtb` (sem vídeo) e `OUT/kalambo-gwnx2d1.dtb` (a48b6c54…, gwnx2 + vídeo; validado no `try` e promovido ao `current`). Roteiro e revisão final: `D/gwnx2/gwnx2-runbook.txt` e `D/gwnx2/gwnx2-final-review.txt`; projetos de cada frente no journal do workflow `wf_b1a3bd27-044` em `<sessao-claude>/f247ff19-fc71-41d0-8a7b-335b801e041d/subagents/workflows/wf_b1a3bd27-044/journal.jsonl`.
 
 - **Tampa:** gpio-keys SW_LID no TLMM 92; logind registra "Lid closed/opened". Suspensão segue mascarada.
 - **Chave de privacidade da câmera:** TLMM 99 com pull-up, IRQ funciona.
 - **EC com IRQ (TLMM 66, borda de descida, pull-up):** módulo de teste `P/install/ec-rtc/extmod-ec/yoga-ec-test.ko`; eventos 0x15 (tampa), 0x29 (chave da câmera), 0x18 (mudo do mic), 0x19 (modo avião → rfkill, **derruba o Wi-Fi/SSH**; a mesma tecla religa), 0x0f (Fn-Lock), 0x16 (Fn+Espaço), e 0x54 periódico a cada 6 s (não identificado). Precisa de `initcall_blacklist=slim7x11_ec_driver_init` enquanto usar o módulo de teste; no uso final o driver embutido dá probe pelo DT.
-- **RTC plano B:** `rtc_pm8xxx` como `rtc1` (alias no DT) não desloca o relógio; `P/install/ec-rtc/rtc-fallback/yoga-rtc save` gravou o offset em `/var/lib/yoga-rtc/offset`. Não habilitar o serviço com DTB sem o alias (viraria rtc0 → 1970).
+- **RTC plano B:** `rtc_pm8xxx` como `rtc1` (alias no DT) não desloca o relógio; `P/install/ec-rtc/rtc-fallback/yoga-rtc save` gravou o offset em `/var/lib/yoga-rtc/offset`. O serviço instalado exige o alias `rtc1`; não carregar `rtc_pm8xxx` manualmente em DTB sem esse alias (viraria rtc0 → 1970).
 - **Térmica:** 24 zonas de CPU com trip passivo 105 °C + cdev de cpufreq; carga total 3 min a 4,03 GHz = 61 °C máx, ventoinha 2700→5400 RPM sozinha.
 - **USB:** os três xHCI (a600000, a800000, a000000 = porta da direita) enumeram pendrive em USB2. Guarda: só carregar os PHYs eUSB2 com o Wi-Fi de pé (trilhos l1f1/l2f1/l4f1 compartilhados com o eDP; os `HOLD_*` não seguram nada neste kernel).
 - **Som:** ADSP (firmware da coleta Windows em `/var/lib/yoga-fw`, fora do caminho de busca) → pd-mapper/GPR → macros LPASS → 4 amplificadores WSA884x "Attached" → placa `GLYMUR-LENOVO-Yoga-Slim7x` → **melodia audível e limpa** (usuário confirmou). Script `P/install/audio/yoga-audio.sh` (etapas adsp, svc, macros, amps, card). Armadilhas: volumes sobem no MÁXIMO por padrão (PA 6, Digital 81); controles da wsa_macro dão `-EBUSY` (registrador 0x480) com o bloco em runtime-suspend → `echo on > .../6c90000.codec/power/control` e `.../6cb0000.codec/power/control` antes de ajustar, e ajustar por `numid` (o `amixer cset name=` reporta "Cannot find the given element"); script que funcionou: `D/gwnx2/mix.sh` (DV 66, PA 6). Topologia e UCM emprestados do CRD (já instalados em `/usr/lib/firmware/qcom/glymur/` e `/usr/share/alsa/ucm2/conf.d/glymur/`). Microfones (pinos DMIC) e fone não testados. `snd_q6apm` só carrega com `modprobe --ignore-install snd-pcm` neste kernel (falta `snd-seq`).
@@ -61,13 +75,12 @@ Logs em `D/gwnx2/` e `D/gwnx2-live-dmesg.txt`. Fragmentos em `P/dts/fragments/`;
 
 ### Próximos passos, em ordem sugerida
 
-1. Promover a `current` o que passou no gwnx2: DTB `gwnx2d1` no slot `try` primeiro (nunca deu boot), com `yoga.video=1`, EC pelo driver embutido (sem `initcall_blacklist`, desabilitar `yoga-ec.service`), USB nas três portas (carga dos PHYs eUSB2 por serviço depois do Wi-Fi), tampa, chave, térmica, RTC plano B com `yoga-rtc.service`. Decidir a política do modo avião e do logind para a tampa.
-2. Som permanente: serviço que sobe a cadeia na ordem do `yoga-audio.sh`, mantém as macros com `power/control=on`, baixa os volumes antes de liberar a placa ao PipeWire/WirePlumber; depois microfones e fone.
-3. UCSI: terminar o teste de carregador nas três portas; depois role-switch/USB3/DP alt-mode.
-4. GPU: testar o Mesa de `/opt/mesa-x2-45` (destrava Niri).
-5. Kernel R4 com o patch v2 do PHY (traz firewall, zram, snd-seq) no slot `try`.
-6. Câmeras (após decisão sobre os GPIOs), suspensão, evento 0x54 do EC.
-7. Documentos do porte ainda no estado de 13/11: `P/README.md`, `WORKFLOW.md`, `DRIVERS.md`, `iso/RESULTADO-*.md`.
+1. Som permanente: serviço que sobe a cadeia na ordem do `yoga-audio.sh`, mantém as macros com `power/control=on`, baixa os volumes antes de liberar a placa ao PipeWire/WirePlumber; depois microfones e fone.
+2. UCSI: terminar o teste de carregador nas três portas; depois role-switch/USB3/DP alt-mode.
+3. GPU: testar o Mesa de `/opt/mesa-x2-45` (destrava Niri).
+4. Kernel R4 com o patch v2 do PHY (traz firewall, zram, snd-seq) no slot `try`.
+5. Câmeras (após decisão sobre os GPIOs), suspensão, evento 0x54 do EC.
+6. `P/README.md` e `docs/ESTADO-ATUAL.md` refletem 16/11; `WORKFLOW.md`, `DRIVERS.md` e `iso/RESULTADO-*.md` permanecem como histórico de 13/11.
 
 ## Detalhe cronológico da sessão de 16/11 (onde conflitar, vale "COMECE AQUI")
 
@@ -168,9 +181,9 @@ Fontes em `ports/lenovo-yoga-slim7-14q8y11/dts/`, binários em `local/dtb-bisect
 | `gwnu2` | gwn1 + USB2 host em 2 portas + `HOLD_L3F0` | revisado e aprovado, não testado |
 | `gwnd1` | gwn1 + vídeo real (mdss/eDP/painel) | testado (T1/T2); imagem com o PHY corrigido |
 | `gwnx1` | gwnb1 + fragmentos (toque, EC-bus, Bluetooth, áudio-base, cpufreq/RTC, USB) | testado; base do `gwnxd1` |
-| `gwnxd1` | gwnx1 + vídeo real | **em uso no slot `current`** |
+| `gwnxd1` | gwnx1 + vídeo real | anterior; preservado em `/root/resume-gwnx2d1/current-before` |
 | `gwnx2` | gwnx1 + placa de som, usb_2, chave da câmera, EC com IRQ, RTC rtc1, tampa, térmica | testado num boot (slot `try`) |
-| `gwnx2d1` | gwnx2 + vídeo real | compilado, não testado |
+| `gwnx2d1` | gwnx2 + vídeo real | **validado no `try` e no boot normal do `current`; EC, RTC e USB automáticos** |
 
 Variantes de bisseção `b1`–`b4`, `c1`–`c5`, `e1`, `k1b` ficam só em `local/dtb-bisect-r5/`.
 
@@ -301,7 +314,7 @@ Secure Boot: em 2026-11-13, nesta rodada DIAG-R2, o usuário confirmou que está
 ## Arquivos para retomada
 
 - `MEMORIA-LENOVO-YOGA-14Q8Y11.md`: índice de retomada, sem estados antigos concorrentes.
-- No porte, `README.md`, `WORKFLOW.md`, `DRIVERS.md` e `iso/RESULTADO-*.md` descrevem o estado de 13/11 e **não foram atualizados em 16/11**.
+- No porte, `README.md` e `docs/ESTADO-ATUAL.md` estão atualizados em 16/11. `WORKFLOW.md`, `DRIVERS.md` e `iso/RESULTADO-*.md` preservam o histórico de 13/11.
 - `AUDITORIA-UPSTREAM-YOGA-14Q8Y11.md`: fontes upstream fixadas e limites.
 - No porte: `RETOMADA.md`, `README.md`, `WORKFLOW.md`, `DRIVERS.md`, `CORES.md`, `sources.json`.
 - Relatórios: `iso/RESULTADO-R3-CONS.md` (atual), `iso/RESULTADO-DIAG-R2.md` e `iso/RESULTADO.md` (históricos).
