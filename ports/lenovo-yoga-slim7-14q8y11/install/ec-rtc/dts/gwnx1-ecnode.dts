@@ -1,0 +1,3 @@
+// SPDX-License-Identifier: BSD-3-Clause
+#include "kalambo-lenovo-yoga-slim7x-gwnx1.dts"
+#include "yoga-ec-node.dtsi"

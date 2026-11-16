@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/* DTS de teste da frente TAMPA/TERMICA: gwnx1 + yoga-lid + yoga-thermal */
+
+#include "kalambo-lenovo-yoga-slim7x-gwnx1.dts"
+#include "yoga-lid.dtsi"
+#include "yoga-thermal.dtsi"

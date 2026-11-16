@@ -1,0 +1,102 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Cameras do Yoga Slim 7 14Q8Y11 (Kalambo) - etapa 1: so o que e ENTRADA.
+ *
+ * Entra agora:
+ *   - chave fisica de privacidade como gpio-keys SW_CAMERA_LENS_COVER (TLMM 99);
+ *   - (opcional, -DYOGA_CAMERA_PRIVACY_LED) LED de privacidade em TLMM 111,
+ *     criado apagado.
+ * NAO entra: CCI, CSIPHY, CAMSS, PMIC de camera (PM8010 por I2C) e sensores.
+ * O rascunho documentado esta em install/camera/stage2/ e depende de kernel
+ * (driver qcom,pm8010-i2c) e de GPIOs de saida (106, 239, 109) que so aparecem
+ * na configuracao PEP do Windows, nao no DSDT nem na referencia.
+ *
+ * Fontes da chave (TLMM 99, ativa em nivel baixo = lente coberta):
+ *   - DSDT desta maquina, \_SB.CAMP (QCOM0F32) _CRS: GpioIo (Shared, PullUp,
+ *     ..., IoRestrictionNone, "\\_SB.GIO0") pino 0x0063
+ *     (local/iso-build/acpi/acpi-registry-0000.dsl:93487-93492);
+ *   - referencia glymur-lenovo-yoga-slim7x.dts:59-64 (switch-camera-privacy,
+ *     <&tlmm 99 GPIO_ACTIVE_LOW>, SW_CAMERA_LENS_COVER) e :807-811
+ *     (cam_privacy_default: gpio99, function gpio, bias-pull-up);
+ *   - Windows desta maquina: CAMP_RES_QRD.bin, FSTATE 0, TLMMGPIO
+ *     (99, 0, func 0, dir 0 = entrada, pull 3 = pull-up, drive 0);
+ *     CAMP_PCFG_QRD.bin, palavra do obturador = 0 -> indice de GPIO 0 do _CRS
+ *     do CAMP (= pino 99), "Active High" = nao;
+ *   - lido no notebook em 2026-11-16 com a chave LIGADA/desbloqueada:
+ *     "gpio99  : in  high func0 2mA pull down" (/sys/kernel/debug/gpio).
+ *     Nivel alto = lente descoberta = SW_CAMERA_LENS_COVER 0, coerente.
+ *
+ * Fontes do LED (TLMM 111, ativo em nivel alto; so com o define):
+ *   - DSDT \_SB.CAMP _CRS: GpioIo (Exclusive, PullNone, ...) pino 0x006F
+ *     (acpi-registry-0000.dsl:93493-93498); o DSDT nao diz a polaridade;
+ *   - referencia glymur-lenovo-yoga-slim7x.dts:67-80 (privacy-led,
+ *     <&tlmm 111 GPIO_ACTIVE_HIGH>, default-state off) e :813-818;
+ *   - lido no notebook: "gpio111 : in  low  func0 2mA pull down". O no nasce
+ *     com default-state = "off": o pino vira saida em nivel baixo, o mesmo
+ *     nivel que o firmware deixa. A polaridade vem so da referencia (HIPOTESE
+ *     para o Plus), por isso fica atras do define e sem panic-indicator.
+ *
+ * Efeito no boot: gpio-keys e leds-gpio sao =y neste kernel
+ * (CONFIG_KEYBOARD_GPIO=y, CONFIG_LEDS_GPIO=y), entao os nos sao atendidos no
+ * boot sem carga manual. A chave so pede o pino 99 como entrada com IRQ e
+ * publica um dispositivo de entrada novo; nenhum trilho, clock ou pino de
+ * saida muda. Os pinos 99 e 111 nao estao em gpio-reserved-ranges e nenhum
+ * outro no do gwnx1 os usa.
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+
+/ {
+	/*
+	 * Nome proprio (nao "gpio-keys") para nao colidir com um futuro no da
+	 * tampa (lid) vindo de outra frente.
+	 */
+	gpio-keys-camera {
+		compatible = "gpio-keys";
+
+		pinctrl-0 = <&cam_privacy_default>;
+		pinctrl-names = "default";
+
+		switch-camera-privacy {
+			label = "Camera privacy switch";
+			gpios = <&tlmm 99 GPIO_ACTIVE_LOW>;
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_CAMERA_LENS_COVER>;
+		};
+	};
+
+#ifdef YOGA_CAMERA_PRIVACY_LED
+	leds-camera {
+		compatible = "gpio-leds";
+
+		pinctrl-0 = <&cam_indicator_en>;
+		pinctrl-names = "default";
+
+		privacy_led: privacy-led {
+			function = LED_FUNCTION_INDICATOR;
+			color = <LED_COLOR_ID_WHITE>;
+			gpios = <&tlmm 111 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+	};
+#endif
+};
+
+&tlmm {
+	cam_privacy_default: cam-privacy-default-state {
+		pins = "gpio99";
+		function = "gpio";
+		bias-pull-up;
+	};
+
+#ifdef YOGA_CAMERA_PRIVACY_LED
+	cam_indicator_en: cam-indicator-en-state {
+		pins = "gpio111";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+#endif
+};

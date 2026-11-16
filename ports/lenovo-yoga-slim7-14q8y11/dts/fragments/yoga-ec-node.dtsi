@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Frente EC, modo "node": o EC descrito no DT, com IRQ (hotkeys) e probe sem
+ * o yoga-ec.service. Incluir DEPOIS do gwnx1 (ou do gwnb1; as duas linhas do
+ * barramento repetem yoga-ec.dtsi). NAO definir YOGA_EC_DT_NODE junto.
+ *
+ * DSDT = local/iso-build/acpi/acpi-registry-0000.dsl
+ * REF  = arch/arm64/boot/dts/qcom/glymur-lenovo-yoga-slim7x.dts
+ *
+ * IRQ = TLMM gpio66, PROVADO pelas tabelas do DSDT desta maquina:
+ *  1. ECGE (DSDT:83335-83340): GpioInt Edge, ActiveLow, PullUp, pino 0x0300.
+ *  2. GIO0 tem 250 pinos (GPIC 0xFA, DSDT:78417) = 4 bancos de 64. O _CRS do
+ *     GIO0 (DSDT:78301-78374) lista 16 interrupcoes: as 4 primeiras sao o
+ *     resumo 0xF0 (bancos 0-3) e cada uma das seguintes e um banco virtual de
+ *     64 pinos, 0x100, 0x140, ... A 13a (banco 0x300) e 0x1037 (DSDT:78357-78360).
+ *  3. CIPR (DSDT:78491-78496): { PDC 0xBA=186, GPIO 0x42=66, GIC 0x1037 }.
+ *  4. Mesma regra, conferida em pinos que ja funcionam nesta maquina:
+ *     0x2C0 -> 0x2EF -> gpio67 (teclado, DSDT:94415-94419, em uso);
+ *     0x380 -> 0x292 -> gpio3  (touchpad, DSDT:94523-94527, em uso);
+ *     0x3C0 -> 0x1033 -> gpio92 (tampa; = GpioIo 0x5C LIDR, DSDT:78288-78298);
+ *     0x180 -> 0x2F8 -> gpio148 (WAKE do pcie4); 0x340 -> 0x2EE -> gpio59 (RX uart14).
+ *  5. Kernel: pinctrl-glymur.c:1735 { 66, 186 }; PDC 186 esta nos ranges do
+ *     Kalambo (kalambo.dtsi:98-118, <182 4115 20> -> SPI 4119 = GIC 0x1037).
+ *  6. REF:492 "EC @ 0x70, irq = TLMM 66" e REF:775-779 (ec_int_n_default).
+ *
+ * Lido no notebook (16/11, slots current e try, 540 amostras): gpio66 alterna
+ * sozinho, ~25 Hz, ~75% do tempo em baixo, "in ... func0 2mA pull down",
+ * mesmo num boot em que o Linux nunca falou com o EC. HIPOTESE: eventos
+ * pendentes nunca lidos; o INTR do ACPI le UM evento por borda
+ * (DSDT:101682-101688), logo o EC repete a borda enquanto a fila nao esvazia.
+ * Testar com install/ec-rtc/ec-tool.py ANTES de usar este no.
+ *
+ * Borda de descida, como o DSDT. NAO usar nivel: com a linha em baixo seriam
+ * ate 64 comandos por disparo, sem pausa.
+ * bias-pull-up vem do DSDT desta maquina (a REF usa bias-disable).
+ *
+ * Boot neutro: o driver e =y (nao ha modulo a bloquear). Para o no ficar
+ * parado ate a carga manual de install/ec-rtc/extmod-ec/yoga-ec-test.ko,
+ * acrescentar na cmdline do slot: initcall_blacklist=slim7x11_ec_driver_init
+ * Sem esse parametro o driver embutido da probe sozinho no boot (uso final).
+ */
+
+&i2c9 {
+	clock-frequency = <400000>;
+
+	status = "okay";
+
+	embedded-controller@70 {
+		compatible = "lenovo,yoga-slim7x-gen11-ec";
+		reg = <0x70>;
+
+		interrupts-extended = <&tlmm 66 IRQ_TYPE_EDGE_FALLING>;
+
+		pinctrl-0 = <&ec_int_n_default>;
+		pinctrl-names = "default";
+	};
+};
+
+&tlmm {
+	ec_int_n_default: ec-int-n-state {
+		pins = "gpio66";
+		function = "gpio";
+		bias-pull-up;
+	};
+};

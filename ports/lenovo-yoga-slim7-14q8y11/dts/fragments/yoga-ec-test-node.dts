@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/* DTS de teste da frente EC: gwnb1 + fragments/yoga-ec.dtsi (node) */
+#define YOGA_EC_DT_NODE
+#include "kalambo-lenovo-yoga-slim7x-gwnb1.dts"
+#include "yoga-ec.dtsi"

@@ -1,0 +1,69 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Frente USB-C: terceira porta (usb_2, ACPI URS2 @ 0x0A000000) em USB2 host
+ * fixo. ACRESCIMO ao yoga-usb.dtsi (nao substitui): incluir DEPOIS dele.
+ * Nao toca usb_0/usb_1, pmic-glink, pcie4/5 nem nenhum GPIO.
+ *
+ * REF   = arch/arm64/boot/dts/qcom/glymur-lenovo-yoga-slim7x.dts
+ * DSDT  = local/iso-build/acpi/acpi-registry-0000.dsl
+ * WIN   = local/windows/2026-11-13/.../inventory/pnp-properties
+ *
+ * Por que existe: a porta USB-C que nao detectou no teste do gwnx1 pode ser
+ * a do usb_2, que o DT nao habilitava. FATO: no Windows o pendrive do projeto
+ * (USB\VID_13FE&PID_6700\<serial-do-pendrive>) estava em
+ * ACPI(_SB_)#ACPI(URS2)#ACPI(USB2)#ACPI(RHUB)#ACPI(PRT0), isto e, o
+ * controlador 0x0A000000 tem porta fisica e funciona nesta maquina.
+ *
+ * Boot: com phy_qcom_m31_eusb2 e phy_qcom_eusb2_repeater bloqueados na
+ * cmdline, este fragmento so acrescenta, em relacao ao gwnx1, a leitura de
+ * REVID do PMIC 2-0b (pmic-spmi e =y; 5 leituras SPMI, nenhuma escrita) e
+ * dispositivos parados a espera de driver. Sem o bloqueio, a usb_2 sobe
+ * sozinha junto com usb_0/usb_1.
+ *
+ * Trilhos (ver relatorio da frente): l4c1 so alimenta a porta 2 no DSDT
+ * (URS2/UFN2/UBF0.PRT2); l4f1, l1f1 e l2f1 (PHY + TCSR_USB2_4_CLKREF_EN,
+ * tcsrcc-glymur.c:84-90,233-238) tem consumidor vivo enquanto o Wi-Fi
+ * (1bf6000.phy + clkref do pcie4) estiver de pe. Nenhum HOLD_* novo: os
+ * HOLD_* existentes ficam com use_count 0 neste kernel (core.c:1479-1487
+ * copia always_on do supply), entao nao seguram nada.
+ */
+
+/*
+ * PMIC do repetidor "L": spmi_bus2 SID 0xb (smb2370.dtsi:33-47), unico dos
+ * tres que nasce "disabled". A REF:681-683 so marca o filho como okay, o que
+ * nao instancia nada com o pai desligado; aqui o pai e ligado.
+ * HIPOTESE: o SID 0xb responde nesta placa. Evidencia indireta: o PEP vota
+ * para URS2 os mesmos LDO7_B_E0/LDO15_B_E0 dos repetidores J/K (DSDT:26370,
+ * 26398) e os SIDs 9 e 0xa respondem como SMB2370 (regmap 2-09/2-0a:
+ * 0x104=0x51, 0x105=0x5f). Se nao responder, pmic-spmi falha o probe com
+ * erro de leitura e a usb_2 fica adiada, sem efeito colateral.
+ */
+&smb2370_l_e2 {
+	status = "okay";
+};
+
+/*
+ * REF:973-977. power-domains pelo mesmo raciocinio do yoga-usb.dtsi (ja
+ * testado em usb_0/usb_1): o PEP lista gcc_usb_2_phy_gdsc no D0 do URS2.
+ */
+&usb_2_hsphy {
+	phys = <&smb2370_l_e2_eusb2_repeater>;
+
+	power-domains = <&gcc GCC_USB_2_PHY_GDSC>;
+
+	status = "okay";
+};
+
+/* Mesmo bloco de usb_0/usb_1 do yoga-usb.dtsi (comprovado no hardware). */
+&usb_2 {
+	dr_mode = "host";
+	maximum-speed = "high-speed";
+
+	/delete-property/ usb-role-switch;
+	phys = <&usb_2_hsphy>;
+	phy-names = "usb2-phy";
+
+	qcom,select-utmi-as-pipe-clk;
+
+	status = "okay";
+};

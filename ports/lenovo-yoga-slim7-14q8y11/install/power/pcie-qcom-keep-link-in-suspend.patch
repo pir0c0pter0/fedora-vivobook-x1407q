@@ -1,0 +1,39 @@
+PROPOSTA, NAO APLICADA E NAO COMPILADA (so "git apply --check").
+
+pcie-qcom: parametro para manter o link PCIe na suspensao
+
+Nesta arvore o qcom_pcie_host_post_init() marca broken_l1ss_resume, entao o
+NVMe sempre faz shutdown completo no suspend, vai a D3hot, e o
+dw_pcie_suspend_noirq() derruba o link e chama qcom_pcie_host_deinit()
+(PERST, pwrctrl, PHY, clocks, reguladores). No Yoga 14Q8Y11 a raiz esta no
+NVMe (pcie5) e um ciclo liga/desliga do PCIe ja apagou a tela. Com
+pcie_qcom.keep_link_in_suspend=1 o RC fica como nos kernels anteriores: link
+de pe, so o voto de interconnect/OPP e reduzido.
+
+--- a/drivers/pci/controller/dwc/pcie-qcom.c
++++ b/drivers/pci/controller/dwc/pcie-qcom.c
+@@ -2451,6 +2451,9 @@
+ 	return ret;
+ }
+ 
++static bool qcom_pcie_keep_link;
++module_param_named(keep_link_in_suspend, qcom_pcie_keep_link, bool, 0644);
++
+ static int qcom_pcie_suspend_noirq(struct device *dev)
+ {
+ 	struct qcom_pcie *pcie;
+@@ -2464,9 +2467,11 @@
+ 	if (!pcie)
+ 		return 0;
+ 
+-	ret = dw_pcie_suspend_noirq(pcie->pci);
+-	if (ret)
+-		return ret;
++	if (!qcom_pcie_keep_link) {
++		ret = dw_pcie_suspend_noirq(pcie->pci);
++		if (ret)
++			return ret;
++	}
+ 
+ 	if (pcie->pci->suspended) {
+ 		ret = icc_disable(pcie->icc_mem);

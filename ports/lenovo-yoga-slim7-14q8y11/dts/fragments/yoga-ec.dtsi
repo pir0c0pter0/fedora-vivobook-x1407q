@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Frente EC: controlador embarcado ENE em \_SB.IC10 (QUP_1_SE_1), 0x70.
+ * Incluir DEPOIS do DTS base (gwnb1). So acrescenta; nao toca em nada existente.
+ *
+ * Fontes:
+ *  - barramento: DSDT:72055-72080 (IC10, QCOM0F10 _UID 0x0A, "QUP_1_SE_1",
+ *    0x00A84000, GIC 0x182 = SPI 354) = glymur.dtsi:1447 (i2c9).
+ *  - 0x70 @ 400 kHz: DSDT:101419-101424 (ENE9, 0x00061A80);
+ *    referencia glymur-lenovo-yoga-slim7x.dts:487-493 ("EC @ 0x70, irq = TLMM 66").
+ *  - protocolo = o do driver lenovo-yoga-slim7x-gen11-ec.c: DSDT:101435-101451
+ *    (I2CR reg 0x01/6 bytes, I2CW reg 0x02/7 bytes), DSDT:101505-101528
+ *    (0xB0 le RAM, 0xB1 escreve), DSDT:101313-101328 (KBLT 0x03, S7T1..6
+ *    0x12..0x17, SCUK 0x1C), DSDT:101687 (0x84 = evento), DSDT:104252 (0x46/0x81 = RPM).
+ *  - pinos: gpio36/37 ja estao em func1 (qup1_se1) 2mA pull-up, deixados pelo
+ *    firmware (/sys/kernel/debug/gpio, slot current, 2026-11-16).
+ *
+ * Padrao (sem define): SO o barramento. O driver do EC e =y, mas sem no filho
+ * nada conversa com o EC; o dispositivo e criado a mao por sysfs
+ * (new_device "slim7x-gen11-ec" 0x70), sem IRQ => hwmon + LED, sem hotkeys.
+ *
+ * -DYOGA_EC_DT_NODE: descreve o EC no DT (probe automatico no boot, com IRQ e
+ * hotkeys). Usar so depois de o teste manual passar.
+ */
+
+&i2c9 {
+	clock-frequency = <400000>;
+
+	status = "okay";
+
+#ifdef YOGA_EC_DT_NODE
+	embedded-controller@70 {
+		compatible = "lenovo,yoga-slim7x-gen11-ec";
+		reg = <0x70>;
+
+		/*
+		 * DSDT:83331-83341 (ECGE): GpioInt Edge/ActiveLow/PullUp, pino
+		 * virtual 0x300. HIPOTESE: 0x300 = TLMM gpio66 (referencia :493,
+		 * :775-779; CIPR tem {PDC 0xBA=186, gpio 0x42=66} em DSDT:78491-78496
+		 * = pinctrl-glymur.c:1735 {66, 186}). Entrada apenas.
+		 * Lido no hardware: gpio66 "in low func0 2mA pull down" (o Linux
+		 * ainda nao drena eventos nem aplica o PullUp do DSDT).
+		 */
+		interrupts-extended = <&tlmm 66 IRQ_TYPE_EDGE_FALLING>;
+
+		pinctrl-0 = <&ec_int_n_default>;
+		pinctrl-names = "default";
+	};
+#endif
+};
+
+#ifdef YOGA_EC_DT_NODE
+&tlmm {
+	ec_int_n_default: ec-int-n-state {
+		pins = "gpio66";
+		function = "gpio";
+		bias-pull-up;
+	};
+};
+#endif

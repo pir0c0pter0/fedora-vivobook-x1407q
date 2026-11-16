@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * u2 = u1 + USB2 host fixo em usb_1 (ACPI URS1 @ 0x0A800000, _STA 0x0F,
+ * DSDT:91350-91375). Mesmas pecas do u1, repetidor "K" (SID 0xA).
+ * Supplies: cob:273-276 e cob:232-235; DSDT:36487, 36515.
+ */
+
+#include "kalambo-lenovo-yoga-slim7x-u1.dts"
+
+/* Porta -> repetidor K: so da referencia (glymur-lenovo-yoga-slim7x.dts:952) */
+&usb_1_hsphy {
+	phys = <&smb2370_k_e2_eusb2_repeater>;
+
+	status = "okay";
+};
+
+&usb_1 {
+	dr_mode = "host";
+	maximum-speed = "high-speed";
+
+	/delete-property/ usb-role-switch;
+	phys = <&usb_1_hsphy>;
+	phy-names = "usb2-phy";
+
+	qcom,select-utmi-as-pipe-clk;
+
+	status = "okay";
+};

@@ -1,0 +1,29 @@
+#!/bin/sh
+# PLANO B do RTC (so com o DTB "ecrtcfb": RTC como rtc1, sem hctosys do kernel).
+# O PMK8850 conta segundos crus; o offset fica em arquivo.
+#   yoga-rtc load   acerta o relogio do sistema = contador + offset (so para frente)
+#   yoga-rtc save   grava offset = agora - contador (so com NTP sincronizado)
+set -eu
+F=/var/lib/yoga-rtc/offset
+RAW=/sys/class/rtc/rtc1/since_epoch
+
+case "${1:-}" in
+load)
+	modprobe rtc_pm8xxx
+	for _ in 1 2 3 4 5; do [ -r "$RAW" ] && break; sleep 0.2; done
+	off=$(cat "$F")
+	t=$(($(cat "$RAW") + off))
+	# so adianta: nunca joga o relogio para tras
+	if [ "$t" -gt "$(date +%s)" ]; then date -u -s "@$t" >/dev/null; fi
+	;;
+save)
+	[ "$(timedatectl show -p NTPSynchronized --value)" = yes ] || exit 0
+	mkdir -p "${F%/*}"
+	echo $(($(date +%s) - $(cat "$RAW"))) > "$F.tmp"
+	mv "$F.tmp" "$F"
+	;;
+*)
+	echo "uso: $0 load|save" >&2
+	exit 2
+	;;
+esac

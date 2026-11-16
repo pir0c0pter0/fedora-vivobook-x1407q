@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Frente RTC: hora certa e persistente no rtc-pm8xxx.
+ * Incluir DEPOIS do gwnx1 (que ja traz qcom,no-alarm e o compatible da raiz
+ * com "qcom,mahua" da frente de audio).
+ *
+ * Causa do "1970": o PMK8850 so conta segundos desde o reset do RTC
+ * (lido em 16/11 16:37:11 UTC: 13531677 s => zero em 2026-06-13 01:49:14 UTC).
+ * A hora real = contador + offset, e o offset nao fica no PMIC. Sem
+ * "offset" nvmem nem qcom,uefi-rtc-info o driver devolve o contador cru
+ * (rtc-pm8xxx.c:564-593) e o rtc0 ajusta o relogio do sistema ao registrar
+ * (class.c:435-437, RTC_HCTOSYS_DEVICE="rtc0").
+ *
+ * PLANO A (padrao) = o que a familia usa: offset na variavel UEFI RTCInfo
+ * (glymur-qcb.dtsi:327-330, glymur-hp-elitebook-x-g2q.dts:467-470), a mesma
+ * que o UEFI/Windows mantinham. Com efi=noruntime as variaveis so existem
+ * pelo qseecom/uefisecapp (QCOM_QSEECOM_UEFISECAPP=y), e o qcom_scm so o liga
+ * em maquinas da lista (qcom_scm.c:2227-2274). Lido no notebook:
+ *   "qseecom: found qseecom with version 0x1402000"
+ *   "qseecom: untested machine, skipping"
+ * A lista tem "lenovo,yoga-slim7x-gen11" (mesmo chassi, variante Elite) e
+ * "qcom,kalambo-crd". Essa string so e usada nessa lista (grep em drivers/,
+ * sound/, arch/), entao acrescenta-la a raiz so liga o qseecom.
+ * Expectativa (HIPOTESE ate o teste): RTCInfo com offset GPS perto de
+ * 1465350554 (0x5757799a).
+ * Nao existe celula nvmem livre comprovada: o unico SDAM do DT e nvram@7100
+ * (pmk8850.dtsi:57-68), com dados do firmware espalhados (lido por nvmem).
+ *
+ * Efeitos colaterais do plano A (o qseecom e =y, sobe no boot):
+ *  - efivarfs passa a ter conteudo e aceita escrita (fwupd, efibootmgr);
+ *  - efi-pstore gravaria panes em variaveis UEFI: usar
+ *    efi_pstore.pstore_disable=1 na cmdline do slot;
+ *  - o rtc-pm8xxx grava RTCInfo quando a hora e acertada (chrony rtcsync,
+ *    hwclock --systohc): na hora se o offset mudar >= 30 s, senao no desligar.
+ * Bloquear para carga manual: rtc_pm8xxx (ja esta na cmdline do slot current).
+ *
+ * PLANO B (-DYOGA_RTC_FALLBACK, so se o uefisecapp nao subir): sem qseecom.
+ * O RTC vira rtc1 por alias (class.c:254-273), logo nao ha hctosys nem
+ * systohc do kernel e o relogio nunca e deslocado; o offset fica em arquivo
+ * (install/ec-rtc/rtc-fallback/).
+ */
+
+#ifndef YOGA_RTC_FALLBACK
+
+/ {
+	compatible = "lenovo,yoga-slim7x-gen11-x2plus-diag",
+		     "lenovo,yoga-slim7x-gen11", "qcom,kalambo", "qcom,mahua";
+};
+
+&pmk8850_rtc {
+	qcom,no-alarm;
+	qcom,uefi-rtc-info;
+};
+
+#else
+
+/ {
+	aliases {
+		rtc1 = &pmk8850_rtc;
+	};
+};
+
+&pmk8850_rtc {
+	qcom,no-alarm;
+};
+
+#endif

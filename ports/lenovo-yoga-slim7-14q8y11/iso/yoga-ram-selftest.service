@@ -1,0 +1,14 @@
+[Unit]
+Description=Verify the Yoga live payload in an ARM virtual machine
+ConditionKernelCommandLine=yoga.selftest
+ConditionVirtualization=qemu
+After=local-fs.target livesys.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/yoga-ram-selftest
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

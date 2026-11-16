@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * gwnx2 = gwnx1 (em uso no slot current) + fragmentos aprovados da rodada 2,
+ * para testar varias frentes num unico boot do slot try. Cada fragmento
+ * documenta as proprias fontes; aqui so a composicao.
+ *
+ * Inclui o gwnx1 inteiro: nenhum fragmento novo substitui um antigo
+ * (yoga-usb-typec.dtsi e yoga-audio-card.dtsi sao ACRESCIMOS a yoga-usb.dtsi
+ * e yoga-audio.dtsi; yoga-ec-node.dtsi repete as duas linhas de &i2c9 do
+ * yoga-ec.dtsi com os mesmos valores).
+ *
+ * Variantes escolhidas (as opcionais ficam de fora):
+ *   audio-card  sem YOGA_AUDIO_DMIC_PINS (LPI 6/8 como saida so pela referencia)
+ *   camera      sem YOGA_CAMERA_PRIVACY_LED (TLMM 111 em alto so pela referencia)
+ *   rtc         YOGA_RTC_FALLBACK (plano B: so o alias rtc1). O plano A muda o
+ *               compatible da raiz e liga o qseecom (=y) aos ~0,15 s numa
+ *               maquina fora da allowlist: se travar, perde o boot de todas as
+ *               frentes. Fica para um boot proprio (install/ec-rtc/dtb/).
+ *
+ * Recursos por fragmento (sem sobreposicao de no, pino ou label):
+ *   audio-card  /sound, &swr0, &swr3 (+4 speakers, lpass_tlmm 12/13), &lpass_vamacro
+ *   usb-typec   &smb2370_l_e2 (spmi 2-0b), &usb_2_hsphy, &usb_2
+ *   camera      /gpio-keys-camera + tlmm gpio99 (entrada)
+ *   ec-node     &i2c9/embedded-controller@70 + tlmm gpio66 (entrada)
+ *   rtc         /aliases rtc1
+ *   lid         /gpio-keys + tlmm gpio92 (entrada)
+ *   thermal     24 zonas cpu-{0,1}-*-thermal (trip passivo 105 C + cooling-map)
+ *
+ * Cmdline do slot try (ver o roteiro da integracao): modprobe.blacklist do
+ * current + phy_qcom_m31_eusb2,phy_qcom_eusb2_repeater, e
+ * initcall_blacklist=slim7x11_ec_driver_init.
+ */
+
+#define YOGA_RTC_FALLBACK
+
+#include "kalambo-lenovo-yoga-slim7x-gwnx1.dts"
+
+#include "yoga-audio-card.dtsi"
+#include "yoga-usb-typec.dtsi"
+#include "yoga-camera.dtsi"
+#include "yoga-ec-node.dtsi"
+#include "yoga-rtc.dtsi"
+#include "yoga-lid.dtsi"
+#include "yoga-thermal.dtsi"

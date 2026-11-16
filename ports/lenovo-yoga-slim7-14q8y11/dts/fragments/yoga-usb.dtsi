@@ -1,0 +1,104 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Frente USB: USB2 host fixo em usb_0 (ACPI URS0 @ 0x0A600000) e usb_1
+ * (ACPI URS1 @ 0x0A800000). Incluir DEPOIS do DTS base (gwnb1).
+ *
+ * Blocos copiados SEM alteracao de kalambo-lenovo-yoga-slim7x-gwnu2.dts
+ * (revisado e aprovado): HOLD_L3F0, usb_0_hsphy/usb_0, usb_1_hsphy/usb_1.
+ * A analise de trilhos/clocks compartilhados esta no cabecalho daquele
+ * arquivo. Sem #include do gwnu2 porque ele parte do gwn1, nao do gwnb1.
+ *
+ * Boot: bloquear phy_qcom_m31_eusb2 e phy_qcom_eusb2_repeater na cmdline.
+ * dwc3/dwc3-qcom/xhci sao =y: sem o PHY os controladores ficam sem probe
+ * completo; a ativacao e "modprobe phy_qcom_eusb2_repeater" e depois
+ * "modprobe phy_qcom_m31_eusb2", uma porta por vez (driver_override).
+ */
+
+/ {
+	/*
+	 * Segurador de trilho, mesmo padrao do gw1a/gwn1 (NAO existe na REF).
+	 *
+	 * m31eusb2_phy_init() liga l3f0 + l4h0 e os DESLIGA se o init do
+	 * repetidor ou o clock falharem (phy-qcom-m31-eusb2.c:187-224), e
+	 * m31eusb2_phy_exit() os desliga quando o dwc3 falha depois do phy_init
+	 * (phy-qcom-m31-eusb2.c:227-236, core.c:1387-1415). O PEP vota
+	 * LDO3_F_E0 em 0,912 V tambem para \_SB.PCI5 (DSDT:58940, junto de
+	 * LDO2_F_E0 e LDO4_H_E0) e o COB liga l3f0 ao QREF (qreftx0/qrefrx5,
+	 * COB:252-253). HIPOTESE: o clock de referencia do NVMe passa por esse
+	 * QREF; sem este hold a contagem do l3f0 voltaria a zero e o kernel
+	 * mandaria o disable ao RPMh.
+	 * Tensao: a mesma que o kernel ja aplica no gwn1 ("vreg_l3f0: Setting
+	 * 912000-912000uV", ssd-boot1-dmesg.txt:441).
+	 */
+	regulator-hold-l3f0 {
+		compatible = "regulator-fixed";
+		regulator-name = "HOLD_L3F0";
+		vin-supply = <&vreg_l3f0>;
+		regulator-always-on;
+	};
+};
+
+/*
+ * Repetidor eUSB2 SMB2370 "J" (spmi_bus2 SID 9, smb2370.dtsi:7). Porta ->
+ * repetidor vem so da REF:930; o DSDT confirma apenas as tensoes (DSDT:34480-
+ * 34522).
+ *
+ * power-domains NAO esta na REF nem no binding do PHY. O no do SoC nao liga
+ * nenhum GDSC para o HS PHY (glymur.dtsi:2553-2566); o unico no que liga o
+ * GCC_USB_0_PHY_GDSC e o usb_0_qmpphy (glymur.dtsi:2587), que fica desligado.
+ * O PEP lista esse footswitch no D0 do USB0 (DSDT:34546). Com um unico
+ * power-domain o platform bus liga o dominio antes do probe do PHY
+ * (platform.c:1502-1503), e portanto antes do primeiro acesso MMIO, que so
+ * acontece em phy_init. Se o GDSC nao ligar, o probe do PHY adia e nada e
+ * escrito. HIPOTESE: o CSR do HS PHY esta nesse dominio.
+ */
+&usb_0_hsphy {
+	phys = <&smb2370_j_e2_eusb2_repeater>;
+
+	power-domains = <&gcc GCC_USB_0_PHY_GDSC>;
+
+	status = "okay";
+};
+
+/* Padrao host fixo HS: usb_2 do mahua-lenovo-thinkpad-t14s-gen7-lcd.dts:985-994 */
+&usb_0 {
+	dr_mode = "host";
+	maximum-speed = "high-speed";
+
+	/delete-property/ usb-role-switch;
+	phys = <&usb_0_hsphy>;
+	phy-names = "usb2-phy";
+
+	/*
+	 * Nao esta na referencia T14s. Vem do binding ("dwc3 operates without
+	 * SSPHY"), de dwc3-qcom.c:677-684 e do controlador so-HS do proprio SoC
+	 * (glymur.dtsi:5272). So escreve no QSCRATCH do controlador. Se o xHCI
+	 * nao subir, a variante de reserva e este arquivo sem esta propriedade
+	 * nos dois controladores.
+	 */
+	qcom,select-utmi-as-pipe-clk;
+
+	status = "okay";
+};
+
+/* Repetidor "K" (SID 0xA): REF:952. Tensoes: DSDT:36487, 36515. */
+&usb_1_hsphy {
+	phys = <&smb2370_k_e2_eusb2_repeater>;
+
+	power-domains = <&gcc GCC_USB_1_PHY_GDSC>;
+
+	status = "okay";
+};
+
+&usb_1 {
+	dr_mode = "host";
+	maximum-speed = "high-speed";
+
+	/delete-property/ usb-role-switch;
+	phys = <&usb_1_hsphy>;
+	phy-names = "usb2-phy";
+
+	qcom,select-utmi-as-pipe-clk;
+
+	status = "okay";
+};

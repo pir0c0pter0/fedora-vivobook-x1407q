@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Frente CPUFREQ + RTC. Incluir DEPOIS de kalambo-lenovo-yoga-slim7x-gwnb1.dts.
+ * So acrescenta propriedades em dois nos ja existentes. Nenhum GPIO,
+ * regulador, clock, pinctrl ou firmware-name novo.
+ *
+ * REF = arch/arm64/boot/dts/qcom/glymur-lenovo-yoga-slim7x.dts (mesmo chassi)
+ *
+ * (a) SCMI / cpufreq - EXPERIMENTO DE DIAGNOSTICO, nao correcao comprovada.
+ *   Fatos lidos no notebook (slot current, 2026-11-16):
+ *   - base responde em < 0,5 ms; as 4 mensagens do protocolo 0x13 dao
+ *     "timed out in resp" com 30 ms;
+ *   - /proc/interrupts: "apss_cpucp_mbox" = 7 (so as respostas do base),
+ *     nenhum "Ignoring spurious A2P IRQ" nem "is not expected": nao chegou
+ *     IRQ de conclusao, nem atrasada, para o 0x13;
+ *   - nao houve "Timeout waiting for a free TX channel" (shmem.c:113-118),
+ *     logo o firmware devolveu CHANNEL_FREE depois de cada mensagem 0x13.
+ *   Ou seja: o PDP1 consome a mensagem de perf e libera o canal, mas nao
+ *   interrompe. Com polling o nucleo SCMI le o shmem direto
+ *   (shmem_poll_done, shmem.c:168-181) e mostra o que o firmware escreveu.
+ *   - arm,no-completion-irq: lido em driver.c:3258, binding
+ *     Documentation/devicetree/bindings/firmware/arm,scmi.yaml:149-154
+ *     (permitido para "arm,scmi").
+ *   - arm,max-rx-timeout-ms: driver.c:3243, binding :127-132. 200 e so um
+ *     teto de espera do kernel (nao e valor de hardware); o padrao do
+ *     transporte mailbox e 30 (transports/mailbox.c, "We may increase this
+ *     if required"). Em polling a espera e ocupada: pior caso 4 x 200 ms.
+ *   arm-scmi e =y; o gatilho manual e o qcom_cpucp_mbox (=m): bloquear na
+ *   cmdline e dar modprobe a mao.
+ *
+ * (b) RTC: o periferico de alarme 0x62 do PMK8850 nao pertence ao EE do
+ *   Linux ("disallowed SPMI write to sid=0, addr=0x6211",
+ *   spmi-pmic-arb.c:1419-1422 -> request_irq -EPERM). qcom,no-alarm faz o
+ *   rtc-pm8xxx nem pedir a IRQ (rtc-pm8xxx.c, probe: of_property_read_bool
+ *   "qcom,no-alarm"). Igual a REF:659-661, mahua-lenovo-thinkpad-t14s-gen7
+ *   -lcd.dts:699-701 e glymur-crd.dtsi:699-701 (herdado por kalambo-crd).
+ *   Sem qcom,uefi-rtc-info de proposito: a REF nao usa e o sistema roda com
+ *   efi=noruntime (o probe ficaria em -EPROBE_DEFER para sempre).
+ */
+
+&{/firmware/scmi} {
+	arm,no-completion-irq;
+	arm,max-rx-timeout-ms = <200>;
+};
+
+&pmk8850_rtc {
+	qcom,no-alarm;
+};

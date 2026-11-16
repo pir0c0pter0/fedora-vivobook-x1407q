@@ -1,0 +1,149 @@
+phy: qcom: edp: fix Glymur (v8) PLL tables and the HBR2 pixel clock divider
+
+Two defects found on a Lenovo Yoga Slim 7 14Q8Y11 (X2 Plus, eDP on mdss_dp3,
+panel limited to HBR2 x2 lanes):
+
+1. The v8 PLL settings for RBR, HBR and HBR2 did not lock a usable link.
+   HBR2 now matches what the firmware leaves in the PHY (register dump taken
+   before the first write) and qmp_v8_dp_serdes_tbl_hbr2 of the combo PHY;
+   RBR and HBR follow the combo PHY tables and are untested. HBR3 is
+   unchanged. VCO_TUNE{1,2}_MODE0 and the SSC step become per-rate.
+
+2. DP_PHY_VCO_DIV = 0x2 at HBR2 gives half the pixel clock the clock
+   framework is told (30 Hz instead of 60 Hz, link trained, panel black).
+   0x0 gives 60 Hz and a picture; 0x1 gives 40 Hz. Only the HBR2 entry is
+   changed; the other three are untested and kept.
+
+Not for upstream as is: RBR/HBR/HBR3 need a platform that can reach them.
+---
+--- a/drivers/phy/qualcomm/phy-qcom-edp.c
++++ b/drivers/phy/qualcomm/phy-qcom-edp.c
+@@ -286,8 +286,21 @@
+ 	0x00, 0x00, 0xa0, 0x00, 0x0a, 0x26, 0x0a, 0x03, 0x37, 0x03, 0x02, 0x02, 0x04,
+ };
+ 
++/*
++ * DP_PHY_VCO_DIV codes for RBR, HBR, HBR2, HBR3. The encoding is not the v4
++ * one (1 = /2, 2 = /4, 0 = /6 of the link bit rate).
++ *
++ * Only HBR2 is measured (Lenovo Yoga Slim 7 14Q8Y11, Glymur eDP PHY, HBR2 x2,
++ * 1920x1200@60, frames counted over 10 s): 0x0 gives 60 Hz, i.e. the 1350 MHz
++ * the clock framework is told (5.4 G / 4); 0x1 gives 40 Hz (5.4 G / 6) and the
++ * previous 0x2 gave 30 Hz (5.4 G / 8) and a black panel.
++ *
++ * RBR, HBR and HBR3 are untested and left as they were: the HBR3 value agrees
++ * with the measurement if the divider follows the bit rate (0x1 = /6), but by
++ * the same reading 0x0 would be /4 where RBR and HBR need /2.
++ */
+ static const u8 edp_phy_vco_div_cfg_v8[4] = {
+-	0x00, 0x00, 0x02, 0x01,
++	0x00, 0x00, 0x00, 0x01,
+ };
+ 
+ static int qcom_edp_phy_init(struct phy *phy)
+@@ -916,13 +929,17 @@
+ 
+ 	switch (dp_opts->link_rate) {
+ 	case 1620:
+-	case 2700:
+-	case 8100:
+-		step1 = 0x5b;
++		step1 = 0x83;
+ 		step2 = 0x02;
+ 		break;
+ 
++	case 2700:
+ 	case 5400:
++		step1 = 0x18;
++		step2 = 0x02;
++		break;
++
++	case 8100:
+ 		step1 = 0x5b;
+ 		step2 = 0x02;
+ 		break;
+@@ -952,32 +969,53 @@
+ 	u32 lock_cmp2_mode0;
+ 	u32 code1_mode0;
+ 	u32 code2_mode0;
++	u32 vco_tune1_mode0;
++	u32 vco_tune2_mode0;
+ 	u32 hsclk_sel;
+ 
+ 	switch (dp_opts->link_rate) {
+ 	case 1620:
++		/* VCO 12.96 GHz / 8, as qmp_v8_dp_serdes_tbl_rbr; untested */
+ 		hsclk_sel = 0x5;
+-		dec_start_mode0 = 0x34;
+-		div_frac_start2_mode0 = 0xc0;
+-		div_frac_start3_mode0 = 0x0b;
++		dec_start_mode0 = 0x54;
++		div_frac_start2_mode0 = 0x00;
++		div_frac_start3_mode0 = 0x06;
+ 		lock_cmp1_mode0 = 0x37;
+ 		lock_cmp2_mode0 = 0x04;
+-		code1_mode0 = 0x71;
+-		code2_mode0 = 0x0c;
++		code1_mode0 = 0x8d;
++		code2_mode0 = 0x27;
++		vco_tune1_mode0 = 0xfe;
++		vco_tune2_mode0 = 0x00;
+ 		break;
+ 
+ 	case 2700:
+-		hsclk_sel = 0x3;
+-		dec_start_mode0 = 0x34;
+-		div_frac_start2_mode0 = 0xc0;
+-		div_frac_start3_mode0 = 0x0b;
++		/* VCO 10.8 GHz / 4, as qmp_v8_dp_serdes_tbl_hbr; untested */
++		hsclk_sel = 0x4;
++		dec_start_mode0 = 0x46;
++		div_frac_start2_mode0 = 0x00;
++		div_frac_start3_mode0 = 0x05;
+ 		lock_cmp1_mode0 = 0x07;
+ 		lock_cmp2_mode0 = 0x07;
+-		code1_mode0 = 0x71;
+-		code2_mode0 = 0x0c;
++		code1_mode0 = 0xf6;
++		code2_mode0 = 0x20;
++		vco_tune1_mode0 = 0xae;
++		vco_tune2_mode0 = 0x02;
+ 		break;
+ 
+ 	case 5400:
++		/* VCO 10.8 GHz / 2, as qmp_v8_dp_serdes_tbl_hbr2 and the firmware */
++		hsclk_sel = 0x3;
++		dec_start_mode0 = 0x46;
++		div_frac_start2_mode0 = 0x00;
++		div_frac_start3_mode0 = 0x05;
++		lock_cmp1_mode0 = 0x10;
++		lock_cmp2_mode0 = 0x0e;
++		code1_mode0 = 0xf6;
++		code2_mode0 = 0x20;
++		vco_tune1_mode0 = 0xae;
++		vco_tune2_mode0 = 0x02;
++		break;
++
+ 	case 8100:
+ 		hsclk_sel = 0x2;
+ 		dec_start_mode0 = 0x4f;
+@@ -987,6 +1025,8 @@
+ 		lock_cmp2_mode0 = 0x15;
+ 		code1_mode0 = 0x14;
+ 		code2_mode0 = 0x25;
++		vco_tune1_mode0 = 0xa0;
++		vco_tune2_mode0 = 0x01;
+ 		break;
+ 
+ 	default:
+@@ -1022,8 +1062,8 @@
+ 	writel(0x00, edp->pll + DP_QSERDES_V8_COM_VCO_TUNE_CTRL);
+ 	writel(0x1f, edp->pll + DP_QSERDES_V8_COM_BIAS_EN_CLKBUFLR_EN);
+ 	writel(0x00, edp->pll + DP_QSERDES_V8_COM_CORE_CLK_EN);
+-	writel(0xa0, edp->pll + DP_QSERDES_V8_COM_VCO_TUNE1_MODE0);
+-	writel(0x01, edp->pll + DP_QSERDES_V8_COM_VCO_TUNE2_MODE0);
++	writel(vco_tune1_mode0, edp->pll + DP_QSERDES_V8_COM_VCO_TUNE1_MODE0);
++	writel(vco_tune2_mode0, edp->pll + DP_QSERDES_V8_COM_VCO_TUNE2_MODE0);
+ 
+ 	writel(code1_mode0, edp->pll + DP_QSERDES_V8_COM_BIN_VCOCAL_CMP_CODE1_MODE0);
+ 	writel(code2_mode0, edp->pll + DP_QSERDES_V8_COM_BIN_VCOCAL_CMP_CODE2_MODE0);

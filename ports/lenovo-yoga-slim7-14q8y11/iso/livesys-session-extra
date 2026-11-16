@@ -1,0 +1,13 @@
+# Sourced by Fedora livesys after it creates liveuser and configures GDM.
+mkdir -p /var/lib/AccountsService/users
+cat > /var/lib/AccountsService/users/liveuser <<'EOF'
+[User]
+Session=niri
+XSession=niri
+SystemAccount=false
+EOF
+cat > /home/liveuser/.dmrc <<'EOF'
+[Desktop]
+Session=niri
+EOF
+chown liveuser:liveuser /home/liveuser/.dmrc

@@ -1,0 +1,59 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * FRENTE AUDIO, etapa 1+2: habilita so o no do ADSP e faz o pd-mapper casar.
+ * Incluir DEPOIS do DTS base (gwnb1). Nao cria regulador, GPIO, pinctrl nem
+ * placa de som.
+ *
+ * REF  = arch/arm64/boot/dts/qcom/glymur-lenovo-yoga-slim7x.dts
+ * DSDT = local/iso-build/acpi/acpi-registry-0000.dsl
+ *
+ * MECANISMO DE CONTROLE (boot neutro):
+ * - qcom_q6v5_pas ja e carregado no boot pelo yoga-soccp.service; com este no
+ *   habilitado ele da probe em 6800000.remoteproc e o rproc (auto_boot,
+ *   qcom_q6v5_pas.c:1710) tenta subir. rproc_boot() faz request_firmware()
+ *   ANTES de qualquer acao de hardware (remoteproc_core.c, rproc_boot): sem o
+ *   arquivo, loga "request_firmware failed: -2" e o ADSP fica "offline".
+ * - Por isso o firmware NAO pode existir em /usr/lib/firmware/qcom/glymur/
+ *   LENOVO/83QR/ (lido no notebook: o diretorio nao existe). Ele fica num
+ *   diretorio de staging fora do caminho de busca e so entra por
+ *   /sys/module/firmware_class/parameters/path (volatil) no passo manual,
+ *   seguido de "echo start > /sys/class/remoteproc/<adsp>/state".
+ * - Achar o rproc pelo atributo "name" (adsp), nunca pelo indice: o SoCCP e
+ *   o outro rproc do mesmo driver e nao pode receber stop.
+ *
+ * Bloquear na cmdline do slot de teste (tudo =m, carga manual depois):
+ *   qcom_pd_mapper,apr,fastrpc,snd_q6apm,q6prm,q6prm_clocks,q6apm_dai,
+ *   q6apm_lpass_dais,snd_soc_lpass_wsa_macro,snd_soc_lpass_va_macro,
+ *   soundwire_qcom,snd_soc_wsa884x,snd_soc_x1e80100
+ */
+
+/ {
+	/*
+	 * drivers/soc/qcom/qcom_pd_mapper.c:632-635 casa "qcom,glymur" e
+	 * "qcom,mahua" (mesma tabela glymur_domains), nao "qcom,kalambo".
+	 * Unico outro usuario dessas strings na arvore: ubwc_config.c:126-130,
+	 * que ja casa kalambo com os mesmos dados. As duas primeiras strings
+	 * repetem kalambo-lenovo-yoga-slim7x-g1.dts:15.
+	 * Efeito no boot: com isso o qcom_pd_mapper (hoje carregado e parado
+	 * com -ENODEV) passaria a subir o servidor QMI no attach do SoCCP; por
+	 * isso ele entra na modprobe.blacklist do slot de teste.
+	 */
+	compatible = "lenovo,yoga-slim7x-gen11-x2plus-diag", "qcom,kalambo",
+		     "qcom,mahua";
+};
+
+/*
+ * REF:663-668. ACPI \_SB.ADSP (QCOM0F1B, _STA 0x0F) DSDT:72280-72297.
+ * Arquivos = coleta Windows desta maquina (qcsubsys_ext_adsp8480.inf):
+ *   qcadsp8480.mbn sha256 0dd34eda...8a9144f8, carrega 0x89e00000-0x8d800000
+ *   (= adspslpi_mem, glymur.dtsi:643); adsp_dtbs.elf sha256 7b0b994e...a8ddae5,
+ *   carrega em 0x8d800000 (= q6_adsp_dtb_mem, glymur.dtsi:648).
+ * Supplies do no (glymur.dtsi:4394-4431): so power-domains LCX/LMX, clock
+ * RPMH_CXO_CLK, interconnect LPASS e iommus 0x1000; nenhum regulador/GPIO.
+ */
+&remoteproc_adsp {
+	firmware-name = "qcom/glymur/LENOVO/83QR/qcadsp8480.mbn",
+			"qcom/glymur/LENOVO/83QR/adsp_dtbs.elf";
+
+	status = "okay";
+};

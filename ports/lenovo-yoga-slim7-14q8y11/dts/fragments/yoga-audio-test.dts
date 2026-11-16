@@ -1,0 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/* DTB de teste da frente AUDIO: gwnb1 (slot current) + fragments/yoga-audio.dtsi */
+#include "kalambo-lenovo-yoga-slim7x-gwnb1.dts"
+#include "yoga-audio.dtsi"

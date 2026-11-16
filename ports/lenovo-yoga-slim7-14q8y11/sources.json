@@ -1,0 +1,458 @@
+{
+  "checked_at": "2026-11-13",
+  "target": {
+    "model": "Lenovo Yoga Slim 7 14Q8Y11",
+    "cpu": "Snapdragon X2 Plus X2P-42-100",
+    "cores": 6,
+    "soc": "kalambo",
+    "identification": "Confirmed by physical-device Windows inventory: LENOVO 83QR, Yoga Slim 7 14Q8Y11, X2P42100, 6 cores. Kalambo association follows SKU sources; Linux SMEM ID not measured."
+  },
+  "userspace": {
+    "fedora": 45,
+    "arch": "aarch64",
+    "compositor": "niri",
+    "shell": "noctalia",
+    "shell_version": "5.5.0",
+    "shell_commit": "c2573248a89470383e41b8e1ac432424691cbc1f",
+    "compositor_package": "26.04-2.fc45.aarch64",
+    "shell_build": "5.5.0-1.yoga.fc45.aarch64; native C++ cross-build; runtime version verified in chroot"
+  },
+  "stage": "paused-by-user-r3-cons-usb-ready-physical-test-pending",
+  "hardware_validation": {
+    "boot": false,
+    "installation": false,
+    "gpu": false,
+    "firmware": false,
+    "icc_exported": true,
+    "icc_applied": false,
+    "icc_installed_in_experimental_image": true,
+    "kernel_execution": true,
+    "six_cpus_started": true,
+    "boot_definition": "Stable physical boot to terminal/live; kernel_execution and six_cpus_started are separate partial milestones."
+  },
+  "blockers": [
+    "Physical R2 initializes Linux and six CPUs then reboots; partial video transcript does not establish reset cause. R3 low-verbosity comparison pending.",
+    "Lenovo Kalambo board DTS still needs porting; no matching board DTS located in inspected pinned trees",
+    "DSDT decompiled with ACPICA 20260930; board wiring audit and SSDT completeness still pending; duplicate SOID reported",
+    "Complete ICC output transform not verified for Niri; acquired EDIDs have conformity/extension warnings"
+  ],
+  "color_profiles_requested": [
+    "LEN88AE_AdobeRGB",
+    "LEN88AE_DCIP3",
+    "LEN88AE_Default",
+    "LEN88AE_DisplayP3",
+    "LEN88AE_Native",
+    "LEN88AE_REC709",
+    "LEN88AE_sRGB"
+  ],
+  "verified_sources": [
+    {
+      "id": "lenovo_psref",
+      "url": "https://psref.lenovo.com/syspool/Sys/PDF/Yoga/Yoga_Slim_7_14Q8Y11/Yoga_Slim_7_14Q8Y11_Spec.pdf",
+      "role": "catalog",
+      "revision": null,
+      "bytes": 1057850,
+      "sha256": "dfa2f9fd3932a7b935efbc1a2b05a4482dbeaa5981b85c4181f3ccf40e2d7f35",
+      "checked_at": "2026-11-13",
+      "hardware_validated": false
+    },
+    {
+      "id": "kalambo_dtsi",
+      "url": "https://kernel.googlesource.com/pub/scm/linux/kernel/git/qcom/linux/+/6a876df4686788cd39128b62d7fcbff62f39278f/arch/arm64/boot/dts/qcom/kalambo.dtsi?format=TEXT",
+      "role": "soc-reference",
+      "revision": "6a876df4686788cd39128b62d7fcbff62f39278f",
+      "bytes": 2024,
+      "sha256": "f00763145bc8b8667b755e81f532f6ccb4999fa3412ea6710b10c99ae0a8f6df",
+      "checked_at": "2026-11-13",
+      "hardware_validated": false
+    },
+    {
+      "id": "kalambo_crd",
+      "url": "https://kernel.googlesource.com/pub/scm/linux/kernel/git/qcom/linux/+/6a876df4686788cd39128b62d7fcbff62f39278f/arch/arm64/boot/dts/qcom/kalambo-crd.dts?format=TEXT",
+      "role": "reference-board-not-lenovo",
+      "revision": "6a876df4686788cd39128b62d7fcbff62f39278f",
+      "bytes": 291,
+      "sha256": "88895ae964fda60ee281bc9e8c561e14eabf077d1d7624d5ba32aace63e2d954",
+      "checked_at": "2026-11-13",
+      "hardware_validated": false
+    },
+    {
+      "id": "qcom_dts_listing",
+      "url": "https://kernel.googlesource.com/pub/scm/linux/kernel/git/qcom/linux/+/6a876df4686788cd39128b62d7fcbff62f39278f/arch/arm64/boot/dts/qcom/?format=JSON",
+      "role": "board-discovery",
+      "revision": "6a876df4686788cd39128b62d7fcbff62f39278f",
+      "bytes": 104735,
+      "sha256": "6f260f78c56abb269d6edbd1581274aceb79bab2d99c582bacb99f5f531a0dd3",
+      "checked_at": "2026-11-13",
+      "hardware_validated": false,
+      "kalambo_files": [
+        "kalambo-crd.dts",
+        "kalambo.dtsi"
+      ],
+      "yoga_files": [
+        "glymur-lenovo-yoga-slim7x.dts"
+      ]
+    },
+    {
+      "id": "linux_dts_listing",
+      "url": "https://api.github.com/repos/torvalds/linux/contents/arch/arm64/boot/dts/qcom?ref=7e1392a42ea288d70a266f6553fe06f57f8647ea",
+      "role": "board-discovery",
+      "revision": "7e1392a42ea288d70a266f6553fe06f57f8647ea",
+      "bytes": 754607,
+      "sha256": "627fd50162827d074a55c56386a8960f2c7db59723e9ab58bd9da8b825020277",
+      "checked_at": "2026-11-13",
+      "hardware_validated": false,
+      "kalambo_files": [],
+      "yoga_files": [
+        "glymur-lenovo-yoga-slim7x.dts"
+      ]
+    },
+    {
+      "id": "yoga_elite_dts",
+      "url": "https://raw.githubusercontent.com/torvalds/linux/7e1392a42ea288d70a266f6553fe06f57f8647ea/arch/arm64/boot/dts/qcom/glymur-lenovo-yoga-slim7x.dts",
+      "role": "elite-reference-not-plus",
+      "revision": "7e1392a42ea288d70a266f6553fe06f57f8647ea",
+      "bytes": 24854,
+      "sha256": "daa28046e512767577e844691e6fa85e4f63e250ad36e21596f469f751a6b26c",
+      "checked_at": "2026-11-13",
+      "hardware_validated": false
+    },
+    {
+      "id": "yoga_ec",
+      "url": "https://raw.githubusercontent.com/torvalds/linux/7e1392a42ea288d70a266f6553fe06f57f8647ea/drivers/platform/arm64/lenovo-yoga-slim7x-gen11-ec.c",
+      "role": "driver-reference",
+      "revision": "7e1392a42ea288d70a266f6553fe06f57f8647ea",
+      "bytes": 12553,
+      "sha256": "bab1ed535bfae3f1735a5b9fd9f99a098160dc6d3b7b2781c169cdfa1a1fc237",
+      "checked_at": "2026-11-13",
+      "hardware_validated": false
+    },
+    {
+      "id": "yoga_hid_quirk",
+      "url": "https://raw.githubusercontent.com/torvalds/linux/7e1392a42ea288d70a266f6553fe06f57f8647ea/drivers/hid/i2c-hid/i2c-hid-core.c",
+      "role": "driver-reference",
+      "revision": "7e1392a42ea288d70a266f6553fe06f57f8647ea",
+      "bytes": 37547,
+      "sha256": "c797152f5933d3d0943b6f156e88659505e6fba9c9f06712516a9a01397afe9d",
+      "checked_at": "2026-11-13",
+      "hardware_validated": false
+    },
+    {
+      "id": "niri_outputs",
+      "url": "https://raw.githubusercontent.com/niri-wm/niri/73a04441fccc78294c3899af8f8cdd2a1e38fa33/niri-config/src/output.rs",
+      "role": "color-support-inspection",
+      "revision": "73a04441fccc78294c3899af8f8cdd2a1e38fa33",
+      "bytes": 21521,
+      "sha256": "f95fa0e77fbae577004f31b9871cda4574017b69cb26dbecf14231158e6becee",
+      "checked_at": "2026-11-13",
+      "hardware_validated": false
+    },
+    {
+      "id": "niri_gamma",
+      "url": "https://raw.githubusercontent.com/niri-wm/niri/73a04441fccc78294c3899af8f8cdd2a1e38fa33/src/protocols/gamma_control.rs",
+      "role": "gamma-is-not-full-icc",
+      "revision": "73a04441fccc78294c3899af8f8cdd2a1e38fa33",
+      "bytes": 7755,
+      "sha256": "0dcc3d0733d780348197c5bd9538cf3422fd0c5e5c374d3e8325c563b79a0166",
+      "checked_at": "2026-11-13",
+      "hardware_validated": false
+    }
+  ],
+  "additional_references": [
+    {
+      "id": "lenovo_drivers",
+      "url": "https://pcsupport.lenovo.com/us/en/products/laptops-and-netbooks/yoga-series/yoga-slim-7-14q8y11/downloads/driver-list"
+    },
+    {
+      "id": "kalambo_v9",
+      "url": "https://lkml.iu.edu/2610.2/00931.html"
+    },
+    {
+      "id": "kalambo_binding",
+      "url": "https://github.com/torvalds/linux/commit/6d5e851353aa114cdeda4e4c6efcb87dc46bf047"
+    },
+    {
+      "id": "qualcomm_preview",
+      "url": "https://www.qualcomm.com/developer/blog/2026/09/announcing-linux-on-snapdragon-x2-series-early-developer-preview"
+    },
+    {
+      "id": "qualcomm_debian_recipes",
+      "url": "https://github.com/qualcomm-linux/qcom-deb-images"
+    },
+    {
+      "id": "qualcomm_qli_kernel",
+      "url": "https://github.com/qualcomm-linux/kernel"
+    },
+    {
+      "id": "linux_firmware_whence",
+      "url": "https://gitlab.com/kernel-firmware/linux-firmware/-/blob/main/WHENCE"
+    },
+    {
+      "id": "qcom_firmware_extract_21",
+      "url": "https://sources.debian.org/src/qcom-firmware-extract/21/qcom-firmware-extract"
+    },
+    {
+      "id": "audio_topology",
+      "url": "https://github.com/linux-msm/audioreach-topology"
+    },
+    {
+      "id": "audio_ucm",
+      "url": "https://github.com/alsa-project/alsa-ucm-conf"
+    },
+    {
+      "id": "ubuntu_concept",
+      "url": "https://discourse.ubuntu.com/t/ubuntu-concept-26-10-snapdragon-edition/88518"
+    },
+    {
+      "id": "omarchy_reference",
+      "url": "https://github.com/omacom/omarchy-pkgs/blob/master/pkgbuilds/linux-omarchy-aarch64/README.md"
+    },
+    {
+      "id": "fedora_download",
+      "url": "https://fedoraproject.org/workstation/download/"
+    },
+    {
+      "id": "fedora_niri",
+      "url": "https://packages.fedoraproject.org/pkgs/niri/niri/fedora-45.html"
+    },
+    {
+      "id": "fedora_noctalia",
+      "url": "https://packages.fedoraproject.org/pkgs/noctalia/noctalia/fedora-45.html"
+    },
+    {
+      "id": "rawhide_noctalia",
+      "url": "https://packages.fedoraproject.org/pkgs/noctalia/noctalia/fedora-rawhide.html"
+    },
+    {
+      "id": "noctalia_release",
+      "url": "https://github.com/noctalia-dev/noctalia/releases/tag/v5.5.0"
+    },
+    {
+      "id": "noctalia_install",
+      "url": "https://docs.noctalia.dev/noctalia/getting-started/installation/"
+    },
+    {
+      "id": "noctalia_niri",
+      "url": "https://docs.noctalia.dev/noctalia/compositor-settings/niri/"
+    },
+    {
+      "id": "niri_packaging",
+      "url": "https://niri-wm.github.io/niri/Packaging-niri.html"
+    },
+    {
+      "id": "niri_software",
+      "url": "https://niri-wm.github.io/niri/Important-Software.html"
+    },
+    {
+      "id": "niri_icc_discussion",
+      "url": "https://github.com/niri-wm/niri/discussions/2458"
+    },
+    {
+      "id": "mesa_freedreno",
+      "url": "https://docs.mesa3d.org/drivers/freedreno.html"
+    },
+    {
+      "id": "fastfetch_soc_mapping",
+      "url": "https://github.com/fastfetch-cli/fastfetch/blob/dev/src/detection/cpu/cpu_linux.c"
+    }
+  ],
+  "local_artifacts": [
+    {
+      "name": "ldiag_5.2.1_linux_arm64.iso",
+      "path": "~/Downloads/ldiag_5.2.1_linux_arm64.iso",
+      "sha256": "053a9a276bdd5c3da9d3023a88c6ffa3b24dddab598e166740bb9a1f337a75b8",
+      "bytes": 3024523264,
+      "official_checksum_matches": true,
+      "report": "ISO-LENOVO-DIAGNOSTICS-5.2.1.md",
+      "target_dtb_found": false,
+      "len88ae_profiles_found": false,
+      "hardware_boot_tested": false
+    }
+  ],
+  "windows_collector": {
+    "script": "windows/Collect-Yoga14Q8Y11.ps1",
+    "script_sha256": "7a251eac864827456193002bea9b293e60475f8f5f71323ef15bd51c2b38e888",
+    "launcher": "windows/Coletar-Yoga.cmd",
+    "guide": "windows/LEIA-ME.md",
+    "tests": "windows/Test-Collector.ps1",
+    "test_runtime": "PowerShell 7.7.0 linux-x64; collector suite plus reproduced EDID access-denial regression passed",
+    "windows_powershell_51_arm64_tested": true,
+    "hardware_collected": true,
+    "package": "~/Downloads/Coleta-Yoga-14Q8Y11-v2.zip",
+    "package_sha256": "c6e434fc6025875c1dd202dfb9c99cc85429fa31f8ee1177ffb35827aeaf3397",
+    "acpi_limitation": "Windows API only reads first table for duplicate signatures; registry complement is not proof of all SSDTs",
+    "excluded_acpi_signatures": [
+      "MSDM",
+      "SLIC"
+    ],
+    "previous_package": {
+      "path": "~/Downloads/Coleta-Yoga-14Q8Y11.zip",
+      "sha256": "9e142c5403b9ef54e214143a21ca004a303415a35ab20d545055a657d2ebbf17",
+      "note": "Initial USB package; user-observed EDID protected Properties traversal; kept unchanged for provenance."
+    },
+    "revision": 2,
+    "first_windows_run": {
+      "observed_at": "2026-11-13",
+      "evidence": "user screenshot; edid-registry PermissionDenied in protected Properties children; continued to color copy",
+      "final_reports_received": true,
+      "result": "25 ok steps, one incomplete edid-registry step, two optional directories absent; zero hash errors; 188/188 driver packages exported; two EDIDs and all seven requested color profiles preserved."
+    },
+    "fix": "EDID traversal only enumerates monitor/instance and reads Device Parameters; no protected Properties recursion.",
+    "windows_revision_2_tested": false
+  },
+  "session_handoff": {
+    "updated_at": "2026-11-13T15:15:45-03:00",
+    "memory_pointer": "<workspace>/MEMORIA-LENOVO-YOGA-14Q8Y11.md",
+    "handoff": "RETOMADA.md",
+    "last_user_report": "Requested consolidation of all documentation and pause until Monday; R3 has not been physically tested.",
+    "console_pause_cause": "QuickEdit/selection suspected, not confirmed; script has no prompt between driver export and hashing.",
+    "final_reports_received": true,
+    "usb_contains_collector_revision": null,
+    "collector_revision_2_on_usb": false,
+    "next_action": "When user returns, test first R3-CONS entry, time BOOT-to-output and film last messages. Do not reflash R2 or start work automatically.",
+    "status": "paused_by_user",
+    "resume_date": "2026-11-16",
+    "automatic_resume_scheduled": false,
+    "usb_current_contents": "R2 ISO payload plus R3-CONS ESP menu; original Windows collection preserved on PC."
+  },
+  "windows_acquisition": {
+    "collection": "Yoga-14Q8Y11-20261113-090057-d44470f5",
+    "local_directory": "<workspace>/fedora-vivobook-x1407q/.worktrees/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11/local/windows/2026-11-13/Yoga-14Q8Y11-20261113-090057-d44470f5",
+    "report": "COLETA-WINDOWS-2026-11-13.md",
+    "files": 6433,
+    "bytes": 6783459253,
+    "windows_hashes_verified": 6430,
+    "source_hash_mismatches": 0,
+    "local_copy_hash_mismatches": 0,
+    "usb_root_files_copied": 9,
+    "acpi_table_files": 22,
+    "acpi_distinct_hashes": 20,
+    "all_ssdts_confirmed": false,
+    "edids": 2,
+    "edid_conformity_warnings": true,
+    "requested_icc_profiles_preserved": 7,
+    "driver_packages_exported": 188,
+    "source_usb_access": "read-only",
+    "source_was_modified": false,
+    "unlisted_driver_preserved": "drivers/System32-drivers/Msft_User_WpdFs_01_11_00.Wdf"
+  },
+  "experimental_iso": {
+    "status": "three-physical-kernel-handoffs-failed",
+    "report": "iso/RESULTADO.md",
+    "base_sha256": "ad73a977709d417f5b7dda4147fc071396b9d8d2bdcca2df615aa3aab7673710",
+    "fedora_checksum_signature_valid": true,
+    "kernel_commit": "6a876df4686788cd39128b62d7fcbff62f39278f",
+    "kernel_version": "7.4.0-rc1-yoga-kalambo+",
+    "board_dtb_included": false,
+    "usb_diagnostic_dtb_included": true,
+    "boot_method": "ACPI entries plus a minimal Kalambo DTB entry on the USB ESP; optional live root preloaded into RAM by UEFI/GRUB",
+    "noctalia_release_sha256": "a4ba61392de6024905513d6b070cf40839809f61953468bda7eb8272f7a7aa16",
+    "noctalia_github_asset_digest_matches": true,
+    "physical_boot_tested": true,
+    "physical_boot_result": "UEFI and GRUB reached three times; ACPI without earlycon, ACPI with EFI earlycon, and a minimal six-CPU Kalambo DTB all produced the same black screen with fixed cursor, then firmware fell back to Windows before the live system",
+    "installed_icc_count": 7,
+    "icc_applied": false,
+    "path": "<workspace>/isos/Fedora-45-Yoga-14Q8Y11-Experimental-20261113.iso",
+    "sha256": "9efffc4de3e904e5a1cdca91148786a067bcd0da44f3430c9c734512bddc201c",
+    "bytes": 8253472768,
+    "media_md5_verified": true,
+    "public_copy_sha256_verified": true,
+    "vm_boot_tested": true,
+    "vm_payload_selftest": "YOGA-SELFTEST-PASS",
+    "vm_cpus": 6,
+    "vm_ram_mib": 12288,
+    "usb_write": {
+      "date": "2026-11-13",
+      "serial": "<serial-do-pendrive>",
+      "bytes": 8253472768,
+      "sha256": "9efffc4de3e904e5a1cdca91148786a067bcd0da44f3430c9c734512bddc201c",
+      "direct_readback_verified": true,
+      "esp_override": {
+        "grub": {
+          "path": "EFI/BOOT/grub.cfg",
+          "sha256": "0107c9da0146705d9c6e686736e27b03af445eb83c7beb323d2c20ee0caa0d53"
+        },
+        "dtb": {
+          "path": "EFI/BOOT/kalambo-lenovo-yoga-slim7x-diag.dtb",
+          "sha256": "1312ce6f353e842e1b770c265c4db1fff245f478b3c0319b67c69168478e1dd2",
+          "bytes": 139393,
+          "cpu_nodes": 6,
+          "board_regulators_or_gpio_hogs_enabled": false
+        },
+        "readback_after_read_only_remount": true,
+        "ejected_after_update": true,
+        "purpose": "minimal explicit Kalambo DTB for the third physical boot"
+      },
+      "ejected": true,
+      "record": "local/usb-iso-write-2026-11-13.json"
+    },
+    "historical": true,
+    "status_scope": "Original ISO and first three physical attempts; not the current USB state."
+  },
+  "diagnostic_r2": {
+    "date": "2026-11-13T14:21:36.565388-03:00",
+    "path": "<workspace>/isos/Fedora-45-Yoga-14Q8Y11-Diag-R2-20261113.iso",
+    "sha256": "04397fcf04d18c9985c12e8ba401115aa54d4663f62f5261617ecec45d9581d2",
+    "bytes": 8253669376,
+    "kernel_commit": "6a876df4686788cd39128b62d7fcbff62f39278f",
+    "board_dtb_complete": false,
+    "minimal_kalambo_dtb_in_iso_and_esp": true,
+    "grub_syntax_pass": true,
+    "mock_sequence_and_failure_tests_pass": true,
+    "qemu_grub_acpi_stages": [
+      "SEARCH=0",
+      "LINUX=0",
+      "INITRD=0",
+      "BOOT marker"
+    ],
+    "qemu_pauses_verified": true,
+    "physical_boot_tested": true,
+    "usb_verified": true,
+    "secure_boot": {
+      "enabled": false,
+      "evidence": "User confirms disabled since first physical test, 2026-11-13"
+    },
+    "qemu_grub_dtb_stages": [
+      "SEARCH=0",
+      "LINUX=0",
+      "DEVICETREE=0"
+    ],
+    "qemu_dtb_kernel_executed": false,
+    "usb_ejected": true,
+    "usb_record": "local/usb-iso-write-diag-r2-2026-11-13.json",
+    "grub_sha256": "bdc2410a54f25c82d5e66a0e1ee45cace8f407652cfd46ba5b02fc3aaa44469c",
+    "physical_boot_result": "Partial video transcription shows Linux/EFI early console, ACPI/PSCI/GIC and six CPUs at EL2. User reports about five minutes before output, about two seconds of normal-speed text then reboot. No legible panic/Oops; stable live not reached.",
+    "qemu_linux_executed": true,
+    "qemu_systemd_started": true,
+    "qemu_full_live_selftest_repeated": false,
+    "usb_log_persistence": false
+  },
+  "diagnostic_r3_cons": {
+    "status": "ready-paused-awaiting-user-physical-test",
+    "source_iso": "diagnostic_r2",
+    "iso_rebuilt": false,
+    "kernel_changed": false,
+    "removed_kernel_args": [
+      "initcall_debug",
+      "ignore_loglevel"
+    ],
+    "grub_sha256": "5be4480e84a0db817e5e1a7a05bfa0022802478c066eb02becad16db5aedb418",
+    "physical_tested": false,
+    "transcription_sha256": "3d7c57b2e86d0d281cc5fcccb3124df0d5442b36cde0ab1c82061eccfdc53dd9",
+    "transcription_complete": false,
+    "user_modified_boot_args": false,
+    "usb_ejected": true,
+    "usb_record": "local/usb-esp-r3-cons.json",
+    "qemu_tested": false
+  },
+  "current_usb": {
+    "revision": "R3-CONS",
+    "serial": "<serial-do-pendrive>",
+    "iso_base": "diagnostic_r2",
+    "whole_device_hash_matches_base_iso": false,
+    "reason": "ESP menu changed after full R2 write verification",
+    "grub_sha256": "5be4480e84a0db817e5e1a7a05bfa0022802478c066eb02becad16db5aedb418",
+    "readonly_remount_verified": true,
+    "ejected": true
+  }
+}

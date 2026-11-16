@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * gwnd3 = gwnd1 com UMA mudanca: 1 lane (data-lanes = <0>).
+ * NUNCA TESTADO. Variante de diagnostico para o slot de uma tentativa.
+ *
+ * Por que: o painel anuncia 2 lanes e o PHY, em 2 lanes, desliga o bloco tx1
+ * (phy-qcom-edp.c:1178-1183). Com 1 lane o treino usa so a lane fisica 0
+ * (dp_panel.c:286-288 limita pelo data-lanes).
+ *   CR fecha em 1 lane   -> defeito na lane 1 ou no modo 2 lanes do PHY v8
+ *   falha igual          -> saida TX parada ou PLL fora de frequencia
+ * 1 lane x 5,4 G = 4,32 Gbps >= 3,70 Gbps (154,26 MHz x 24 bpp): cabe.
+ * Nenhum GPIO, regulador ou no de pcie/pmic-glink muda.
+ */
+
+#include "kalambo-lenovo-yoga-slim7x-gwnd1.dts"
+
+&mdss_dp3_out {
+	data-lanes = <0>;
+};

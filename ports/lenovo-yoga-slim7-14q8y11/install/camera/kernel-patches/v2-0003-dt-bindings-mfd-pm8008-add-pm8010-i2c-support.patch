@@ -1,0 +1,65 @@
+From: Nihal Kumar Gupta <nihal.gupta@oss.qualcomm.com>
+Date: Mon, 07 Sep 2026 13:43:39 +0530
+Subject: [PATCH v2 3/6] dt-bindings: mfd: pm8008: Add PM8010 I2C support
+Message-Id: <20260907-glymur_camss-v2-3-75f7982dc983@oss.qualcomm.com>
+
+From: Dhruvin Rajpura <drajpura@qti.qualcomm.com>
+
+Some designs integrate the PM8008/PM8010 with the interrupt pin left
+unconnected, deliberately. That compromises some functionality, but
+the core function of programming the voltage regulators remains
+available, so make interrupts (and the interrupt-controller
+properties that depend on it) optional.
+
+PM8010 can communicate over either SPMI or I2C, depending on whether
+GPIO1 is pulled high or low. Since qcom,pm8010 is already used by the
+SPMI PMIC bindings, whose properties are tailored to SPMI, add a
+separate qcom,pm8010-i2c compatible for the I2C case.
+
+Signed-off-by: Dhruvin Rajpura <drajpura@qti.qualcomm.com>
+Signed-off-by: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>
+Signed-off-by: Nihal Kumar Gupta <nihal.gupta@oss.qualcomm.com>
+---
+ Documentation/devicetree/bindings/mfd/qcom,pm8008.yaml | 14 ++++++--------
+ 1 file changed, 6 insertions(+), 8 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/mfd/qcom,pm8008.yaml b/Documentation/devicetree/bindings/mfd/qcom,pm8008.yaml
+index 0c6e1870db1dc571af668c37655017cefe82e139..2f439ff9805d253bdd815bc85ac206ed1be964b6 100644
+--- a/Documentation/devicetree/bindings/mfd/qcom,pm8008.yaml
++++ b/Documentation/devicetree/bindings/mfd/qcom,pm8008.yaml
+@@ -16,7 +16,9 @@ description: |
+ 
+ properties:
+   compatible:
+-    const: qcom,pm8008
++    enum:
++      - qcom,pm8008
++      - qcom,pm8010-i2c
+ 
+   reg:
+     maxItems: 1
+@@ -88,18 +90,14 @@ properties:
+ required:
+   - compatible
+   - reg
+-  - interrupts
+   - vdd-l1-l2-supply
+   - vdd-l3-l4-supply
+   - vdd-l5-supply
+   - vdd-l6-supply
+   - vdd-l7-supply
+-  - gpio-controller
+-  - "#gpio-cells"
+-  - gpio-ranges
+-  - interrupt-controller
+-  - "#interrupt-cells"
+-  - "#thermal-sensor-cells"
++
++dependencies:
++  interrupt-controller: [ interrupts, "#interrupt-cells" ]
+ 
+ additionalProperties: false
+ 
+
+-- 
+2.34.1

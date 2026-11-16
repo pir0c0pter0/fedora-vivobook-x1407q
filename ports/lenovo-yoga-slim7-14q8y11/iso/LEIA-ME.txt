@@ -1,0 +1,34 @@
+Fedora 45 aarch64 / Yoga Slim 7 14Q8Y11 / X2P-42-100
+Estado em 16/11/2026. Fonte de verdade: CONTEXTO-LIMPO-YOGA-14Q8Y11.md.
+
+PENDRIVE: ISO R2 na primeira particao (nao regravada) + ESP com menu R8,
+DTBs e arquivos extras. Serial <serial-do-pendrive>. Textos dentro da ISO sao
+historicos; este arquivo descreve o uso atual.
+
+MENU R8 (sem inicio automatico):
+G3  GNOME + SSH, sem rede. Caminho que funciona. Carga longa.
+G4  GNOME + SSH + USB nas 2 portas da esquerda. USB nunca testado.
+G1  Shell rapido (~1 min) com teclado, touchpad e video.
+W5  Shell rapido para o teste manual do Wi-Fi (PCIe).
+U2  Shell rapido, USB nas 2 portas.   U3  variante de reserva.
+L1  ACPI, live em texto sem SMMUv2. Referencia; sem teclado.
+Ultima: Fedora com kernel original (recuperacao).
+
+ESPERA: depois de "BOOT - entregando controle ao kernel agora" a tela fica
+parada enquanto o pendrive e lido: ~1 min nas entradas de shell, varios
+minutos nas de live (3,8 GB). Nas entradas G3/G4 nao ha log do kernel na
+tela; ela fica na imagem do GRUB ate o terminal aparecer.
+
+LIVE: login automatico de liveuser no GNOME; root e liveuser sem senha.
+Niri nao roda sem GPU. Sem controle de brilho. Tudo em RAM: nada persiste.
+Desligar: menu do GNOME, "sudo poweroff", ou toque curto no botao power.
+SHELL RAPIDO: "poweroff -f" para desligar.
+
+Se a tela ficar preta ou congelada: segurar o botao power e usar G3 ou G1.
+
+Nao instalar nem alterar NVMe/Windows antes de validar armazenamento, energia
+e termica. Esta midia nao e um instalador. Nao executar ferramentas ou patches
+especificos do ASUS.
+
+Kernel Qualcomm for-next 6a876df4686788cd39128b62d7fcbff62f39278f,
+7.4.0-rc1-yoga-kalambo+. DTS do porte em ports/lenovo-yoga-slim7-14q8y11/dts.

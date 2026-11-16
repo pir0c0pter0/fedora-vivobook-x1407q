@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * gwnd4 = gwnd1 com UMA mudanca: VREG_EDP_3P3 sem regulator-boot-on.
+ * NUNCA TESTADO. Variante de diagnostico para o slot de uma tentativa.
+ *
+ * Por que: no gwnd1 o painel nunca passou por ciclo de energia entre o link
+ * do firmware e o primeiro treino do msm (bind 94,655 s, falha 94,787 s,
+ * autosuspend de 2 s em panel-samsung-atna33xc20.c:301). Sem boot-on o
+ * regulator-fixed pede o GPIO 70 em nivel baixo no probe (fixed.c:302) e o
+ * resume do painel faz power-on a frio com espera de HPD (:90-121).
+ *
+ * EFEITO: A TELA APAGA NO BOOT, assim que o regulator-fixed faz probe, e so
+ * volta se o treino fechar. Controle somente por SSH. O GPIO 18 (EL_ON3)
+ * fica alto com VCC cortado ate o probe do painel, fora da sequencia do
+ * datasheet: usar so no slot de uma tentativa, nunca em current/good.
+ * Usa apenas o GPIO 70 ja aprovado; nenhuma tensao muda.
+ */
+
+#include "kalambo-lenovo-yoga-slim7x-gwnd1.dts"
+
+&vreg_edp_3p3 {
+	/delete-property/ regulator-boot-on;
+};

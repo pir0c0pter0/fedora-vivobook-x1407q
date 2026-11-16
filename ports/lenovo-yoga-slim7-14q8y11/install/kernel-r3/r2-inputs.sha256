@@ -1,0 +1,3 @@
+24e0262e9776b07c8864c6c694e2150d9ee1c405db005557b351940a78f34504  <workspace>/fedora-vivobook-x1407q/.worktrees/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11/install/kernel-r2/r2.config
+f724f1ba3399fe551b1faddb43146877e6267398ac90ac5ae47274349620e540  <workspace>/fedora-vivobook-x1407q/.worktrees/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11/install/kernel-r2/0001-qcom-pd-mapper-add-kalambo.patch
+f99cd9fe4f15fecbf30772a2571b69333a2c33e17374add713f4dc885698bd7e  <workspace>/fedora-vivobook-x1407q/.worktrees/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11/install/kernel-r2/0002-pci-pwrctrl-pwrseq-visible.patch

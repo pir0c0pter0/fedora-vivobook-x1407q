@@ -1,0 +1,9 @@
+da7b083482be8ef4d0795e1f845779bfa62b93b3b69c96e45a88997b4a31255b  KVER
+218d1cc587f93aecf8ff3bfc9c324936c0fbe8541c760a8e50a91fe1c5af1746  System.map-7.4.0-rc3-yoga-kalambo-r4+
+b016a3ff0e43268112583700814b27f3b17af431cdeefd4999d7c0b7f3280309  config-7.4.0-rc3-yoga-kalambo-r4+
+8077286413dc63bd58220c8fdf199c3b365f106e15724a57704a29fcda3cdf97  config-base-vs-r4.diffconfig
+8ed7fb79b57ad59bb09280d1ac8493eadc045244b1a188e6b777a1d8e64405ef  config-new-options.txt
+60b740fd18e4626c9f1981179973d2696982edc9cda49a332105005b2b84825a  config-r1-vs-r4.diffconfig
+0c3efda97f4404f01b6cf4b3561ef4d0989b4e7e3977bc595569f069287feb18  modules-7.4.0-rc3-yoga-kalambo-r4+.list
+f36db4a8a4db3df67e10c35f3f2e16c4a5be49ecd66074a34aeee899e339b7d0  modules-7.4.0-rc3-yoga-kalambo-r4+.tar
+eab0ae71abb34dafa153b4d949b4fc3fc9c046537e4f63c8adda26697995d1b5  vmlinuz-7.4.0-rc3-yoga-kalambo-r4+

@@ -1,0 +1,37 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * ATENCAO: USAR SOMENTE COM AUTORIZACAO EXPLICITA DO USUARIO.
+ *
+ * gw1b = gw1a + GPIO 94 do TLMM como enable do vreg_wcn_3p3, como na referencia
+ * (glymur-lenovo-yoga-slim7x.dts:234-248 e :800-805).
+ *
+ * O GPIO 94 como SAIDA nao tem confirmacao no DSDT desta maquina: so aparece
+ * no mapa de wake (acpi-registry-0000.dsl:78508); nenhum GpioIo, TLMMGPIO ou
+ * PMICGPIO usa 0x5E. A unica fonte e a variante Elite do mesmo chassi. Este
+ * DTB faz o kernel dirigir o pino em nivel ALTO no probe do regulador.
+ *
+ * Diferenca deliberada para a referencia: regulator-always-on (herdado do
+ * gw1a) e mantido, entao o kernel nunca leva o GPIO 94 a nivel baixo.
+ */
+
+#include "kalambo-lenovo-yoga-slim7x-gw1a.dts"
+
+&vreg_wcn_3p3 {
+	gpio = <&tlmm 94 GPIO_ACTIVE_HIGH>;
+	enable-active-high;
+
+	pinctrl-0 = <&wcn_sw_en>;
+	pinctrl-names = "default";
+
+	regulator-boot-on;
+};
+
+&tlmm {
+	/* REF:800-805 */
+	wcn_sw_en: wcn-sw-en-state {
+		pins = "gpio94";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};

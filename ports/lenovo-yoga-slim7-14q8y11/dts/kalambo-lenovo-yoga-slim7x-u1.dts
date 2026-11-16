@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * u1 = k1 + USB2 host fixo em usb_0 (ACPI URS0 @ 0x0A600000, _STA 0x0F,
+ * DSDT:90893-90918). Sem GPIO, sem regulador novo, sem no de PMIC novo,
+ * sem QMP/SuperSpeed, sem pmic-glink.
+ *
+ * Padrao host fixo HS: usb_2 do mahua-lenovo-thinkpad-t14s-gen7 (:985-994).
+ * Supplies ja herdados de glymur-cob.dtsi e iguais ao PEP do DSDT:
+ *   usb_0_hsphy vdd = vreg_l3f0 0,912 V, vdda12 = vreg_l4h0 1,2 V
+ *     (cob:262-265; DSDT:34491, 34519)
+ *   repetidor J vdd18 = vreg_l15b0 1,8 V, vdd3 = vreg_l7b0 3,072 V
+ *     (cob:227-230; DSDT:34477, 34505)
+ * VBUS nao e controlado aqui: depende do firmware de PD.
+ */
+
+#include "kalambo-lenovo-yoga-slim7x-k1.dts"
+
+/*
+ * Repetidor eUSB2 SMB2370 "J" (spmi_bus2 SID 9, smb2370.dtsi:7, ja okay no
+ * k1). Porta -> repetidor vem so da referencia do chassi
+ * (glymur-lenovo-yoga-slim7x.dts:930); o DSDT confirma apenas as tensoes.
+ */
+&usb_0_hsphy {
+	phys = <&smb2370_j_e2_eusb2_repeater>;
+
+	status = "okay";
+};
+
+&usb_0 {
+	dr_mode = "host";
+	maximum-speed = "high-speed";
+
+	/delete-property/ usb-role-switch;
+	phys = <&usb_0_hsphy>;
+	phy-names = "usb2-phy";
+
+	/*
+	 * Nao esta na referencia T14s; vem do binding (qcom,snps-dwc3.yaml:154,
+	 * "dwc3 operates without SSPHY") e de dwc3-qcom.c:681-684. Se o
+	 * controlador nao subir, o primeiro ajuste e remover (variante u3).
+	 */
+	qcom,select-utmi-as-pipe-clk;
+
+	status = "okay";
+};

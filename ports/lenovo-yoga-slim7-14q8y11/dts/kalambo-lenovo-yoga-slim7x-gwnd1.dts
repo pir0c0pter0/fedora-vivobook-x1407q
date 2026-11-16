@@ -1,0 +1,142 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * gwnd1 = gwn1 (em uso: GNOME + Wi-Fi + NVMe) + video real somente display:
+ * MDSS/DPU + controlador eDP (mdss_dp3) + PHY eDP + painel OLED. SEM GPU.
+ * Objetivo: /sys/class/backlight (brilho por DPCD via AUX) e KMS de verdade.
+ * NUNCA TESTADO. So faz efeito com dispcc_glymur e msm carregados a mao; com
+ * a blacklist atual o boot e igual ao gwn1 (os nos novos ficam sem driver).
+ *
+ * REF  = arch/arm64/boot/dts/qcom/glymur-lenovo-yoga-slim7x.dts (mesmo chassi,
+ *        variante Elite)
+ * T14S = arch/arm64/boot/dts/qcom/mahua-lenovo-thinkpad-t14s-gen7-lcd.dts
+ *        (mesmo SoC Mahua, mesmos pinos de eDP)
+ * DSDT = local/iso-build/acpi/acpi-registry-0000.dsl, recursos do PEP para
+ *        \_SB.GPU0 (DSDT:3123-3461)
+ * HW   = /sys/kernel/debug/gpio lido por SSH em 2026-11-16 (boot gwn1)
+ *
+ * GPIOs dirigidos como saida a mais em relacao ao gwn1:
+ *    70 enable do 3,3 V do painel  REF:182  T14S:133  DSDT:3342-3351 (0x46)
+ *                                  HW: "gpio70  : out high func0 16mA pull up"
+ *    18 EL_ON3 (emissao do OLED)   REF:537  T14S:582  DSDT:3450-3458 (0x12)
+ *                                  HW: "gpio18  : out high func0 16mA pull up"
+ * GPIO 119 e entrada (HPD, funcao edp0_hot = func1 em pinctrl-glymur.c:1570):
+ *                                  T14S:773-777  DSDT:3436-3444 (0x77)
+ *                                  HW: "gpio119 : in  high func1 2mA no pull"
+ *
+ * ATENCAO, por projeto do driver do painel (panel-samsung-atna33xc20.c):
+ * o probe poe o GPIO 18 em nivel baixo (:284) e o runtime-suspend desliga o
+ * GPIO 70 (:74); a tela apaga e so volta depois do ciclo de energia e do
+ * modeset. Isso so acontece quando o modulo msm e carregado.
+ *
+ * Painel: EDID bruto do painel = SDC 0x4208 "ATNA40CT03-0", 1920x1200@60,
+ * 154,26 MHz (local/windows/2026-11-13/.../edid/edid-registry-0001.dat);
+ * LEN88AE e o EDID de override da Lenovo com os mesmos tempos. Nao ha
+ * "samsung,atna40ct03" no binding; o driver so casa "samsung,atna33xc20"
+ * (:336) e le o EDID por AUX (:233), entao so o compativel generico e usado.
+ *
+ * Trilhos: mdss_dp3_phy usa l2f1/l4f1 (glymur-cob.dtsi:199-202) e o clkref
+ * TCSR_EDP_CLKREF_EN usa l1f1/l4f1/l2f1 (tcsrcc-glymur.c:83-89, :193-196,
+ * mahua.dtsi:416-420, glymur-cob.dtsi:244-258). Os mesmos trilhos servem o
+ * pcie4 (Wi-Fi) e ja tem voto permanente HOLD_L1F1/L2F1/L4F1 no gw1a, entao
+ * o liga/desliga do PHY eDP nao os derruba. Nada aqui usa l2f0/l4h0 (pcie5).
+ * Nenhum regulador existente e alterado.
+ */
+
+#include "kalambo-lenovo-yoga-slim7x-gwn1.dts"
+
+/ {
+	/*
+	 * REF:176-190, identico. Sem regulator-always-on de proposito: o painel
+	 * exige ciclo de energia depois que EL_ON3 cai
+	 * (panel-samsung-atna33xc20.c:168-176). regulator-boot-on faz o GPIO
+	 * ser pedido ja em nivel alto (fixed.c:299), igual ao que o firmware
+	 * deixou. Enquanto o driver do painel nao existir, quem impede o
+	 * desligamento aos 30 s e o regulator_ignore_unused da cmdline
+	 * (regulator/core.c:6872): NAO remover esse parametro com este DTB.
+	 */
+	vreg_edp_3p3: regulator-edp-3p3 {
+		compatible = "regulator-fixed";
+
+		regulator-name = "VREG_EDP_3P3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+
+		gpio = <&tlmm 70 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+
+		pinctrl-0 = <&edp_reg_en>;
+		pinctrl-names = "default";
+
+		regulator-boot-on;
+	};
+};
+
+/* REF:501-503 */
+&mdss {
+	status = "okay";
+};
+
+/* REF:529-550; pinctrl do HPD como no T14S:574-575 */
+&mdss_dp3 {
+	/delete-property/ #sound-dai-cells;
+
+	pinctrl-0 = <&edp0_hpd_default>;
+	pinctrl-names = "default";
+
+	status = "okay";
+
+	aux-bus {
+		panel {
+			compatible = "samsung,atna33xc20";
+			enable-gpios = <&tlmm 18 GPIO_ACTIVE_HIGH>;
+			power-supply = <&vreg_edp_3p3>;
+
+			pinctrl-0 = <&edp_bl_en>;
+			pinctrl-names = "default";
+
+			port {
+				edp_panel_in: endpoint {
+					remote-endpoint = <&mdss_dp3_out>;
+				};
+			};
+		};
+	};
+};
+
+/* REF:552-557 */
+&mdss_dp3_out {
+	data-lanes = <0 1 2 3>;
+	link-frequencies = /bits/ 64 <1620000000 2700000000 5400000000 8100000000>;
+
+	remote-endpoint = <&edp_panel_in>;
+};
+
+/* Supplies herdados: vdda-phy = l2f1, vdda-pll = l4f1 (glymur-cob.dtsi:199-202). REF:559-561 */
+&mdss_dp3_phy {
+	status = "okay";
+};
+
+&tlmm {
+	/* REF:753-758 */
+	edp_bl_en: edp-bl-en-state {
+		pins = "gpio18";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-disable;
+	};
+
+	/* REF:787-792 */
+	edp_reg_en: edp-reg-en-state {
+		pins = "gpio70";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-disable;
+	};
+
+	/* T14S:773-777; repete o que o firmware deixou */
+	edp0_hpd_default: edp0-hpd-default-state {
+		pins = "gpio119";
+		function = "edp0_hot";
+		bias-disable;
+	};
+};

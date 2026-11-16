@@ -1,0 +1,84 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Frente TERMICA: trip passivo + cooling-map (cpufreq) nas zonas de CPU.
+ * Incluir depois do DTS base (gwnx1). So acrescenta: nenhuma zona desabilitada,
+ * nenhum trip existente alterado (o critical de 115 C continua igual).
+ *
+ * Por que: lido no notebook, as zonas cpu-* so tem "critical:115000" e cdev=0,
+ * embora exista o cooling device "cpufreq-cpu0" (max_state 17, 355 MHz-4,03
+ * GHz). glymur.dtsi so tem cooling-maps nas zonas de GPU. Sem isto o kernel
+ * nao reduz frequencia por temperatura; so desliga aos 115 C.
+ *
+ * Valor: 105000 mC = _PSV das zonas "CPU Cluster 0/1 Thermal Zone" do DSDT
+ * desta maquina (TZ0/TZ1, TPSV 0x0EC4 = 378,0 K = 104,85 C;
+ * local/iso-build/acpi/acpi-registry-0000.dsl:94910 e :95080). O critico do
+ * DSDT (TZ99 TCRT 0x0F28 = 114,85 C) ja coincide com o do glymur.dtsi.
+ * polling-delay-passive 100 ms: convencao das zonas de GPU do glymur.dtsi
+ * (:9602) e igual ao _TSP do TZ1 (TTSP = 1 = 0,1 s). hysteresis 1000:
+ * convencao do glymur.dtsi (o DSDT nao define).
+ *
+ * Zonas: cpu-0-* (tsens1) e cpu-1-* (tsens2), dois sensores por nucleo. O
+ * Kalambo so tem seis nucleos (cpu6-cpu11) e nao esta provado qual grupo de
+ * sensores fica sobre eles (em repouso cpu-1-* le ~2 C acima), por isso os
+ * dois grupos recebem o trip. Ha uma unica policy de cpufreq; o cooling device
+ * fica registrado no no do primeiro nucleo (cpu6); os demais entram por
+ * convencao e nao casam com nada.
+ *
+ * NEUTRALIDADE DE BOOT: sem modulo novo. O tsens passa a programar o limiar
+ * de 105 C e, com scmi-cpufreq carregado, as zonas ganham cdev0. Abaixo de
+ * 105 C nada muda.
+ */
+
+#include <dt-bindings/thermal/thermal.h>
+
+#define YOGA_CPU_PASSIVE(zone, lbl)					\
+	zone {								\
+		polling-delay-passive = <100>;				\
+		trips {							\
+			lbl: trip-passive {				\
+				temperature = <105000>;			\
+				hysteresis = <1000>;			\
+				type = "passive";			\
+			};						\
+		};							\
+		cooling-maps {						\
+			map0 {						\
+				trip = <&lbl>;				\
+				cooling-device = <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,	\
+						 <&cpu7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,	\
+						 <&cpu8 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,	\
+						 <&cpu9 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,	\
+						 <&cpu10 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,	\
+						 <&cpu11 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;	\
+			};						\
+		};							\
+	}
+
+&thermal_zones {
+	YOGA_CPU_PASSIVE(cpu-0-0-0-thermal, yoga_psv_0_0_0);
+	YOGA_CPU_PASSIVE(cpu-0-0-1-thermal, yoga_psv_0_0_1);
+	YOGA_CPU_PASSIVE(cpu-0-1-0-thermal, yoga_psv_0_1_0);
+	YOGA_CPU_PASSIVE(cpu-0-1-1-thermal, yoga_psv_0_1_1);
+	YOGA_CPU_PASSIVE(cpu-0-2-0-thermal, yoga_psv_0_2_0);
+	YOGA_CPU_PASSIVE(cpu-0-2-1-thermal, yoga_psv_0_2_1);
+	YOGA_CPU_PASSIVE(cpu-0-3-0-thermal, yoga_psv_0_3_0);
+	YOGA_CPU_PASSIVE(cpu-0-3-1-thermal, yoga_psv_0_3_1);
+	YOGA_CPU_PASSIVE(cpu-0-4-0-thermal, yoga_psv_0_4_0);
+	YOGA_CPU_PASSIVE(cpu-0-4-1-thermal, yoga_psv_0_4_1);
+	YOGA_CPU_PASSIVE(cpu-0-5-0-thermal, yoga_psv_0_5_0);
+	YOGA_CPU_PASSIVE(cpu-0-5-1-thermal, yoga_psv_0_5_1);
+	YOGA_CPU_PASSIVE(cpu-1-0-0-thermal, yoga_psv_1_0_0);
+	YOGA_CPU_PASSIVE(cpu-1-0-1-thermal, yoga_psv_1_0_1);
+	YOGA_CPU_PASSIVE(cpu-1-1-0-thermal, yoga_psv_1_1_0);
+	YOGA_CPU_PASSIVE(cpu-1-1-1-thermal, yoga_psv_1_1_1);
+	YOGA_CPU_PASSIVE(cpu-1-2-0-thermal, yoga_psv_1_2_0);
+	YOGA_CPU_PASSIVE(cpu-1-2-1-thermal, yoga_psv_1_2_1);
+	YOGA_CPU_PASSIVE(cpu-1-3-0-thermal, yoga_psv_1_3_0);
+	YOGA_CPU_PASSIVE(cpu-1-3-1-thermal, yoga_psv_1_3_1);
+	YOGA_CPU_PASSIVE(cpu-1-4-0-thermal, yoga_psv_1_4_0);
+	YOGA_CPU_PASSIVE(cpu-1-4-1-thermal, yoga_psv_1_4_1);
+	YOGA_CPU_PASSIVE(cpu-1-5-0-thermal, yoga_psv_1_5_0);
+	YOGA_CPU_PASSIVE(cpu-1-5-1-thermal, yoga_psv_1_5_1);
+};
+
+#undef YOGA_CPU_PASSIVE

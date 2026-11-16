@@ -1,0 +1,10 @@
+--- a/drivers/soc/qcom/qcom_pd_mapper.c
++++ b/drivers/soc/qcom/qcom_pd_mapper.c
+@@ -632,6 +632,7 @@
+ 	{ .compatible = "qcom,glymur", .data = glymur_domains, },
+ 	{ .compatible = "qcom,hawi", .data = kaanapali_domains, },
+ 	{ .compatible = "qcom,kaanapali", .data = kaanapali_domains, },
++	{ .compatible = "qcom,kalambo", .data = glymur_domains, },
+ 	{ .compatible = "qcom,mahua", .data = glymur_domains, },
+ 	{ .compatible = "qcom,milos", .data = sm8550_domains, },
+ 	{ .compatible = "qcom,msm8226", .data = NULL, },

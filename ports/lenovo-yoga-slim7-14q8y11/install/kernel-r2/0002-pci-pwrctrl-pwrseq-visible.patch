@@ -1,0 +1,11 @@
+--- a/drivers/pci/pwrctrl/Kconfig
++++ b/drivers/pci/pwrctrl/Kconfig
+@@ -7,7 +7,7 @@
+ 	tristate
+ 
+ config PCI_PWRCTRL_PWRSEQ
+-	tristate
++	tristate "PCI Power Control driver using the Power Sequencing subsystem"
+ 	select POWER_SEQUENCING
+ 	select PCI_PWRCTRL
+ 

@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * DTB de teste da frente CAMERAS: gwnx1 + yoga-camera.dtsi.
+ * Com -DYOGA_CAMERA_PRIVACY_LED entra tambem o LED de privacidade.
+ */
+#include "kalambo-lenovo-yoga-slim7x-gwnx1.dts"
+#include "yoga-camera.dtsi"

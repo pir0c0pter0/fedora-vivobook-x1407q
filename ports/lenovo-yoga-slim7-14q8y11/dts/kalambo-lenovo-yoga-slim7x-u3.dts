@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * u3 = u2 sem qcom,select-utmi-as-pipe-clk, isto e, exatamente o padrao do
+ * usb_2 do mahua-lenovo-thinkpad-t14s-gen7 (:985-994). Usar so se u1/u2
+ * falharem no probe do dwc3.
+ */
+
+#include "kalambo-lenovo-yoga-slim7x-u2.dts"
+
+&usb_0 {
+	/delete-property/ qcom,select-utmi-as-pipe-clk;
+};
+
+&usb_1 {
+	/delete-property/ qcom,select-utmi-as-pipe-clk;
+};

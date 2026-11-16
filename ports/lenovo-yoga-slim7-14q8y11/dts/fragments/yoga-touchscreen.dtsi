@@ -1,0 +1,78 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Frente TOUCHSCREEN: Goodix GXPT7936, HID-over-I2C, 0x14.
+ * Incluir depois do DTS base (gwnb1). So acrescenta; nenhum GPIO de saida,
+ * nenhum regulador, nenhum clock novo.
+ *
+ * REF  = arch/arm64/boot/dts/qcom/glymur-lenovo-yoga-slim7x.dts
+ * DSDT = local/iso-build/acpi/acpi-registry-0000.dsl
+ *
+ * Barramento: ACPI \_SB.I2C9 = "QUP_1_SE_0" @ 0x00A80000, SPI 0x181-32=353
+ * (DSDT:71980-72003) = glymur.dtsi:1393 i2c8 (SDA/SCL gpio32/33, :6163-6169).
+ * REF:465-485 usa o mesmo &i2c8. Lido no notebook: "gpio32 : in high func1
+ * 2mA pull up", "gpio33 : in high func1 2mA pull up" (firmware ja deixa os
+ * pinos em qup1_se0).
+ *
+ * ATENCAO (neutralidade de boot): i2c_qcom_geni, i2c_hid_of e hid_multitouch
+ * ja sobem sozinhos por causa do teclado/touchpad e nao podem ser bloqueados.
+ * Com este fragmento o i2c8 e o touchscreen dao probe no boot, sem carga
+ * manual. O kernel atual nao tem modulo separado que sirva de trava
+ * (CONFIG_I2C_HID_OF_GOODIX nao esta compilado).
+ */
+
+&i2c8 {
+	/* DSDT:94756 0x00061A80 = 400 kHz; REF:466 */
+	clock-frequency = <400000>;
+
+	status = "okay";
+
+	/*
+	 * ACPI TSC1 GXPT7936 / PNP0C50 (DSDT:94724-94848).
+	 * - reg 0x14: DSDT:94756; REF:472.
+	 * - IRQ: GpioInt Level/ActiveLow/PullUp, pino 0x33 = TLMM 51 direto
+	 *   (DSDT:94760-94766; nao e pino virtual: o PEP usa o mesmo 0x33 como
+	 *   TLMMGPIO de entrada, DSDT:71621); REF:476 = <&tlmm 51 LEVEL_LOW>.
+	 *   Lido: "gpio51 : in high func0 6mA pull up" (linha em repouso, alta).
+	 * - hid-descr-addr: _DSM 3cdff6f7-..., funcao 1 retorna One
+	 *   (DSDT:94808-94812); REF:475.
+	 * - 200 ms: DELAY 0xC8 depois de soltar o reset no D0 (DSDT:71608-71614);
+	 *   REF:478.
+	 * - Presenca: _STA exige IN73 bit0 == 0 (DSDT:94737-94752); lido
+	 *   "gpio73 : in low func0 2mA pull down" -> painel de toque presente.
+	 *
+	 * Sem reset-gpios, de proposito (igual a REF): o reset e TLMM 48 ativo em
+	 * baixo (DSDT:71571-71600 baixa, 5 ms, sobe; REF:767-772 "reset-n-pins"),
+	 * e o firmware ja o entrega solto: lido "gpio48 : out high func0 6mA pull
+	 * up". O i2c-hid-of generico nao tem atraso pos-reset vindo do DT, entao
+	 * dirigir o pino so atrapalharia. O gpio48 nao e tocado (nem pinctrl).
+	 *
+	 * Sem vdd-supply/vddl-supply, de proposito (como teclado/touchpad no k1):
+	 * com reguladores dummy nenhum caminho de erro desliga VREG_MISC_3P3 ou
+	 * L15B, que a REF:479-480 mostra serem compartilhados com o teclado.
+	 */
+	touchscreen@14 {
+		compatible = "hid-over-i2c";
+		reg = <0x14>;
+
+		hid-descr-addr = <0x1>;
+		interrupts-extended = <&tlmm 51 IRQ_TYPE_LEVEL_LOW>;
+
+		post-power-on-delay-ms = <200>;
+
+		pinctrl-0 = <&ts0_default>;
+		pinctrl-names = "default";
+	};
+};
+
+&tlmm {
+	/*
+	 * Entrada apenas. Divergencia: REF:761-765 usa bias-disable; o DSDT
+	 * declara PullUp (DSDT:94760; TLMMGPIO pull=3 em DSDT:71621-71626) e o
+	 * estado lido ja e "pull up", entao vale o DSDT (mesmo criterio do k1).
+	 */
+	ts0_default: ts0-default-state {
+		pins = "gpio51";
+		function = "gpio";
+		bias-pull-up;
+	};
+};

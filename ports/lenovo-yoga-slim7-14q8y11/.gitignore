@@ -1,0 +1,14 @@
+/local/
+# artefatos de build e bancos de ferramentas
+*.ko
+*.dtb
+*.o
+*.mod
+*.mod.c
+.*.cmd
+Module.symvers
+modules.order
+.swarm/
+.claude-flow/
+ruvector.db
+agentdb.rvf*

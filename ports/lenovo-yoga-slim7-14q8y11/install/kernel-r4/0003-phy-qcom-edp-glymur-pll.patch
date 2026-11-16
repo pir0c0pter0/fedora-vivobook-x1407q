@@ -1,0 +1,136 @@
+diff --git a/drivers/phy/qualcomm/phy-qcom-edp.c b/drivers/phy/qualcomm/phy-qcom-edp.c
+index 5e773843d..5ffdab82a 100644
+--- a/drivers/phy/qualcomm/phy-qcom-edp.c
++++ b/drivers/phy/qualcomm/phy-qcom-edp.c
+@@ -916,13 +916,17 @@ static int qcom_edp_com_configure_ssc_v8(const struct qcom_edp *edp)
+ 
+ 	switch (dp_opts->link_rate) {
+ 	case 1620:
+-	case 2700:
+-	case 8100:
+-		step1 = 0x5b;
++		step1 = 0x83;
+ 		step2 = 0x02;
+ 		break;
+ 
++	case 2700:
+ 	case 5400:
++		step1 = 0x18;
++		step2 = 0x02;
++		break;
++
++	case 8100:
+ 		step1 = 0x5b;
+ 		step2 = 0x02;
+ 		break;
+@@ -952,32 +956,53 @@ static int qcom_edp_com_configure_pll_v8(const struct qcom_edp *edp)
+ 	u32 lock_cmp2_mode0;
+ 	u32 code1_mode0;
+ 	u32 code2_mode0;
++	u32 vco_tune1_mode0;
++	u32 vco_tune2_mode0;
+ 	u32 hsclk_sel;
+ 
+ 	switch (dp_opts->link_rate) {
+ 	case 1620:
++		/* VCO 12,96 GHz / 8 (como qmp_v8_dp_serdes_tbl_rbr) */
+ 		hsclk_sel = 0x5;
+-		dec_start_mode0 = 0x34;
+-		div_frac_start2_mode0 = 0xc0;
+-		div_frac_start3_mode0 = 0x0b;
++		dec_start_mode0 = 0x54;
++		div_frac_start2_mode0 = 0x00;
++		div_frac_start3_mode0 = 0x06;
+ 		lock_cmp1_mode0 = 0x37;
+ 		lock_cmp2_mode0 = 0x04;
+-		code1_mode0 = 0x71;
+-		code2_mode0 = 0x0c;
++		code1_mode0 = 0x8d;
++		code2_mode0 = 0x27;
++		vco_tune1_mode0 = 0xfe;
++		vco_tune2_mode0 = 0x00;
+ 		break;
+ 
+ 	case 2700:
+-		hsclk_sel = 0x3;
+-		dec_start_mode0 = 0x34;
+-		div_frac_start2_mode0 = 0xc0;
+-		div_frac_start3_mode0 = 0x0b;
++		/* VCO 10,8 GHz / 4 (como qmp_v8_dp_serdes_tbl_hbr) */
++		hsclk_sel = 0x4;
++		dec_start_mode0 = 0x46;
++		div_frac_start2_mode0 = 0x00;
++		div_frac_start3_mode0 = 0x05;
+ 		lock_cmp1_mode0 = 0x07;
+ 		lock_cmp2_mode0 = 0x07;
+-		code1_mode0 = 0x71;
+-		code2_mode0 = 0x0c;
++		code1_mode0 = 0xf6;
++		code2_mode0 = 0x20;
++		vco_tune1_mode0 = 0xae;
++		vco_tune2_mode0 = 0x02;
+ 		break;
+ 
+ 	case 5400:
++		/* VCO 10,8 GHz / 2 (como qmp_v8_dp_serdes_tbl_hbr2) */
++		hsclk_sel = 0x3;
++		dec_start_mode0 = 0x46;
++		div_frac_start2_mode0 = 0x00;
++		div_frac_start3_mode0 = 0x05;
++		lock_cmp1_mode0 = 0x10;
++		lock_cmp2_mode0 = 0x0e;
++		code1_mode0 = 0xf6;
++		code2_mode0 = 0x20;
++		vco_tune1_mode0 = 0xae;
++		vco_tune2_mode0 = 0x02;
++		break;
++
+ 	case 8100:
+ 		hsclk_sel = 0x2;
+ 		dec_start_mode0 = 0x4f;
+@@ -987,6 +1012,8 @@ static int qcom_edp_com_configure_pll_v8(const struct qcom_edp *edp)
+ 		lock_cmp2_mode0 = 0x15;
+ 		code1_mode0 = 0x14;
+ 		code2_mode0 = 0x25;
++		vco_tune1_mode0 = 0xa0;
++		vco_tune2_mode0 = 0x01;
+ 		break;
+ 
+ 	default:
+@@ -1022,8 +1049,8 @@ static int qcom_edp_com_configure_pll_v8(const struct qcom_edp *edp)
+ 	writel(0x00, edp->pll + DP_QSERDES_V8_COM_VCO_TUNE_CTRL);
+ 	writel(0x1f, edp->pll + DP_QSERDES_V8_COM_BIAS_EN_CLKBUFLR_EN);
+ 	writel(0x00, edp->pll + DP_QSERDES_V8_COM_CORE_CLK_EN);
+-	writel(0xa0, edp->pll + DP_QSERDES_V8_COM_VCO_TUNE1_MODE0);
+-	writel(0x01, edp->pll + DP_QSERDES_V8_COM_VCO_TUNE2_MODE0);
++	writel(vco_tune1_mode0, edp->pll + DP_QSERDES_V8_COM_VCO_TUNE1_MODE0);
++	writel(vco_tune2_mode0, edp->pll + DP_QSERDES_V8_COM_VCO_TUNE2_MODE0);
+ 
+ 	writel(code1_mode0, edp->pll + DP_QSERDES_V8_COM_BIN_VCOCAL_CMP_CODE1_MODE0);
+ 	writel(code2_mode0, edp->pll + DP_QSERDES_V8_COM_BIN_VCOCAL_CMP_CODE2_MODE0);
+@@ -1099,8 +1126,11 @@ static int qcom_edp_phy_power_on(struct phy *phy)
+ 	u8 cfg1;
+ 
+ 	ret = edp->cfg->ver_ops->com_power_on(edp);
+-	if (ret)
++	if (ret) {
++		dev_err(edp->dev, "DIAG com_power_on (CMN_STATUS) ret=%d rate=%u lanes=%u\n",
++			ret, edp->dp_opts.link_rate, edp->dp_opts.lanes);
+ 		return ret;
++	}
+ 
+ 	ret = edp->cfg->ver_ops->com_ldo_config(edp);
+ 	if (ret)
+@@ -1147,8 +1177,11 @@ static int qcom_edp_phy_power_on(struct phy *phy)
+ 	writel(0x09, edp->edp + DP_PHY_CFG);
+ 
+ 	ret = edp->cfg->ver_ops->com_resetsm_cntrl(edp);
+-	if (ret)
++	if (ret) {
++		dev_err(edp->dev, "DIAG resetsm (C_READY) ret=%d rate=%u lanes=%u\n",
++			ret, edp->dp_opts.link_rate, edp->dp_opts.lanes);
+ 		return ret;
++	}
+ 
+ 	writel(0x19, edp->edp + DP_PHY_CFG);
+ 	writel(0x1f, edp->tx0 + TXn_HIGHZ_DRVR_EN);

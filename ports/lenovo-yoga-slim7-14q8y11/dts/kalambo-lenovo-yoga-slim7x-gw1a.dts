@@ -1,0 +1,229 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * gw1a = g1 (validado no hardware) + Wi-Fi interno FastConnect 7800 / WCN7850
+ * (PCI 17cb:1107, subsystem 17aa:e0e9) em pcie4, SEM dirigir o GPIO 94.
+ *
+ * REF  = arch/arm64/boot/dts/qcom/glymur-lenovo-yoga-slim7x.dts (mesmo chassi,
+ *        variante Elite)
+ * DSDT = local/iso-build/acpi/acpi-registry-0000.dsl
+ *
+ * GPIOs dirigidos como saida por este DTB (alem dos do g1, que nao tem nenhum):
+ *   117 WLAN_EN  REF:322      DSDT:80055-80061 (GWLE 0x75), _RST :80083-80085
+ *   116 BT_EN    REF:323      DSDT:108365-108369 (BTH0 GpioIo 0x74)
+ *   146 PERST#   REF:575      DSDT:79733-79740 (QPPX GpioIo 0x92)
+ * GPIO 147 (CLKREQ#, funcao pcie4_clk_req_n, REF:828-833, DSDT:65082 TLMMGPIO
+ * 0x93) e GPIO 148 (WAKE#, entrada, REF:576/:842-847) nao sao saidas GPIO.
+ *
+ * O GPIO 94 (chave do 3,3 V do modulo na REF:234-248) NAO e tocado aqui: o DSDT
+ * so o cita no mapa de wake (DSDT:78508). vreg_wcn_3p3 e vreg_wcn_0p95 sao
+ * puramente declarativos. HIPOTESE: o firmware deixou o 3,3 V do modulo ligado.
+ * Se nao deixou, o link PCIe nao sobe e o resto do sistema segue igual ao g1.
+ */
+
+#include "kalambo-lenovo-yoga-slim7x-g1.dts"
+
+/ {
+	/*
+	 * Trilhos do modulo WLAN. Sem gpio, sem pinctrl: o kernel nao liga nem
+	 * desliga nada, so satisfaz o vdd-supply obrigatorio do pwrseq
+	 * (pwrseq-qcom-wcn.c:417-425). Tensoes = REF:224-248.
+	 */
+	vreg_wcn_3p3: regulator-wcn-3p3 {
+		compatible = "regulator-fixed";
+
+		regulator-name = "VREG_WCN_3P3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+
+		regulator-always-on;
+	};
+
+	vreg_wcn_0p95: regulator-wcn-0p95 {
+		compatible = "regulator-fixed";
+
+		regulator-name = "VREG_WCN_0P95";
+		regulator-min-microvolt = <950000>;
+		regulator-max-microvolt = <950000>;
+
+		vin-supply = <&vreg_wcn_3p3>;
+
+		regulator-always-on;
+	};
+
+	/*
+	 * Seguradores de trilho (NAO existem na REF). Sem tensao propria e sem
+	 * gpio: so mantem um voto de enable permanente no trilho RPMh pai, na
+	 * tensao que glymur-cob.dtsi ja declara (nenhum regulador existente e
+	 * alterado).
+	 *
+	 * Motivo: pcie4_phy e o clkref TCSR_PCIE_2_CLKREF_EN ligam l1c1, l4f1,
+	 * l1f1 e l2f1 (glymur-cob.dtsi:204-207, mahua.dtsi:416-420,
+	 * tcsrcc-glymur.c:64-71, :197-202) e os DESLIGAM quando o probe do
+	 * pcie-qcom falha ou adia (pcie-qcom.c:1502-1541: -EPROBE_DEFER enquanto
+	 * pci-pwrctrl-pwrseq, que so esta no rootfs, nao carregou). l2f1 e l4f1
+	 * tambem alimentam o mdss_dp3_phy (glymur-cob.dtsi:199-202), que no g1
+	 * nao tem consumidor no kernel. HIPOTESE: sem isto a tela deixada pelo
+	 * firmware pode apagar no primeiro desligamento desses trilhos.
+	 * Tensoes conferem com o voto do PEP para PCI4 (DSDT:64791-64868).
+	 */
+	regulator-hold-l1c1 {
+		compatible = "regulator-fixed";
+		regulator-name = "HOLD_L1C1";
+		vin-supply = <&vreg_l1c1>;
+		regulator-always-on;
+	};
+
+	regulator-hold-l1f1 {
+		compatible = "regulator-fixed";
+		regulator-name = "HOLD_L1F1";
+		vin-supply = <&vreg_l1f1>;
+		regulator-always-on;
+	};
+
+	regulator-hold-l2f1 {
+		compatible = "regulator-fixed";
+		regulator-name = "HOLD_L2F1";
+		vin-supply = <&vreg_l2f1>;
+		regulator-always-on;
+	};
+
+	regulator-hold-l4f1 {
+		compatible = "regulator-fixed";
+		regulator-name = "HOLD_L4F1";
+		vin-supply = <&vreg_l4f1>;
+		regulator-always-on;
+	};
+
+	/*
+	 * REF:312-369, identico. vreg_l15b0 ja e regulator-always-on
+	 * (glymur-cob.dtsi:53-60). bt-enable-gpios e opcional no driver
+	 * (pwrseq-qcom-wcn.c:524), mantido como na REF: sem no bluetooth o
+	 * BT_EN fica em nivel baixo desde o probe do PMU.
+	 */
+	wcn7850-pmu {
+		compatible = "qcom,wcn7850-pmu";
+
+		vdd-supply = <&vreg_wcn_0p95>;
+		vddio-supply = <&vreg_l15b0>;
+		vddaon-supply = <&vreg_l15b0>;
+		vdddig-supply = <&vreg_l15b0>;
+		vddrfa1p2-supply = <&vreg_l15b0>;
+		vddrfa1p8-supply = <&vreg_l15b0>;
+
+		wlan-enable-gpios = <&tlmm 117 GPIO_ACTIVE_HIGH>;
+		bt-enable-gpios = <&tlmm 116 GPIO_ACTIVE_HIGH>;
+
+		pinctrl-0 = <&wcn_wlan_bt_en>;
+		pinctrl-names = "default";
+
+		regulators {
+			vreg_pmu_rfa_cmn: ldo0 {
+				regulator-name = "vreg_pmu_rfa_cmn";
+			};
+
+			vreg_pmu_aon_0p59: ldo1 {
+				regulator-name = "vreg_pmu_aon_0p59";
+			};
+
+			vreg_pmu_wlcx_0p8: ldo2 {
+				regulator-name = "vreg_pmu_wlcx_0p8";
+			};
+
+			vreg_pmu_wlmx_0p85: ldo3 {
+				regulator-name = "vreg_pmu_wlmx_0p85";
+			};
+
+			vreg_pmu_btcmx_0p85: ldo4 {
+				regulator-name = "vreg_pmu_btcmx_0p85";
+			};
+
+			vreg_pmu_rfa_0p8: ldo5 {
+				regulator-name = "vreg_pmu_rfa_0p8";
+			};
+
+			vreg_pmu_rfa_1p2: ldo6 {
+				regulator-name = "vreg_pmu_rfa_1p2";
+			};
+
+			vreg_pmu_rfa_1p8: ldo7 {
+				regulator-name = "vreg_pmu_rfa_1p8";
+			};
+
+			vreg_pmu_pcie_0p9: ldo8 {
+				regulator-name = "vreg_pmu_pcie_0p9";
+			};
+
+			vreg_pmu_pcie_1p8: ldo9 {
+				regulator-name = "vreg_pmu_pcie_1p8";
+			};
+		};
+	};
+};
+
+/* ACPI PCI4, _SEG 4, WLAN em RP1.EP1 (DSDT:81499-81509). REF:563-568 */
+&pcie4 {
+	pinctrl-0 = <&pcie4_default>;
+	pinctrl-names = "default";
+
+	status = "okay";
+};
+
+/* Supplies herdados: vdda-phy = l1c1, vdda-pll = l4f1 (glymur-cob.dtsi:204-207). REF:570-572 */
+&pcie4_phy {
+	status = "okay";
+};
+
+/* REF:574-592 */
+&pcie4_port0 {
+	reset-gpios = <&tlmm 146 GPIO_ACTIVE_LOW>;
+	wake-gpios = <&tlmm 148 GPIO_ACTIVE_LOW>;
+
+	wifi@0 {
+		compatible = "pci17cb,1107";
+		reg = <0x10000 0x0 0x0 0x0 0x0>;
+
+		vddaon-supply = <&vreg_pmu_aon_0p59>;
+		vddwlcx-supply = <&vreg_pmu_wlcx_0p8>;
+		vddwlmx-supply = <&vreg_pmu_wlmx_0p85>;
+		vddrfacmn-supply = <&vreg_pmu_rfa_cmn>;
+		vddrfa0p8-supply = <&vreg_pmu_rfa_0p8>;
+		vddrfa1p2-supply = <&vreg_pmu_rfa_1p2>;
+		vddrfa1p8-supply = <&vreg_pmu_rfa_1p8>;
+		vddpcie0p9-supply = <&vreg_pmu_pcie_0p9>;
+		vddpcie1p8-supply = <&vreg_pmu_pcie_1p8>;
+	};
+};
+
+&tlmm {
+	/* REF:820-825 */
+	wcn_wlan_bt_en: wcn-wlan-bt-en-state {
+		pins = "gpio116", "gpio117";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	/* REF:827-848 */
+	pcie4_default: pcie4-default-state {
+		clkreq-n-pins {
+			pins = "gpio147";
+			function = "pcie4_clk_req_n";
+			drive-strength = <2>;
+			bias-pull-up;
+		};
+
+		perst-n-pins {
+			pins = "gpio146";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-disable;
+		};
+
+		wake-n-pins {
+			pins = "gpio148";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-pull-up;
+		};
+	};
+};

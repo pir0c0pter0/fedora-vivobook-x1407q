@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * gwnx1 = gwnb1 (em uso no slot current) + fragmentos aprovados, para testar
+ * varias frentes num unico boot do slot try, por carga manual de modulos.
+ * Cada fragmento documenta as proprias fontes; aqui so a composicao.
+ *
+ * Sem display real (gwnd1): diagnostico separado. yoga-ec.dtsi entra no modo
+ * "bus" (sem -DYOGA_EC_DT_NODE). yoga-gpu.dtsi e vazio (so comentarios).
+ *
+ * Recursos por fragmento (sem sobreposicao de no, pino ou label):
+ *   touchscreen  &i2c8  (a80000, gpio32/33) + touchscreen@14 + tlmm gpio51
+ *   ec           &i2c9  (a84000, gpio36/37)
+ *   bluetooth    &uart14 (a98000, gpio56-59) + filho bluetooth
+ *   audio        compatible da raiz (+ "qcom,mahua") + &remoteproc_adsp
+ *   cpufreq-rtc  /firmware/scmi + &pmk8850_rtc
+ *   usb          HOLD_L3F0 + &usb_0/&usb_0_hsphy + &usb_1/&usb_1_hsphy
+ * Os tres primeiros dividem so o wrapper QUP1 (ac0000.geniqup): clocks AHB
+ * por voto, contados por referencia pelo geni-se.
+ *
+ * modprobe.blacklist do slot try: ver o roteiro da integracao.
+ */
+
+#include "kalambo-lenovo-yoga-slim7x-gwnb1.dts"
+
+#include "yoga-touchscreen.dtsi"
+#include "yoga-ec.dtsi"
+#include "yoga-bluetooth.dtsi"
+#include "yoga-audio.dtsi"
+#include "yoga-gpu.dtsi"
+#include "yoga-cpufreq-rtc.dtsi"
+#include "yoga-usb.dtsi"

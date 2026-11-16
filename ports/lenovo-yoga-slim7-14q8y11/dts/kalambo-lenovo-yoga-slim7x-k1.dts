@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * k1 = e1 (diag + gpio-reserved-ranges validado no hardware) + teclado e
+ * touchpad internos via I2C-HID. Sem reguladores, sem PMIC, sem USB/display.
+ * DSDT = local/iso-build/acpi/acpi-registry-0000.dsl
+ */
+/dts-v1/;
+
+#include "kalambo.dtsi"
+
+/ {
+	model = "Lenovo Yoga Slim 7x Gen 11 X2 Plus (diagnostic)";
+	compatible = "lenovo,yoga-slim7x-gen11-x2plus-diag", "qcom,kalambo";
+
+	aliases {
+		serial0 = &uart21;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	clocks {
+		xo_board: xo-board {
+			compatible = "fixed-clock";
+			clock-frequency = <38400000>;
+			#clock-cells = <0>;
+		};
+
+		sleep_clk: sleep-clk {
+			compatible = "fixed-clock";
+			clock-frequency = <32000>;
+			#clock-cells = <0>;
+		};
+	};
+};
+
+/* ACPI \_SB.I2C1 = QUP_0_SE_0 @ 0x00B80000 (DSDT:71829-71853); 400 kHz (DSDT:94411, 94519) */
+&i2c0 {
+	clock-frequency = <400000>;
+
+	status = "okay";
+
+	/*
+	 * ACPI TCPA ELAN06FA (DSDT:94504-94553). GpioInt Level/ActiveLow/PullUp,
+	 * pino virtual 0x380 -> CIPR {0x73, 0x03, 0x0292} (DSDT:79030-79034)
+	 * = PDC 115 / TLMM gpio3; pinctrl-glymur.c:1730 {3, 115}.
+	 */
+	touchpad@2c {
+		compatible = "hid-over-i2c";
+		reg = <0x2c>;
+
+		hid-descr-addr = <0x20>;
+		interrupts-extended = <&tlmm 3 IRQ_TYPE_LEVEL_LOW>;
+
+		pinctrl-0 = <&tpad_default>;
+		pinctrl-names = "default";
+	};
+
+	/*
+	 * ACPI ECKB QTEC0001 (DSDT:94396-94463). GpioInt Edge/ActiveLow/PullUp,
+	 * pino virtual 0x2C0 -> CIPR {0x84, 0x43, 0x02EF} (DSDT:78912-78916)
+	 * = PDC 132 / TLMM gpio67; pinctrl-glymur.c:1736 {67, 132}.
+	 *
+	 * Divergencia: glymur-lenovo-yoga-slim7x.dts:445 usa IRQ_TYPE_LEVEL_LOW;
+	 * aqui vale o DSDT desta maquina (Edge). Se o teclado der probe mas nao
+	 * gerar eventos, trocar para IRQ_TYPE_LEVEL_LOW e o primeiro ajuste.
+	 */
+	keyboard@3a {
+		compatible = "hid-over-i2c";
+		reg = <0x3a>;
+
+		hid-descr-addr = <0x1>;
+		interrupts-extended = <&tlmm 67 IRQ_TYPE_EDGE_FALLING>;
+
+		pinctrl-0 = <&kybd_default>;
+		pinctrl-names = "default";
+	};
+};
+
+&tlmm {
+	/* Validado no hardware (kalambo-e1.dtb); sem isso o probe do TLMM trava */
+	gpio-reserved-ranges = <4 4>, <10 2>, <27 1>, <44 4>, <65 1>, <90 2>, <139 1>;
+
+	/*
+	 * Entradas apenas. Divergencia: a referencia (glymur-lenovo-yoga-slim7x.dts
+	 * :747-751, :781-785) usa bias-disable; o DSDT declara PullUp nos dois
+	 * GpioInt (DSDT:94415, 94523), e vale o DSDT.
+	 */
+	tpad_default: tpad-default-state {
+		pins = "gpio3";
+		function = "gpio";
+		bias-pull-up;
+	};
+
+	kybd_default: kybd-default-state {
+		pins = "gpio67";
+		function = "gpio";
+		bias-pull-up;
+	};
+};

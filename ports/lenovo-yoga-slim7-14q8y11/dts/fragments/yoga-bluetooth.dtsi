@@ -1,0 +1,53 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Frente BLUETOOTH: FastConnect 7800 / WCN7850 por UART (hci_uart + btqca).
+ * Incluir DEPOIS de kalambo-lenovo-yoga-slim7x-gwnb1.dts (usa os labels
+ * vreg_pmu_* do no wcn7850-pmu de gw1a.dts:103-160).
+ *
+ * REF  = arch/arm64/boot/dts/qcom/glymur-lenovo-yoga-slim7x.dts
+ * DSDT = local/iso-build/acpi/acpi-registry-0000.dsl
+ *
+ * Fontes:
+ * - No inteiro copiado de REF:904-919 (uart14, qcom,wcn7850-bt, 3200000).
+ * - UART: DSDT:108359-108363 BTH0 (QCOM0F6B) usa "\\_SB.UR15", controle de
+ *   fluxo por hardware; DSDT:72131-72150 UR15 = "QUP_1_SE_6,4W", MMIO
+ *   0x00A98000, SPI 0x18B-32 = 363 = uart14 (glymur.dtsi:1771-1787).
+ * - 3200000: tambem em qcbluetooth8480.inf:136 da coleta Windows.
+ * - Pinos gpio56-59 funcao qup1_se6 (glymur.dtsi:6666-6694); o UEFI ja os
+ *   entrega em func1: lido em /sys/kernel/debug/gpio
+ *   "gpio56 : out low func1 2mA pull down" ... "gpio59 : out low func1 2mA
+ *   pull down". Nenhum pinctrl novo aqui.
+ * - BT_EN = TLMM 116 (DSDT:108365-108369, REF:323) ja pertence ao
+ *   wcn7850-pmu; este fragmento NAO declara enable-gpios, entao hci_qca usa
+ *   o pwrseq alvo "bluetooth" (hci_qca.c:2457-2476).
+ *
+ * Nenhum GPIO, regulador, clock ou pinctrl novo. Nenhum firmware-name
+ * (btqca escolhe qca/hmtbtfw20.tlv e qca/hmtnv20.b<board id>|.bin).
+ *
+ * Wi-Fi: desligar o alvo "bluetooth" so baixa o BT_EN; "regulators-enable"
+ * e "clock-enable" sao contados por unidade (pwrseq/core.c:808,851) e o
+ * alvo "wlan" os mantem.
+ *
+ * Boot: qcom_geni_serial e =y, entao 0xa98000 da probe sozinho (liga e
+ * desliga o voto do HLOS em gcc_qupv3_wrap1_s6_clk e nos AHB do wrap1, e
+ * aplica o pinctrl default). O no filho so ganha driver com
+ * "modprobe hci_uart"; bloquear hci_uart,btqca,bluetooth na cmdline.
+ */
+
+&uart14 {
+	status = "okay";
+
+	bluetooth {
+		compatible = "qcom,wcn7850-bt";
+		/* ponytail: valor da REF/INF; baixar para 115200 se der timeout */
+		max-speed = <3200000>;
+
+		vddaon-supply = <&vreg_pmu_aon_0p59>;
+		vddwlcx-supply = <&vreg_pmu_wlcx_0p8>;
+		vddwlmx-supply = <&vreg_pmu_wlmx_0p85>;
+		vddrfacmn-supply = <&vreg_pmu_rfa_cmn>;
+		vddrfa0p8-supply = <&vreg_pmu_rfa_0p8>;
+		vddrfa1p2-supply = <&vreg_pmu_rfa_1p2>;
+		vddrfa1p8-supply = <&vreg_pmu_rfa_1p8>;
+	};
+};

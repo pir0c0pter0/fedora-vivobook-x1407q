@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * gwnd2 = gwnd1 com UMA mudanca: link eDP limitado a 2,7 G (HBR).
+ * NUNCA TESTADO. Variante de diagnostico para o slot de uma tentativa.
+ *
+ * Por que: no gwnd1 o "phy poweron failed -110" saiu so na religada para
+ * 2,7 G, depois de um treino falho em 5,4 G. Aqui o PRIMEIRO power-on do PHY
+ * ja e em 2,7 G (dp_panel.c:275-277 limita a taxa pelo link-frequencies).
+ *   -110 no primeiro power-on  -> tabela de PLL de 2,7 G do PHY v8 errada
+ *                                 (phy-qcom-edp.c:969-978, copia do v6)
+ *   sem -110 e CR falha        -> PLL "trava" mas fora de frequencia, ou TX
+ *   treino fecha               -> so a taxa de 5,4 G esta quebrada
+ * 2 lanes x 2,7 G = 4,32 Gbps >= 154,26 MHz x 24 bpp = 3,70 Gbps: o modo
+ * 1920x1200 cabe. Nao limitar a 1,62 G (modo vira MODE_BAD).
+ * Nenhum GPIO, regulador ou no de pcie/pmic-glink muda.
+ */
+
+#include "kalambo-lenovo-yoga-slim7x-gwnd1.dts"
+
+&mdss_dp3_out {
+	link-frequencies = /bits/ 64 <1620000000 2700000000>;
+};

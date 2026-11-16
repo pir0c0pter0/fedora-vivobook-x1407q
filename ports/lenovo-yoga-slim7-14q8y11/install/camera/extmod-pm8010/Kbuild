@@ -1,0 +1,1 @@
+obj-m += qcom-pm8008.o qcom-pm8008-regulator.o

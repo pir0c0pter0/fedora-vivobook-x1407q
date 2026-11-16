@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * gu2 = u2 (k1 + USB2 host em usb_0 e usb_1) + simple-framebuffer do g1.
+ * Composicao mecanica de duas pecas ja revisadas; o no abaixo e identico ao
+ * de kalambo-lenovo-yoga-slim7x-g1.dts (validado no hardware em 2026-11-16).
+ */
+#include "kalambo-lenovo-yoga-slim7x-u2.dts"
+
+/ {
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		framebuffer@f9a20000 {
+			compatible = "simple-framebuffer";
+			reg = <0x0 0xf9a20000 0x0 0x8ca000>;
+			width = <1920>;
+			height = <1200>;
+			stride = <7680>;
+			format = "x8r8g8b8";
+		};
+	};
+};

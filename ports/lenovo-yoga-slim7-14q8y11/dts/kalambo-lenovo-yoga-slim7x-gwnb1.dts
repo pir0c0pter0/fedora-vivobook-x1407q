@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * gwnb1 = gwn1 (em uso: GNOME + Wi-Fi + NVMe) + no pmic-glink, para o
+ * qcom_battmgr expor bateria/AC em /sys/class/power_supply.
+ *
+ * REF  = arch/arm64/boot/dts/qcom/glymur-lenovo-yoga-slim7x.dts (mesmo chassi,
+ *        variante Elite, mesmo DMI 83QR)
+ * DSDT = local/iso-build/acpi/acpi-registry-0000.dsl
+ *
+ * Nenhum GPIO, regulador, clock ou pinctrl novo. Nenhum firmware-name.
+ *
+ * Como funciona nesta plataforma (fontes no kernel local/iso-build/kernel):
+ * - A bateria do Windows vem de \_SB.PMGK (QCOM0F8E, DSDT:987) e CMBD/CMPS
+ *   (PNP0C0A/ACPI0003, DSDT:1707-2060) sobre GLINK; o servico fica no SoCCP,
+ *   canal "PMIC_RTR_SOCCP_APPS" (drivers/soc/qcom/pmic_glink.c:286; mesma
+ *   string em qcpmicglink8480.sys da coleta Windows). ADSP nao participa.
+ * - O SoCCP ja esta rodando, deixado pelo UEFI: lido no notebook
+ *   /sys/kernel/debug/qcom_stats/soccp "Count: 1189" e crescendo (adsp/cdsp
+ *   vazios) e 1 interrupcao em smp2p-soccp. O INF do Windows faz o mesmo
+ *   "live handoff" (UefiLoadedImageTZProcID 0x33/0x41 = pas_id 51/0x41 de
+ *   qcom_q6v5_pas.c:1926-1942) e nao traz soccp.mbn.
+ * - "qcom,glymur-soccp-pas" tem early_boot: o probe marca RPROC_DETACHED
+ *   (qcom_q6v5_pas.c:1030-1031) e qcom_pas_attach() (:550-606) so le o
+ *   smp2p e sobe o glink; nao carrega firmware nem liga clock/PD.
+ * - /soc@0/remoteproc@d00000 JA esta habilitado no gwn1 (glymur.dtsi:2332
+ *   nao tem status); so nao da probe porque qcom_q6v5_pas esta na
+ *   modprobe.blacklist. Este DTB nao muda isso: a ativacao continua sendo
+ *   um "modprobe qcom_q6v5_pas" explicito.
+ * - "qcom,glymur-pmic-glink" nao usa PDR (pmic_glink.c:401-405), entao o
+ *   qcom_pd_mapper nao casar "qcom,kalambo" (qcom_pd_mapper.c:632-635) nao
+ *   importa para a bateria.
+ *
+ * Sem connector@N de proposito (REF:88-176 tem tres): USB/DP nao existem
+ * neste DT. ucsi_glink e pmic_glink_altmode devem ficar bloqueados na
+ * cmdline do slot (o UCSI faz PPM_RESET no probe).
+ *
+ * NUNCA: rmmod qcom_q6v5_pas, nem "stop" em /sys/class/remoteproc/.../state
+ * (qcom_pas_stop() faz qcom_scm_pas_shutdown do SoCCP), nem instalar
+ * soccp.mbn (sem ele, nenhum caminho de erro consegue reiniciar o SoCCP).
+ */
+
+#include "kalambo-lenovo-yoga-slim7x-gwn1.dts"
+
+/ {
+	/* REF:82-86 */
+	pmic-glink {
+		compatible = "qcom,glymur-pmic-glink",
+			     "qcom,pmic-glink";
+	};
+};
+
+/* REF:677-679. Redundante (ja habilitado); fica explicito que e intencional. */
+&remoteproc_soccp {
+	status = "okay";
+};

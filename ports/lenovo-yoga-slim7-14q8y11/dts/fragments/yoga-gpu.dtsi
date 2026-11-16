@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * FRENTE GPU (Adreno X2-45, render node sem KMS) - fragmento VAZIO de proposito.
+ *
+ * O DT em uso (gwnb1) ja tem tudo o que a GPU precisa, herdado do SoC:
+ *   gpu@3d00000      glymur.dtsi:4134  (sem status = okay)
+ *                    compatible "qcom,adreno-44060000" (mahua.dtsi:145-147)
+ *   gxclkctl@3d64000 glymur.dtsi:4257  (PDs: rpmhpd GFX, GMXC + GPU_CC_CX_GDSC)
+ *   gmu@3d6c000      glymur.dtsi:4268  compatible "qcom,adreno-gmu-x285.0"
+ *                    (mahua.dtsi:141-143)
+ *   gpucc@3d90000    glymur.dtsi:4328  (PDs: rpmhpd MX, CX)
+ *   adreno_smmu@3da0000 glymur.dtsi:4345
+ * Lido no notebook em /proc/device-tree/soc@0/: nenhum desses nos tem
+ * "status" (= okay) e display-subsystem@ae00000 esta "disabled".
+ * A referencia do mesmo chassi (glymur-lenovo-yoga-slim7x.dts:411-417) so
+ * faz status = "okay" em &gpu e &gmu, que aqui ja e o padrao.
+ *
+ * Sem zap-shader: o kernel sobe em EL2 ("CPU: All CPU(s) started at EL2",
+ * dmesg do notebook) e glymur.dtsi nao tem no zap-shader; o a8xx cai no
+ * caminho RBBM_SECVID_TRUST_CNTL (a8xx_gpu.c:804-822).
+ * Sem regulador, GPIO, pinctrl ou clock de placa: os trilhos da GPU (GFX,
+ * GMXC) sao recursos ARC do RPMh, via rpmhpd.
+ *
+ * A ativacao e so por carga manual de modulos (gpucc_glymur e msm ficam na
+ * modprobe.blacklist). Roteiro: ver a entrega da frente GPU.
+ *
+ * Nao acrescente nada aqui sem evidencia nova; em especial NAO habilitar
+ * &mdss/&dispcc (isso e da frente de display).
+ */

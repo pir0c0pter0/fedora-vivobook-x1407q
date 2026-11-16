@@ -1,0 +1,18 @@
+[Unit]
+Description=Yoga X2 Plus: hora pelo RTC do PMIC com offset em arquivo (plano B)
+DefaultDependencies=no
+After=local-fs.target
+Before=time-set.target chronyd.service sysinit.target shutdown.target
+Wants=time-set.target
+Conflicts=shutdown.target
+ConditionPathExists=/proc/device-tree/aliases/rtc1
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# "-": na primeira vez ainda nao ha offset gravado
+ExecStart=-/usr/local/sbin/yoga-rtc load
+ExecStop=/usr/local/sbin/yoga-rtc save
+
+[Install]
+WantedBy=sysinit.target

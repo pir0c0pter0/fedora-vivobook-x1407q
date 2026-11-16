@@ -1,0 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/* DTS de teste da frente CPUFREQ + RTC: gwnb1 (em uso) + yoga-cpufreq-rtc.dtsi. */
+#include "kalambo-lenovo-yoga-slim7x-gwnb1.dts"
+#include "yoga-cpufreq-rtc.dtsi"

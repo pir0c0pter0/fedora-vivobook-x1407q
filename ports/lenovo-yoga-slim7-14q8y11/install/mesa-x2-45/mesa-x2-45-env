@@ -1,0 +1,11 @@
+#!/bin/sh
+# Roda UM comando com o Mesa de /opt/mesa-x2-45 (freedreno + turnip com X2-45).
+# O Mesa do sistema fica intacto; sem este wrapper nada muda.
+# uso: mesa-x2-45-env <comando> [args]     ex.: mesa-x2-45-env python3 egl-offscreen-test.py
+P=/opt/mesa-x2-45
+export LD_LIBRARY_PATH=$P/lib64${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+export LIBGL_DRIVERS_PATH=$P/lib64/dri
+export GBM_BACKENDS_PATH=$P/lib64/gbm
+export __EGL_VENDOR_LIBRARY_FILENAMES=$P/share/glvnd/egl_vendor.d/50_mesa.json
+export VK_DRIVER_FILES=$P/share/vulkan/icd.d/freedreno_icd.aarch64.json
+exec "$@"

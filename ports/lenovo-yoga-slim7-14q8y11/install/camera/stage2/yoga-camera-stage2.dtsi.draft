@@ -1,0 +1,120 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * RASCUNHO - NAO INCLUIR EM DTB. Etapa 2 das cameras do Yoga 14Q8Y11:
+ * PMIC de camera + CCI + sensor RGB, ate ler o chip id (0x560858 em 0x300a).
+ * Nao compila como esta: os campos marcados FALTA nao tem fonte.
+ * Motivo de ficar fora de dts/fragments/: os GPIOs de SAIDA 106, 239 e 109
+ * so aparecem na configuracao PEP do Windows (AeoB), nao no DSDT nem na
+ * referencia Elite - nao cumprem a regra dura. Precisa de decisao.
+ *
+ * Como ler as fontes: python3 install/camera/tools/aeob.py <arquivo .bin>
+ *   CAMF = qccamfrontsensor_extension8480.../CAMF_RES_QRD.bin (RGB)
+ *   CAMI = qccamauxsensor_extension8480.../CAMI_RES_QRD.bin   (IR)
+ *   CAMP = qccamplatform_ext8480.../CAMP_RES_QRD.bin, CAMP_PCFG_QRD.bin
+ * O INF liga SUBSYS_17AA3801&REV_0001 (CSUB e _HRV desta maquina) a esses
+ * arquivos QRD; o inventario PnP do Windows mostra os tres dispositivos "OK".
+ *
+ * ---------------------------------------------------------------- FATOS
+ * RGB  OmniVision OV08X40 (com.qti.sensormodule.Shinetech_ov08x.bin)
+ *      SCFG_FRONT_QRD: Cfg 0x00160020 = escravo 0x20 em 8 bits (0x10 em 7),
+ *      1 MHz, endereco 16 bits, dado 16 bits; Reg 0x5608300A = id 0x5608 em
+ *      0x300a (driver ov08x40.c: OV08X40_CHIP_ID 0x560858, XVCLK 19,2 MHz).
+ *      CAMP_PCFG (indice Kalambo, palavra 0x00130010): I2C master 3,
+ *      CSI PHY indice 1 da lista do MPCS (KBUF) = 0x0ACEC000 = CSIPHY4.
+ *      CAMF: BOB1_B_E0 3,4 V; TLMM 106 saida alta; TLMM 239 (eGPIO) reset,
+ *      baixo e depois alto; LDO7_I0 2,8 V; LDO4_I0 1,8 V; LDO2_I0 1,1 V;
+ *      cam_cc_mclk4_clk 19,2 MHz (GPIO 100, funcao cam_asc_mclk4).
+ * IR   ST VD55G0 (com.qti.sensormodule.st_vd55g0.bin), obturador global
+ *      SCFG_AUX_QRD: Cfg 0x00150020 = escravo 0x10 (7 bits), 400 kHz;
+ *      Reg 0x30470000 = 0x3047 em 0x0000 (modelo "S5G0", 0x53354730).
+ *      CAMP_PCFG (palavra 0x01000110): I2C master 0, CSI PHY indice 0 =
+ *      0x0ACE4000 = CSIPHY0, flash presente, autenticacao facial.
+ *      CAMI: BOB1 3,4 V; TLMM 106 alta; LDO4_I0 1,8 V; LDO1_I0 1,15 V;
+ *      LDO3_I0 2,8 V; cam_cc_mclk0_clk 24 MHz (GPIO 96); TLMM 109 reset.
+ *      Iluminador: qccamflash_ext8480.inf IrLedCurrentMilliampere = 700.
+ * PMIC "I0": nao existe no cmd-db desta maquina (so B/C/F/H; B1B_E0 existe).
+ *      DSDT: \_SB.PML0 (QCOM0FC6) em I2C6 = QUP_0_SE_5 @0x00B94000, endereco
+ *      0x08, 100 kHz; \_SB.CAMP depende de PML0. No DT e &i2c5 (gpio20/21,
+ *      lidos "in high func1 pull up": o firmware ja deixa em qup0_se5).
+ * CCI (CAMP_RES_QRD FSTATE 0): 101/102 e 103/104 em funcao 1; 235/236
+ *      (asc_cci) entram por P-state ("CCI3" no qccamplatform8480.sys).
+ * CSIPHY (DSDT \_SB.MPCS, KBUF para SOID 0x2D9): 0x0ACE4000 irq 0x1FD
+ *      (SPI 477) e 0x0ACEC000 irq 0x9A (SPI 122).
+ * CCI no DSDT (\_SB.CAMP _CRS): 0x0AC15000 e 0x0AC16000, tres interrupcoes
+ *      0x1E8, 0x37B, 0xFC (SPI 456, 859, 220) sem dizer qual e de quem.
+ *
+ * ------------------------------------------------------------- HIPOTESES
+ * H1 "I0" e um PM8010 por I2C: a serie upstream "Add CAMSS support for
+ *    Qualcomm Glymur" v2 cria "qcom,pm8010-i2c" (patches em kernel-patches/).
+ *    Grade do PM8010: L1/L2 528 mV + n*8 mV -> 1,1 V e 1,15 V NAO caem na
+ *    grade (vizinhos 1,104 e 1,152 V); L3/L4 2,8 e 1,8 V caem; L7 2,8 V cai.
+ * H2 TLMM 106 e o reset/enable do PM8010 (sobe depois do BOB1 e antes dos
+ *    LDOs, nas duas cameras). Pode ser so uma chave de carga.
+ * H3 I2C master 0/1 = CCI0 barras 0/1 (101/102, 103/104); master 2/3 =
+ *    CCI1 barras 0/1 (105/106, 235/236). Entao RGB = CCI1 barra 1.
+ * H4 qual das tres interrupcoes do CAMP e de cada CCI.
+ *
+ * ------------------------------------------------------------------ FALTA
+ * F1 nos SoC (cci0/cci1, csiphy0/4, camss) para glymur.dtsi: nao ha patch
+ *    upstream publicado; o binding qcom,glymur-camss.yaml da o no camss.
+ * F2 alimentacao de entrada do PM8010 (vdd-l1-l2 etc.) e do CSIPHY
+ *    (vdda-0p9/1p2): decodificar C1KD.bin (qccammipicsi_ext8480).
+ * F3 lanes e link-frequency dos sensores: tabela resolutionInfo dos .bin
+ *    (mesmo formato Chromatix V3.4.0 do HM1092 do Vivobook).
+ * F4 driver V4L2 do VD55G0: vd55g1.c so aceita S5G1/S5G3.
+ */
+
+&rpmh_vregs_b_e0 {
+	/* B1B_E0 existe no cmd-db; faixa copiada de glymur-crd.dtsi:344-349 */
+	vreg_bob1_e0: bob1 {
+		regulator-name = "vreg_bob1_e0";
+		regulator-min-microvolt = <2200000>;
+		regulator-max-microvolt = <4224000>;
+		regulator-initial-mode = <RPMH_REGULATOR_MODE_AUTO>;
+	};
+};
+
+&i2c5 {
+	clock-frequency = <100000>;	/* DSDT PML0: 0x000186A0 */
+	status = "okay";
+
+	pm8010_cam: pmic@8 {		/* DSDT PML0: I2cSerialBusV2 (0x0008) */
+		compatible = "qcom,pm8010-i2c";			/* H1 */
+		reg = <0x8>;
+		reset-gpios = <&tlmm 106 GPIO_ACTIVE_LOW>;	/* H2 */
+		vdd-l3-l4-supply = <&vreg_bob1_e0>;		/* CAMF: BOB1 3,4 V */
+		vdd-l7-supply = <&vreg_bob1_e0>;
+		/* vdd-l1-l2-supply, vdd-l5-supply, vdd-l6-supply: FALTA (F2) */
+
+		regulators {
+			vreg_cam_l2_1p1: ldo2 {		/* CAMF LDO2_I0 1100000 */
+				regulator-min-microvolt = <1100000>;
+				regulator-max-microvolt = <1104000>;	/* grade, H1 */
+			};
+			vreg_cam_l4_1p8: ldo4 {		/* CAMF/CAMI LDO4_I0 */
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+			};
+			vreg_cam_l7_2p8: ldo7 {		/* CAMF LDO7_I0 */
+				regulator-min-microvolt = <2800000>;
+				regulator-max-microvolt = <2800000>;
+			};
+		};
+	};
+};
+
+/*
+ * &cci1 { i2c-bus@1 (gpio235/236, funcao asc_cci) {		// H3, F1
+ *	camera@10 {
+ *		compatible = "ovti,ov08x40";
+ *		reg = <0x10>;
+ *		reset-gpios = <&tlmm 239 GPIO_ACTIVE_LOW>;	// eGPIO
+ *		clocks = <&camcc CAM_CC_MCLK4_CLK>;
+ *		assigned-clock-rates = <19200000>;
+ *		avdd-supply = <&vreg_cam_l7_2p8>;
+ *		dovdd-supply = <&vreg_cam_l4_1p8>;
+ *		dvdd-supply = <&vreg_cam_l2_1p1>;
+ *		port { endpoint { data-lanes / link-frequencies: F3 } };
+ *	};
+ * }; };
+ */

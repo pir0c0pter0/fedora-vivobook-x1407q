@@ -1,0 +1,134 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * gwn1 = gw1a (validado no hardware: GNOME + Wi-Fi) + NVMe interno em pcie5
+ * (Samsung MZAMX512HDLV, PCI 144d:a80f, ACPI \_SB.PCI5.RP1.NVME).
+ *
+ * REF  = arch/arm64/boot/dts/qcom/glymur-lenovo-yoga-slim7x.dts (mesmo chassi,
+ *        variante Elite); mahua-lenovo-thinkpad-t14s-gen7.dtsi:640-657 faz o
+ *        mesmo num SoC Mahua.
+ * DSDT = local/iso-build/acpi/acpi-registry-0000.dsl
+ *
+ * Unico GPIO dirigido como saida a mais em relacao ao gw1a:
+ *   152 PERST#  REF:608  DSDT:79742-79750 (QPPX GpioIo 0x98)
+ *               lido no hardware: "gpio152 out high" (desassertado pelo firmware)
+ * GPIO 153 (CLKREQ#, funcao pcie5_clk_req_n, REF:851-856, PEP TLMMGPIO 0x99
+ * DSDT:65752-65764) e GPIO 154 (WAKE#, entrada, REF:609/:865-870) nao sao
+ * saidas GPIO. O pinctrl abaixo repete o que o firmware deixou ("gpio153 in
+ * low func1 pull up", "gpio154 in high pull up").
+ *
+ * O GPIO14 do PMIC pmh0101 (enable do 3,3 V do SSD na REF:208-222, :630-636)
+ * NAO e tocado: nenhum no referencia pmh0101_gpios. Lido no hardware: o pino
+ * ja esta "out high". vreg_nvme e so declarativo.
+ *
+ * O supply fica no no do CONTROLADOR (vddpe-3v3, como na REF:594-595) e nao
+ * no no da porta de proposito: com um "*-supply" em pcie@0 o
+ * pci_pwrctrl_is_required() (pwrctrl/core.c:152-182) cria um dispositivo
+ * pwrctrl e o host_init do pcie-qcom passa a poder devolver -EPROBE_DEFER
+ * DEPOIS de ligar o PHY (pcie-qcom.c:1492-1505, core.c:272-279), que e o
+ * ciclo liga/desliga que apagou a tela no Wi-Fi. Sem supply na porta e sem
+ * no filho, esse caminho nao existe para o pcie5. Nao acrescentar no nvme@0
+ * com supplies sem refazer essa analise.
+ */
+
+#include "kalambo-lenovo-yoga-slim7x-gw1a.dts"
+
+/ {
+	/*
+	 * 3,3 V do M.2. Sem gpio, sem pinctrl: o kernel nao liga nem desliga
+	 * nada, so satisfaz o vddpe-3v3 do controlador (pcie-qcom.c:1048-1053).
+	 * Tensao = REF:211-213.
+	 */
+	vreg_nvme: regulator-nvme {
+		compatible = "regulator-fixed";
+
+		regulator-name = "VREG_NVME_3P3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+
+		regulator-always-on;
+	};
+
+	/*
+	 * Seguradores de trilho, mesmo padrao do gw1a (NAO existem na REF): voto
+	 * de enable permanente na tensao que glymur-cob.dtsi ja declara, sem
+	 * alterar o regulador.
+	 *
+	 * pcie5_phy usa vdda-phy = l2f0 e vdda-pll = l4h0 (glymur-cob.dtsi:217-220)
+	 * e os desliga em phy_exit() (phy-qcom-qmp-pcie.c:5793-5808) sempre que o
+	 * probe do pcie-qcom falha ou adia depois de parse_ports
+	 * (pcie-qcom.c:2440-2446). O PHY Glymur nao tem tabelas de init no
+	 * driver: so funciona reaproveitando a configuracao deixada pelo firmware
+	 * (phy-qcom-qmp-pcie.c:5551-5565, :5730-5740). HIPOTESE: se esses trilhos
+	 * caem, o PHY perde a configuracao e o NVMe nao volta ate o proximo boot
+	 * ("Init sequence not available"). l2f0/l4h0 tambem sao refgen3 do clkref
+	 * do pcie4 (glymur-cob.dtsi:256-257, tcsrcc-glymur.c:64-71, :197-202) e
+	 * alimentam PHYs USB (glymur-cob.dtsi:263-281).
+	 * Tensao do PEP para PCI5: l2f0 0,936 V e l4h0 1,2 V (DSDT:65467-65493).
+	 * l2f0 aqui fica em 0,944 V: o kernel ja faz isso no boot testado
+	 * ("vreg_l2f0: Bringing 936000uV into 944000-944000uV", w6-auto-dmesg).
+	 */
+	regulator-hold-l2f0 {
+		compatible = "regulator-fixed";
+		regulator-name = "HOLD_L2F0";
+		vin-supply = <&vreg_l2f0>;
+		regulator-always-on;
+	};
+
+	regulator-hold-l4h0 {
+		compatible = "regulator-fixed";
+		regulator-name = "HOLD_L4H0";
+		vin-supply = <&vreg_l4h0>;
+		regulator-always-on;
+	};
+};
+
+/* ACPI PCI5, _SEG 5, NVMe em RP1 (DSDT:82071-82432). REF:594-601 */
+&pcie5 {
+	vddpe-3v3-supply = <&vreg_nvme>;
+
+	pinctrl-0 = <&pcie5_default>;
+	pinctrl-names = "default";
+
+	status = "okay";
+};
+
+/*
+ * Supplies herdados: vdda-phy = l2f0, vdda-pll = l4h0 (glymur-cob.dtsi:217-220).
+ * Clock "ref" = RPMH_CXO_CLK (mahua.dtsi:189-196), nao o clkref do TCSR: o
+ * modulo tcsrcc-glymur nao e dependencia do NVMe. REF:603-605
+ */
+&pcie5_phy {
+	status = "okay";
+};
+
+/* REF:607-610 */
+&pcie5_port0 {
+	reset-gpios = <&tlmm 152 GPIO_ACTIVE_LOW>;
+	wake-gpios = <&tlmm 154 GPIO_ACTIVE_LOW>;
+};
+
+&tlmm {
+	/* REF:850-871 */
+	pcie5_default: pcie5-default-state {
+		clkreq-n-pins {
+			pins = "gpio153";
+			function = "pcie5_clk_req_n";
+			drive-strength = <2>;
+			bias-pull-up;
+		};
+
+		perst-n-pins {
+			pins = "gpio152";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-disable;
+		};
+
+		wake-n-pins {
+			pins = "gpio154";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-pull-up;
+		};
+	};
+};

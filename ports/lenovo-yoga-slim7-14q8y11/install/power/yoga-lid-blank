@@ -1,0 +1,17 @@
+#!/bin/sh
+# Tampa fechada -> tela em preto (OLED: pixels apagados); aberta -> acende.
+# Nao bloqueia nem suspende. Roda na sessao GNOME do usuario.
+# ponytail: depende do PropertiesChanged de LidClosed do logind; se o
+# "gdbus monitor" nao mostrar a linha ao fechar a tampa, trocar por polling.
+gdbus monitor --system --dest org.freedesktop.login1 \
+	--object-path /org/freedesktop/login1 |
+while read -r l; do
+	case $l in
+	*"'LidClosed': <true>"*) a=true ;;
+	*"'LidClosed': <false>"*) a=false ;;
+	*) continue ;;
+	esac
+	gdbus call --session --dest org.gnome.ScreenSaver \
+		--object-path /org/gnome/ScreenSaver \
+		--method org.gnome.ScreenSaver.SetActive $a >/dev/null
+done

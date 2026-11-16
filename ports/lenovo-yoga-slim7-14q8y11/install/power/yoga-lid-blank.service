@@ -1,0 +1,11 @@
+[Unit]
+Description=Yoga: apaga a tela com a tampa fechada (sem suspender)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/local/bin/yoga-lid-blank
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target

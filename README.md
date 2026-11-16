@@ -1,3 +1,5 @@
+> **Outro notebook neste repositório:** [Lenovo Yoga Slim 7 14Q8Y11 — Snapdragon X2 Plus (Kalambo)](ports/lenovo-yoga-slim7-14q8y11/README.md). Estado em 16/11/2026: Fedora 45 instalado no SSD interno, com vídeo real a 60 Hz e brilho, GNOME, Wi-Fi, Bluetooth, bateria, controle de frequência, teclado, touchpad, tela de toque e USB 2.0; som, as três portas USB, tampa, teclas de função e relógio de hardware provados em boot de teste; GPU, câmeras e suspensão pendentes. Toda a documentação e os arquivos desse porte ficam em `ports/lenovo-yoga-slim7-14q8y11/`. A ISO e os scripts ASUS abaixo continuam específicos do X1407QA.
+
 <div align="center">
   <p>
     <img src="https://cdn.simpleicons.org/linux/FCC624" alt="Linux" height="58">

@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Frente TAMPA: sensor de tampa (hall) como gpio-keys SW_LID. So ENTRADA.
+ * Incluir depois do DTS base (gwnx1). Nenhum GPIO de saida, regulador ou clock.
+ *
+ * REF  = arch/arm64/boot/dts/qcom/glymur-lenovo-yoga-slim7x.dts
+ * DSDT = local/iso-build/acpi/acpi-registry-0000.dsl
+ *
+ * Pino: TLMM 92.
+ * - DSDT:78287-78299: \_SB.GIO0.LIDR = GpioIo (Shared, PullNone) pino 0x5C
+ *   (= 92, numero TLMM direto; GpioIo nao passa pelo CIPR).
+ * - DSDT:94174-94192: LIGE (ACPI0013) GpioInt Edge/ActiveBoth/SharedAndWake
+ *   pino virtual 0x3C0; _EVT copia LIDR para LID0.LIDB e notifica o LID0
+ *   (PNP0C0D, DSDT:94096). O CIPR (DSDT:78468) tem a entrada {0xB6, 0x5C,
+ *   0x1033} = PDC 182 <-> TLMM 92, igual a { 92, 182 } em
+ *   drivers/pinctrl/qcom/pinctrl-glymur.c:1718.
+ * - REF:44-57 e :794-798; mesmos pino e polaridade em glymur-crd.dtsi:56-63 e
+ *   mahua-lenovo-thinkpad-t14s-gen7-lcd.dts:51-58.
+ *
+ * Polaridade: _LID devolve LIDB = LIDR cru e, em ACPI, _LID 0 = fechada; logo
+ * nivel baixo = fechada = GPIO_ACTIVE_LOW (igual a REF). Lido no notebook em
+ * uso (tampa aberta): "gpio92  : in  high func0 2mA no pull".
+ *
+ * Bias: bias-disable (DSDT PullNone; REF:797; estado lido "no pull").
+ *
+ * wakeup-source como na REF: so tem efeito numa suspensao (hoje mascarada);
+ * acorda apenas ao ABRIR (EV_ACT_DEASSERTED).
+ *
+ * Sem switch-camera-privacy (REF:59-64, TLMM 99): fora desta frente.
+ *
+ * NEUTRALIDADE DE BOOT: CONFIG_KEYBOARD_GPIO=y (embutido), nao ha modulo para
+ * bloquear; o no da probe no boot. Efeito: gpio92 requisitado como entrada
+ * (estado igual ao do firmware), uma IRQ de borda via PDC 182 e um
+ * /dev/input/eventN novo. O logind esta com HandleLidSwitch=ignore.
+ */
+
+#include <dt-bindings/input/gpio-keys.h>
+#include <dt-bindings/input/input.h>
+
+/ {
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		pinctrl-0 = <&hall_int_n_default>;
+		pinctrl-names = "default";
+
+		switch-lid {
+			label = "lid";
+			gpios = <&tlmm 92 GPIO_ACTIVE_LOW>;
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_LID>;
+			wakeup-source;
+			wakeup-event-action = <EV_ACT_DEASSERTED>;
+		};
+	};
+};
+
+&tlmm {
+	hall_int_n_default: hall-int-n-state {
+		pins = "gpio92";
+		function = "gpio";
+		bias-disable;
+	};
+};
