@@ -9,6 +9,10 @@ Esta pasta é independente do projeto ASUS Vivobook X1407QA que ocupa o resto do
 A integração `gwnx2d1` passou no slot `try` e no boot normal pelo `current`,
 com vídeo, EC, RTC e USB automáticos.
 O Wi-Fi conecta em paralelo ao desktop, sem espera por link online.
+O USB agora exige apenas a placa Wi-Fi ativa e os trilhos em uso, sem
+associação a uma rede. O teste offline e o gatilho udev `add|move` no slot
+`try` e no boot normal pelo `current` passaram: o USB subiu antes da conexão
+Wi-Fi, preservando vídeo, bateria e NVMe.
 
 ## O que funciona
 
@@ -25,7 +29,7 @@ Sobe sozinho no boot normal:
 | Bateria | `pmic-glink`, anexando ao coprocessador que o firmware já iniciou |
 | Frequência do processador | SCMI, 355 MHz a 4,03 GHz |
 | Sensores, ventoinha, luz do teclado e teclas de função | EC embutido, com interrupção no `gwnx2d1` |
-| USB 2.0 | Três portas; PHYs carregados após o evento de conexão Wi-Fi |
+| USB 2.0 | Três portas; PHYs protegidos por driver PCIe ativo e trilhos em uso, sem exigir rede associada |
 | Tampa e chave de privacidade da câmera | `gpio-keys`; tampa ignorada pelo logind, suspensão mascarada |
 | Relógio de hardware | `rtc1` + offset em arquivo, serviço automático |
 | Proteção térmica | 24 zonas de CPU com trip passivo de 105 °C; carga anterior atingiu 61 °C |
@@ -64,7 +68,7 @@ Provado em boot de teste, ainda não promovido ao boot normal:
 | `patches/` | Correção do PHY eDP para a árvore do kernel |
 | `install/install-yoga.sh` | Instalador usado no SSD interno (apaga o disco de destino) |
 | `install/video/` | Instalação do vídeo real e script de diagnóstico do eDP |
-| [`install/usb/`](install/usb/) | USB após conexão Wi-Fi, por dispatcher assíncrono; sem espera de rede no boot |
+| [`install/usb/`](install/usb/) | USB com a placa Wi-Fi ativa, por regra udev; sem associação nem espera de rede |
 | `install/audio/` | Subida da cadeia de som e ajuste do mixer |
 | `install/ec-rtc/`, `install/power/`, `install/camera/` | Teclas de função e relógio, tampa e térmica, câmera |
 | `install/kernel-r2/`, `kernel-r3/`, `kernel-r4/` | Configuração, patches e scripts dos kernels candidatos |

@@ -1,13 +1,14 @@
 [Unit]
-Description=Yoga X2 Plus: USB2 nas tres portas depois do Wi-Fi
+Description=Yoga X2 Plus: USB2 nas tres portas com a placa Wi-Fi ativa
 ConditionKernelCommandLine=yoga.usb=1
-After=NetworkManager.service yoga-video.service
+After=yoga-video.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 # Os PHYs compartilham trilhos com o eDP; nao carregar sem consumidores vivos.
-ExecStartPre=/usr/bin/grep -qx up /sys/class/net/wlP4p1s0/operstate
+ExecStartPre=/usr/bin/grep -qx DRIVER=ath12k_wifi7_pci /sys/bus/pci/devices/0004:01:00.0/uevent
+ExecStartPre=/usr/bin/grep -qx active /sys/bus/pci/devices/0004:01:00.0/power/runtime_status
 ExecStartPre=/usr/bin/awk '$$1 ~ /^vreg_l[124]f1$/ { ok[$$1] = ($$2 ~ /^[0-9]+$/ && $$2+0 > 0) } END { exit !(ok["vreg_l1f1"] && ok["vreg_l2f1"] && ok["vreg_l4f1"]) }' /sys/kernel/debug/regulator/regulator_summary
 ExecStart=/usr/sbin/modprobe -a phy_qcom_eusb2_repeater phy_qcom_m31_eusb2
-# shortcut: sem Wi-Fi nao carrega USB, rever quando os trilhos compartilhados forem protegidos.
+# shortcut: depende da placa Wi-Fi ativa, rever quando os trilhos compartilhados forem protegidos.

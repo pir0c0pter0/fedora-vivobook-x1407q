@@ -1,0 +1,1 @@
+ACTION=="add|move", SUBSYSTEM=="net", DRIVERS=="ath12k_wifi7_pci", TAG+="systemd", ENV{SYSTEMD_WANTS}+="yoga-usb.service"
