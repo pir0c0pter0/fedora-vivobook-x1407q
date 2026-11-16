@@ -1,16 +1,85 @@
 # Workflow do porte Lenovo X2 Plus
 
-> **Histórico (13/11/2026).** Este documento descreve o planejamento e os testes anteriores ao bring-up físico de 16/11. O estado atual está no [README do porte](/ports/lenovo-yoga-slim7-14q8y11/README.md) e em [docs/ESTADO-ATUAL.md](/ports/lenovo-yoga-slim7-14q8y11/docs/ESTADO-ATUAL.md).
+## Atual — próxima sessão USB 3
+
+Passagem preparada em 16/11/2026. A fonte do estado é o topo de
+[docs/ESTADO-ATUAL.md](docs/ESTADO-ATUAL.md), resumido no [README](README.md).
+O suporte USB2 permanente está publicado na `main` em `f8a334f`;
+`gwnx2d1` dá boot normal com vídeo real e as três portas USB2, em cerca de
+13,2 s pelo systemd. Esta passagem é documental: nenhum teste USB3 foi feito.
+
+A linha de base somente de leitura já foi salva em
+`local/physical-2026-11-16/handoff-usb3/baseline-readonly.txt` (19:21 UTC).
+Ela confirmou os três hosts limitados a USB2, os combos QMP desabilitados,
+o módulo combo instalado e somente root hubs, sem periféricos externos.
+Nenhum PHY foi carregado, DTB alterado ou reboot feito nesta passagem.
+
+O alvo seguinte é **USB3 SuperSpeed em uma porta por vez**. Som permanente,
+GPU/Mesa e kernel R4 ficam para depois; USB4 e DP alt-mode estão fora desta
+rodada. O DT atual força `high-speed`, somente `usb2-phy` e
+`qcom,select-utmi-as-pipe-clk`: retirar apenas `maximum-speed` não basta.
+
+### Processo
+
+1. Capturar uma linha de base somente de leitura no Lenovo: kernel/cmdline,
+   hashes e argumentos dos três slots, `lsusb -t`, módulos, reguladores,
+   clocks, dispositivos adiados e logs de kernel. Confirmar eDP, Wi-Fi,
+   NVMe, SoCCP anexado, bateria e serviços EC/RTC/USB. Preservar os logs em
+   `local/`; root hubs `480M`/`10000M` sem dispositivo externo não provam
+   um link SuperSpeed.
+2. Auditar o caminho de **uma** porta contra o DSDT desta placa e as fontes
+   do kernel: driver QMP combo, bindings, supplies e trilhos compartilhados,
+   clocks/PIPE, orientação, mux e retimer. O mapa inicial dos três combos
+   fica em [ESTADO-ATUAL](docs/ESTADO-ATUAL.md#próxima-sessão--usb3-superspeed).
+   O driver é `phy-qcom-qmp-combo.c`, com
+   `CONFIG_PHY_QCOM_QMP_COMBO=m` já instalado; não confundir com o driver
+   QMP USB standalone/"uni". A referência Glymur/Elite serve para comparação,
+   sem comprovar a fiação do Kalambo/Plus.
+3. Preparar uma variante DTB para só essa porta, com edição e revisão
+   separadas. Revisar os dois PHYs, seus nomes, PIPE e orientação antes de
+   trocar as limitações USB2. Preservar USB2, eDP, Wi-Fi, NVMe e SoCCP;
+   não escrever em `current` ou `good`. Guardar a cópia do `try` e seus
+   hashes antes de instalar a variante, e usar uma única tentativa pelo
+   `yoga-boot-once try`. Um reboot deve voltar ao `current` preservado.
+4. No Lenovo, comprovar um **dispositivo externo folha** a `5000M` ou
+   `10000M` nas duas orientações do conector. Conferir fallback USB2,
+   estabilidade dos subsistemas preservados e leitura do dispositivo sem
+   gravar nele. Registrar dispositivo, porta, orientação, velocidade e logs.
+   Hubs virtuais, a capacidade anunciada pelo xHCI ou USB4 não substituem
+   esse resultado.
+5. Se houver regressão de vídeo, rede, NVMe ou SoCCP, salvar o que for
+   possível e reiniciar para a base. Não descarregar PHYs nem tentar
+   compensar alterando tensões. Só promover depois da revisão e de evidência
+   física suficiente; atualizar o topo do estado com o resultado real.
+
+### Regras que continuam valendo
+
+- Agentes separados para editar e revisar foram autorizados pelo usuário,
+  como substituição ao Workflow indisponível; quem edita não verifica.
+- Reboot autorizado sem aviso. Travamento duro pode exigir o botão de energia;
+  manter `current`, `good`, backups e recuperação utilizáveis.
+- Não esperar link online durante o boot. A guarda USB2 atual exige a placa
+  PCIe ativa e os trilhos em uso, sem exigir associação Wi-Fi; manter essa
+  proteção até a auditoria justificar qualquer alteração.
+- Não tocar nos M.2 do PC. O PC prepara fontes/builds; só o Lenovo valida
+  hardware. Não publicar firmware, coleta ou dados privados de `local/`.
+- Não carregar `pmic_glink_altmode` nem parar/reiniciar o SoCCP. UCSI já
+  registrou três portas, mas carga e troca de papel não foram validadas;
+  investigar sua necessidade para USB3, sem presumir que seja obrigatório.
+
+## Histórico — planejamento de 13/11/2026
+
+> **Histórico (13/11/2026).** A partir deste ponto, o conteúdo descreve o planejamento e os testes anteriores ao bring-up físico de 16/11. O estado atual está no [README do porte](/ports/lenovo-yoga-slim7-14q8y11/README.md) e em [docs/ESTADO-ATUAL.md](/ports/lenovo-yoga-slim7-14q8y11/docs/ESTADO-ATUAL.md).
 
 Pausa solicitada pelo usuário; retomada prevista para **16/11/2026**, sem agendamento automático.
 
-## Próximo teste — R3-CONS
+### Próximo teste — R3-CONS
 
 Pendrive atualizado, relido e ejetado. Escolher `1. Yoga: ACPI menos logs (teste R3)`, avançar com Esc e medir/filmar desde BOOT. R2 já mostrou Linux e seis CPUs, depois reiniciou; a causa não está identificada. Secure Boot desativado foi confirmado. A R3 remove apenas initcall_debug/ignore_loglevel e ainda não foi testada no Lenovo. Ver [análise](iso/RESULTADO-R3-CONS.md). Não regravar a ISO R2 por cima da ESP R3.
 
 Alvo: Yoga Slim 7 14Q8Y11, X2P-42-100/Kalambo, Fedora 45 aarch64, Niri, Noctalia **5.5.0** e perfis Lenovo. Pesquisa, coleta Windows e tentativas físicas em 2026-11-13. Este é o roteiro de engenharia, não um instalador liberado.
 
-## Estado das etapas
+### Estado das etapas
 
 | Etapa | Estado em 13/11/2026 | Evidência para concluir |
 |---|---|---|
@@ -23,7 +92,7 @@ Alvo: Yoga Slim 7 14Q8Y11, X2P-42-100/Kalambo, Fedora 45 aarch64, Niri, Noctalia
 | 6. Niri + Noctalia 5.5.0 | Userspace aarch64 instalado; versão Noctalia e configuração Niri verificadas; sessão depende de GPU funcional | Sessão acelerada, portais, áudio e bloqueio testados |
 | 7. Aplicar e validar os perfis de cores | Exportação em 1; validação após 6 | Perfis originais íntegros e efeito correto comprovado |
 
-## 1. Coleta Windows concluída — procedimentos de referência
+### 1. Coleta Windows concluída — procedimentos de referência
 
 A rodada de imagem está documentada em [iso/README.md](iso/README.md). O boot
 experimental em RAM por ACPI foi acrescentado a pedido do usuário para obter
@@ -32,7 +101,7 @@ de hardware nem autoriza instalar no NVMe sem as verificações seguintes.
 
 Preparar uma pasta em unidade externa, por exemplo `E:\Yoga-14Q8Y11`. Guardar backup dos dados, mídia Lenovo de recuperação e chave de recuperação BitLocker fora do repositório. Alterações de Secure Boot e partições podem pedir essa chave. Antes de reduzir o Windows, preservar ESP, GPT e partições OEM; usar a gestão de discos do Windows para a redução.
 
-### Coleta automatizada
+#### Coleta automatizada
 
 Usar o [coletor Windows](windows/LEIA-ME.md), criado para esta etapa. Extrair o pacote no Lenovo, executar `Coletar-Yoga.cmd` como administrador e informar o destino externo. O script `Collect-Yoga14Q8Y11.ps1` usa Windows PowerShell 5.1 ARM64, gera uma subpasta exclusiva e preserva DriverStore completo, exportação PnPUtil, firmware, inventário/recursos PnP, ACPI, EDID, ICC/ICM e associações ICM, com hashes e erros por etapa. Não baixa nem instala ferramentas no aparelho.
 
@@ -44,7 +113,7 @@ Primeira execução observada em 2026-11-13: a enumeração ampla de `edid-regis
 
 Na retomada com o USB, a coleta foi recebida e copiada integralmente para `local/windows/2026-11-13/`, incluindo arquivos fora do manifesto. A comparação dos 6.430 hashes Windows passou, e os 6.433 arquivos da cópia local foram comparados com a origem. Há apenas uma etapa marcada incompleta (`edid-registry`), embora dois EDIDs tenham sido salvos. Drivers e cores foram obtidos; não repetir toda a coleta apenas por esse aviso. Ver o [relatório](COLETA-WINDOWS-2026-11-13.md) e a [retomada atualizada](RETOMADA.md).
 
-### Coleta manual alternativa
+#### Coleta manual alternativa
 
 Os comandos seguintes consultam o hardware e escrevem relatórios na pasta escolhida no **Lenovo**; ajustar a letra da unidade externa:
 
@@ -79,7 +148,7 @@ Coletar ACPI com a ferramenta ACPICA `acpidump` para Windows obtida de sua distr
 
 Executar a preservação dos perfis descrita em [CORES.md](CORES.md) **antes** de alterar ou remover o Windows. Depois, copiar as evidências para `local/windows/<data>/` nesta pasta, que é ignorada pelo Git. Firmware, ACPI e perfis de fábrica permanecem locais até revisão do conteúdo e das licenças.
 
-## 2. Fixar fontes e portar a placa
+### 2. Fixar fontes e portar a placa
 
 Usar uma árvore de kernel separada dos artefatos ASUS. Ponto de partida consultado:
 
@@ -106,7 +175,7 @@ Gerar kernel arm64, módulos e DTB a partir do mesmo checkout/configuração. Co
 
 Artefatos exigidos: commit e patches, configuração final, toolchain, log de build, `Image`, DTB, módulos com `vermagic` correspondente e hashes. O `kernel/write-linux-artifact-manifest.sh` legado é referência de formato; revisar seu contrato ASUS antes de reaproveitar código.
 
-## 3. Montar a mídia Fedora
+### 3. Montar a mídia Fedora
 
 A [ISO oficial Lenovo Diagnostics ARM 5.2.1 foi inspecionada](ISO-LENOVO-DIAGNOSTICS-5.2.1.md). Seu hash confere com o site Lenovo, mas os 32 DTBs embutidos não incluem o Yoga Kalambo. Ela serve de referência de boot Stubble/UEFI; não libera esta etapa nem substitui os artefatos de 2.
 
@@ -120,7 +189,7 @@ Preparar também a persistência do mesmo conjunto na instalação: o Anaconda p
 
 Inspeção offline obrigatória: checksums, ISO/ESP legíveis, arquitetura arm64, DTB e `compatible` esperados, dependências do initramfs, firmware, correspondência dos módulos e payload de instalação. Um boot em QEMU valida apenas a estrutura; não valida periféricos Kalambo.
 
-## 4. Primeiro boot USB no Lenovo
+### 4. Primeiro boot USB no Lenovo
 
 Com backup e recuperação preservados, usar boot UEFI temporário de mídia externa. A primeira sessão é de diagnóstico; não particionar nem gravar firmware. Se o kernel de desenvolvimento não tiver cadeia de assinatura aceita, ajustar Secure Boot no Lenovo após preservar a chave BitLocker e registrar a configuração para restauração.
 
@@ -140,7 +209,7 @@ Conferir seis CPUs, ausência de erros de IOMMU/falhas de armazenamento, acesso 
 
 Avançar para DRM/GPU, teclado/touchpad, Wi-Fi/Bluetooth e áudio conforme a matriz. Documentar cada teste com kernel/DTB/firmware e resultado. Só liberar instalação quando mídia USB permanecer estável, o armazenamento estiver íntegro, a entrada e o caminho de recuperação forem utilizáveis e não houver problema térmico/energético conhecido.
 
-## 5. Instalação e recuperação
+### 5. Instalação e recuperação
 
 Escolher particionamento no Anaconda somente após 4. Preservar Windows/OEM e a ESP existente; registrar UUIDs e plano antes de confirmar as alterações. Não há comando de formatação ou instalação automática neste roteiro.
 
@@ -153,7 +222,7 @@ Antes do primeiro reboot, verificar no sistema instalado:
 
 Testar boot frio, reboot, Windows pelo menu UEFI e retorno à mídia USB. Verificar inicialização após uma atualização de kernel: preservar kernel anterior e não promover um kernel stock sem DTB/firmware correspondente. O helper `rescue-installed-boot` ASUS precisa de adaptação antes de servir aqui.
 
-## 6. Niri e Noctalia 5.5.0
+### 6. Niri e Noctalia 5.5.0
 
 Fazer esta etapa no Fedora aarch64 instalado, depois do teste de aceleração DRM/EGL. [Niri exige aceleração de hardware funcional](https://niri-wm.github.io/niri/Packaging-niri.html). Conferir renderer EGL/OpenGL e evitar considerar renderização por software como aprovação do requisito.
 
@@ -189,7 +258,7 @@ O executável da v5 é `noctalia`. Não usar instruções antigas de `qs -c noct
 
 Validar `niri validate`, versões instaladas, launcher/barra, autenticação, notificações, áudio/microfone, rede, brilho, clipboard, aplicativos X11 e seletor de arquivos/compartilhamento de tela pelos portais. Preservar uma sessão de recuperação até essas verificações passarem.
 
-## 7. Cores e conclusão
+### 7. Cores e conclusão
 
 Executar [CORES.md](CORES.md). A entrega precisa separar perfis exportados, instalados e efetivamente aplicados no painel correto. Se o compositor não oferecer o caminho necessário, manter esse requisito como bloqueado e documentar o trabalho restante, preservando Niri como escolha do usuário.
 

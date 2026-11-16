@@ -1,5 +1,9 @@
 # USB2 com a placa Wi-Fi ativa no Yoga X2 Plus
 
+Esta pasta documenta a base USB2 permanente. O próximo trabalho é USB3 em
+uma porta por vez, conforme o [processo atual](../../WORKFLOW.md#atual--próxima-sessão-usb-3);
+não basta retirar `maximum-speed` do DT nem observar root hubs `10000M`.
+
 Unidade preparada para o DTB `gwnx2d1`; validar primeiro no slot `try`.
 A regra udev pede a unidade na criação ou renomeação (`add|move`) da interface
 de rede do driver `ath12k_wifi7_pci`. Ela procura o driver nos pais do dispositivo,

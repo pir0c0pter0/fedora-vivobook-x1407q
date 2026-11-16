@@ -14,6 +14,12 @@ associação a uma rede. O teste offline e o gatilho udev `add|move` no slot
 `try` e no boot normal pelo `current` passaram: o USB subiu antes da conexão
 Wi-Fi, preservando vídeo, bateria e NVMe.
 
+**Próxima sessão: USB 3 SuperSpeed**, antes de som, GPU e kernel R4.
+O estado está em [docs/ESTADO-ATUAL.md](docs/ESTADO-ATUAL.md) e o processo
+de teste em [WORKFLOW.md](WORKFLOW.md#atual--próxima-sessão-usb-3).
+As portas continuam limitadas a USB2 no DT; root hubs anunciando `10000M`
+não comprovam um dispositivo externo em USB3. Nenhum teste USB3 foi iniciado.
+
 ## O que funciona
 
 Sobe sozinho no boot normal:
@@ -76,7 +82,8 @@ Provado em boot de teste, ainda não promovido ao boot normal:
 | `iso/` | Menu GRUB e scripts da mídia de diagnóstico usada no bring-up |
 | `windows/` | Coletor PowerShell de drivers, firmware, ACPI e perfis do Windows original |
 | [`CORES.md`](CORES.md), [`COLETA-WINDOWS-2026-11-13.md`](COLETA-WINDOWS-2026-11-13.md), [`ISO-LENOVO-DIAGNOSTICS-5.2.1.md`](ISO-LENOVO-DIAGNOSTICS-5.2.1.md), [`sources.json`](sources.json) | Referência: perfis de cor Lenovo, coleta do Windows, ISO oficial, fontes |
-| [`WORKFLOW.md`](WORKFLOW.md), [`DRIVERS.md`](DRIVERS.md), `iso/RESULTADO*.md` | Histórico do planejamento de 13/11 |
+| [`WORKFLOW.md`](WORKFLOW.md) | Processo atual para USB3 no topo; planejamento de 13/11 preservado abaixo |
+| [`DRIVERS.md`](DRIVERS.md), `iso/RESULTADO*.md` | Histórico do planejamento de 13/11 |
 
 A pasta `local/` não é versionada: guarda a árvore e os builds do kernel, firmware e ACPI coletados do aparelho, os DTBs compilados e os registros dos testes físicos. Binários (`*.dtb`, `*.ko`) também ficam fora; compile a partir das fontes.
 

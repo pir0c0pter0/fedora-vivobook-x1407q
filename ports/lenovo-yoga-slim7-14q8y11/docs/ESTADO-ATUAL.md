@@ -6,6 +6,24 @@ Consolidado em 2026-11-16 (sessão de bring-up físico). Fonte de verdade para r
 
 Caminhos: `R` = `<workspace>`; `P` = `R/fedora-vivobook-x1407q/.worktrees/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11`; `B` = `P/local/iso-build`; `OUT` = `P/local/dtb-bisect-r5`; `D` = `P/local/physical-2026-11-16` (todos os logs de hardware).
 
+### Próxima sessão — USB3 SuperSpeed
+
+**Prioridade do usuário após limpar o contexto: USB3**, antes de som, GPU e R4. O suporte USB2 permanente foi publicado na `main` em `f8a334f`; esta passagem só atualiza documentação, sem iniciar teste USB3. Seguir o [processo atual em WORKFLOW.md](../WORKFLOW.md#atual--próxima-sessão-usb-3); o restante daquele documento continua como histórico de 13/11.
+
+A linha de base somente de leitura foi capturada em 16/11 às 19:21 UTC em `D/handoff-usb3/baseline-readonly.txt`: `gwnx2d1`, vídeo real, USB ativo, SoCCP anexado, `NetworkManager-wait-online` desabilitado/inativo, só `7760000.pinctrl` adiado, hashes/argumentos dos slots preservados e `next_entry` vazio. `lsusb -t` mostrou seis root hubs a `480M`/`10000M`, **sem periféricos externos**: isso não comprova link USB3. O último boot normal mediu 13,196 s pelo systemd.
+
+**Limitação atual confirmada no FDT em execução:** os três hosts estão com `maximum-speed = "high-speed"`, só `phy-names = "usb2-phy"` e `qcom,select-utmi-as-pipe-clk`. Isso vem de `dts/fragments/yoga-usb.dtsi` e `yoga-usb-typec.dtsi`. Os três QMP combos continuam `disabled`; remover apenas `maximum-speed` não habilita SuperSpeed.
+
+| Combo no SoC | Endereço | Supplies herdados de `glymur-cob.dtsi`, a auditar nesta placa |
+|---|---|---|
+| `usb_0_qmpphy` | `0x00fd5000` | l3f0 / l4h0 |
+| `usb_1_qmpphy` | `0x00fde000` | l1h0 / l4h0 |
+| `usb_2_qmpphy` | `0x088e1000` | l4c1 / l4f1 |
+
+Todos usam `qcom,glymur-qmp-usb3-dp-phy` em `glymur.dtsi`. O driver correto é `drivers/phy/qualcomm/phy-qcom-qmp-combo.c`; `CONFIG_PHY_QCOM_QMP_COMBO=m` e o módulo `phy-qcom-qmp-combo.ko` já estão presentes no kernel em uso. `CONFIG_PHY_QCOM_QMP_USB=m` também existe, mas o driver standalone/"uni" não deve ser confundido com esse combo. A referência `glymur-lenovo-yoga-slim7x.dts` do Elite liga combos e endpoints `pmic_glink_ss`; isso é fonte de comparação, sem validar a fiação do Plus.
+
+Antes de uma variante DTB para **uma porta** no `try`, auditar driver/bindings, supplies compartilhados, clocks/PIPE, os dois PHYs, orientação, mux, retimer e DSDT desta placa. Preservar USB2, eDP, Wi-Fi, NVMe, SoCCP e slots `current`/`good`; usar uma tentativa e revisão separada. Aprovação exige um dispositivo externo folha a `5000M` ou `10000M` nas duas orientações, fallback USB2 e leitura sem gravar, com logs. Não carregar `pmic_glink_altmode` nem tocar no SoCCP; UCSI só registrou portas, carga e papéis não foram comprovados, e sua necessidade para USB3 segue em investigação. Nenhum PHY foi carregado, DTB alterado ou reboot feito nesta passagem documental.
+
 ### Como acessar e operar
 
 - Notebook: `root@<ip-do-notebook>` (IP fixado no roteador), chave `~/.ssh/id_ed25519`, hostname `<hostname>`, usuário `<usuario>` (autologin no GDM, sem senha definida). Usar `ssh ... < /dev/null` com `ConnectTimeout`; `pkill -f` com o nome de algo que está na própria linha de comando mata a sessão SSH.
@@ -43,7 +61,7 @@ O teste offline comprovou a carga com NetworkManager desconectado (estado 30), `
 
 O boot normal anterior, ainda com dispatcher, mediu 13,154 s pelo systemd (184 ms de kernel, 2,019 s de initrd, 10,950 s de userspace). No `try` com dispatcher foram 13,190 s, contra 21,409 s na variante com espera online, removida a pedido do usuário. Tampa segue ignorada e suspensão mascarada; a tecla de modo avião conserva o comportamento rfkill e pode derrubar o SSH.
 
-Evidências privadas: `D/usb-hardware-active/offline-results.txt` para o teste sem associação e `try-udev-v2-results.txt` e `current-udev-final-results.txt` para o gatilho automático antes da conexão; `D/resume-gwnx2d1/current-final-results.txt` e `try-dispatcher-results.txt` para a integração anterior com dispatcher. A revisão separada cobriu a unidade, 21 casos das guardas e o dispatcher; os boots reais comprovaram sua integração. Som permanente continua como próximo passo.
+Evidências privadas: `D/usb-hardware-active/offline-results.txt` para o teste sem associação e `try-udev-v2-results.txt` e `current-udev-final-results.txt` para o gatilho automático antes da conexão; `D/resume-gwnx2d1/current-final-results.txt` e `try-dispatcher-results.txt` para a integração anterior com dispatcher. A revisão separada cobriu a unidade, 21 casos das guardas e o dispatcher; os boots reais comprovaram sua integração. O próximo trabalho agora é USB3 SuperSpeed; som permanente fica para depois.
 
 ### Resultados originais do gwnx2 (16/11 à noite)
 
@@ -77,12 +95,13 @@ Logs em `D/gwnx2/` e `D/gwnx2-live-dmesg.txt`. Fragmentos em `P/dts/fragments/`;
 
 ### Próximos passos, em ordem sugerida
 
-1. Som permanente: serviço que sobe a cadeia na ordem do `yoga-audio.sh`, mantém as macros com `power/control=on`, baixa os volumes antes de liberar a placa ao PipeWire/WirePlumber; depois microfones e fone.
-2. UCSI: terminar o teste de carregador nas três portas; depois role-switch/USB3/DP alt-mode.
+1. **USB3 SuperSpeed**, prioridade escolhida pelo usuário para a próxima sessão: seguir a seção atual de `WORKFLOW.md`, começando pela auditoria de uma porta e preservando a base USB2. Ainda não testado; não incluir USB4 ou DP alt-mode nesta rodada.
+2. Som permanente: serviço que sobe a cadeia na ordem do `yoga-audio.sh`, mantém as macros com `power/control=on`, baixa os volumes antes de liberar a placa ao PipeWire/WirePlumber; depois microfones e fone.
 3. GPU: testar o Mesa de `/opt/mesa-x2-45` (destrava Niri).
 4. Kernel R4 com o patch v2 do PHY (traz firewall, zram, snd-seq) no slot `try`.
-5. Câmeras (após decisão sobre os GPIOs), suspensão, evento 0x54 do EC.
-6. `P/README.md` e `docs/ESTADO-ATUAL.md` refletem 16/11; `WORKFLOW.md`, `DRIVERS.md` e `iso/RESULTADO-*.md` permanecem como histórico de 13/11.
+5. UCSI: terminar o teste de carregador nas três portas e troca de papel. Sua necessidade para USB3 ainda deve ser investigada, sem pressupor que seja obrigatório; não carregar `pmic_glink_altmode` nesta rodada.
+6. Câmeras (após decisão sobre os GPIOs), suspensão, evento 0x54 do EC.
+7. `P/README.md`, `docs/ESTADO-ATUAL.md`, `RETOMADA.md` e o topo de `WORKFLOW.md` refletem 16/11. O restante de `WORKFLOW.md`, `DRIVERS.md` e `iso/RESULTADO-*.md` preserva o histórico de 13/11.
 
 ## Detalhe cronológico da sessão de 16/11 (onde conflitar, vale "COMECE AQUI")
 
@@ -316,7 +335,7 @@ Secure Boot: em 2026-11-13, nesta rodada DIAG-R2, o usuário confirmou que está
 ## Arquivos para retomada
 
 - `MEMORIA-LENOVO-YOGA-14Q8Y11.md`: índice de retomada, sem estados antigos concorrentes.
-- No porte, `README.md` e `docs/ESTADO-ATUAL.md` estão atualizados em 16/11. `WORKFLOW.md`, `DRIVERS.md` e `iso/RESULTADO-*.md` preservam o histórico de 13/11.
+- No porte, `README.md`, `docs/ESTADO-ATUAL.md`, `RETOMADA.md` e o topo de `WORKFLOW.md` estão atualizados em 16/11. O restante de `WORKFLOW.md`, `DRIVERS.md` e `iso/RESULTADO-*.md` preserva o histórico de 13/11.
 - `AUDITORIA-UPSTREAM-YOGA-14Q8Y11.md`: fontes upstream fixadas e limites.
 - No porte: `RETOMADA.md`, `README.md`, `WORKFLOW.md`, `DRIVERS.md`, `CORES.md`, `sources.json`.
 - Relatórios: `iso/RESULTADO-R3-CONS.md` (atual), `iso/RESULTADO-DIAG-R2.md` e `iso/RESULTADO.md` (históricos).
