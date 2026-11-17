@@ -1,35 +1,45 @@
 # Contexto limpo — Lenovo Yoga Slim 7 14Q8Y11 / Snapdragon X2 Plus
 
-Atualizado em 2026-11-17 (audio e GPU integrados ao boot normal; cameras com perfil RGB do Windows e IR ensaiado). Fonte de verdade para retomada; históricos e snapshots não substituem este estado. As seções a partir de "Objetivo confirmado" vêm da consolidação de 13/11 e continuam válidas onde não conflitam com as seções abaixo.
+Atualizado em 2026-11-17 (áudio e GPU integrados ao boot normal; câmeras calibradas parcialmente; inferência NPU comprovada, reabertura bloqueada). Fonte de verdade para retomada; históricos e snapshots não substituem este estado. As seções a partir de "Objetivo confirmado" vêm da consolidação de 13/11 e continuam válidas onde não conflitam com as seções abaixo.
 
 ## COMECE AQUI — estado em 17/11/2026 (fonte de verdade)
 
-### NPU — teste concluido, inferencia bloqueada no QNN
+### NPU — inferencia comprovada; reabertura bloqueada
 
-CDSP iniciou manualmente no `try` em391ms; FastRPC respondeu consultas
-com DOMAIN_SUPPORT1, UNSIGNED_PD_SUPPORT1 e ARCH_VER0x8081/V81.
-HMX_DEPTH e HMX_SPATIAL retornaram0, sem inferir ausencia de hardware.
-SoCCPattached, ADSPrunning, audio/GPU/cameras e bateria preservados.
+QAIRT 2.48.40/QNN plugin 2.4.0 + ORT 1.29 executou Abs no HTP V81.
+Tres boots distintos passaram em 100 inferencias por processo, com entradas
+variadas e verificacao numerica. Os perfis contem 100 Nodes QNN e zero Nodes
+CPU; fallback CPU desabilitado. Shim local ao processo reportou 662/Glymur
+para contornar a rejeicao de 729/Kalambo pelo runtime. Sysfs permaneceu 729;
+isso e compatibilidade experimental, nao suporte nativo ou calibracao.
 
-O runtime oficial QNN2.8.0/QAIRT2.52.0.261104115025, com ORT1.29,
-leu /sys/devices/soc0/soc_id=729 e reportou UNKNOWN_SDM e
-No Snapdragon SOC detected, falhando no router/backend antes de abrir
-FastRPC ou executar o modelo. Perfil sem eventos Node; CPU fallback
-desabilitado. Diagnostico verbose terminou em SIGSEGV no processo usuario
-durante o erro; sem SSR/fault do DSP. A ausencia do simbolo opcional
-remote_system_request nao foi demonstrada como causa.
+A segunda criacao de user PD falha com 0x8000054f/AEE_EQURTBADASID.
+O novo fastrpc-open-close.c reproduziu a falha com libsysmonquery_skel.so
+original, sem QNN e sem shim. FastRPC 1.0.7/1.0.9, driver 7.2/7.4,
+listener root e IDs/context banks distintos nao corrigiram. O driver libera
+o cliente, sem invokes pendentes ou variacao de CMA livre. Captura das
+respostas nao mostrou early response. Causa interna ainda nao identificada.
+QAIRT 2.51 e 2.52, com override 662, falham tambem no polling/mapeamento FD.
 
-**Nao promovido.** NPU desabilitada no boot normal; try restaurado ao
-estado anterior, current/good preservados, sem next_entry. Firmware
-em /var/lib/yoga-npu-fw (separado do ADSP) e runtime /opt/yoga-npu
-permanecem inativos. Nao ha servico NPU automatico. SoC nao foi falsificado.
-Falta runtime com suporte nativo Kalambo729 e depois validar user PD e
-inferencia real. [Receita e evidencias](../install/npu/README.md).
-26 testes startup passaram; DT/modelo revisados independentemente.
-Backup do ensaio: /root/npu-20261117. Logs privados npu-try-state.txt,
-npu-capabilities.txt, qnn-verbose.log e qnn.strace na pasta audio-gpu-npu.
-Retorno ao current confirmado: boot34,424s, audio/GPU/GDM/cameras ativos,
-DT92f6b329 em current/try, apenas SoCCPattached e ADSPrunning.
+**Nao promovido.** Um teste de reabertura perdeu SSH e exigiu reboot;
+o ensaio sem dma-coherent causou warnings de memoria/vmalloc e foi retirado.
+current/good intactos; try restaurado ao current (DT 92f6b329), sem next_entry.
+NPU continua desabilitada no boot normal, sem servico automatico. Modulos
+experimentais nao foram instalados em updates/initramfs. Libatomic foi
+instalado; runtime e firmware ficam em staging privado. A instalacao DNF
+invalidou uma atualizacao offline pendente, que nao foi reconstruida.
+
+Proximo passo: corrigir criacao/destruicao de PD e validar reaberturas,
+usuario comum e novo boot antes da integracao. Nao repetir variantes
+rejeitadas nem retirar dma-coherent. Fontes, matriz de ensaios, hashes e
+reprodutor em [install/npu](../install/npu/README.md). Evidencias privadas
+em local/physical-2026-11-17/npu-inference/; pacote original e ensaios
+anteriores em audio-gpu-npu/. Backup remoto: /root/npu-20261117/.
+
+Retorno final ao current confirmado em 34,441 s: video/USB/cameras/audio/GPU/GDM
+ativos, SoCCP attached, ADSP running, bateria 76%, sem WARN/Oops de memoria.
+Somente a falha conhecida do firewalld permanece. Hashes de current/good
+conferidos e 26 testes offline passaram novamente. Registro: `npu-inference/current-restored.txt`.
 
 ### GPU permanente — 17/11/2026, depois do audio
 

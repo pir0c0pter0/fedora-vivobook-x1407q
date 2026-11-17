@@ -1,4 +1,4 @@
-// ONNX Runtime 1.29 + QNN 2.8; HTP obrigatorio, sem fallback CPU.
+// ONNX Runtime 1.29 + QNN; HTP obrigatorio, sem fallback CPU.
 #include "onnxruntime_cxx_api.h"
 #include <cmath>
 #include <cstdio>
@@ -37,20 +37,23 @@ int main(int argc, char** argv) {
     auto tensor = Ort::Value::CreateTensor<float>(mem, input, 4, shape, 2);
     const char* inputs[] = {"input"};
     const char* outputs[] = {"output"};
-    auto result = session.Run(Ort::RunOptions{}, inputs, &tensor, 1, outputs, 1);
-    auto info = result.at(0).GetTensorTypeAndShapeInfo();
-    if (info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
-        info.GetShape() != std::vector<int64_t>({1, 4}))
-      throw std::runtime_error("tipo/dimensoes de saida inesperados");
-    const float* out = result[0].GetTensorData<float>();
-    for (size_t i = 0; i < 4; ++i) {
-      if (!std::isfinite(out[i]) || std::fabs(out[i] - std::fabs(input[i])) > 0.005f)
-        throw std::runtime_error("resultado numerico incorreto");
-      std::printf("output[%zu]=%.4f\n", i, out[i]);
+    for (int run = 0; run < 100; ++run) {
+      for (size_t i = 0; i < 4; ++i)
+        input[i] = ((run + int(i)) % 2 ? -1.0f : 1.0f) * (run + i) / 4.0f;
+      auto result = session.Run(Ort::RunOptions{}, inputs, &tensor, 1, outputs, 1);
+      auto info = result.at(0).GetTensorTypeAndShapeInfo();
+      if (info.GetElementType() != ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT ||
+          info.GetShape() != std::vector<int64_t>({1, 4}))
+        throw std::runtime_error("tipo/dimensoes de saida inesperados");
+      const float* out = result[0].GetTensorData<float>();
+      for (size_t i = 0; i < 4; ++i) {
+        if (!std::isfinite(out[i]) || std::fabs(out[i] - std::fabs(input[i])) > 0.005f)
+          throw std::runtime_error("resultado numerico incorreto");
+      }
     }
     Ort::AllocatorWithDefaultOptions allocator;
     auto profile = session.EndProfilingAllocated(allocator);
-    std::printf("PASS numerico; conferir execucao QNN no perfil: %s\n", profile.get());
+    std::printf("PASS: 100 inferencias numericamente corretas; conferir QNN no perfil: %s\n", profile.get());
     return 0;
   } catch (const std::exception& e) {
     std::fprintf(stderr, "FAIL: %s\n", e.what());

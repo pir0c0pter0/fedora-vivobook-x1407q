@@ -86,7 +86,7 @@ como OpenGL via sessão do usuário. Boot normal em 34,444 s, áudio preservado.
 
 ## O que falta
 
-- **NPU:** CDSP e consultas FastRPC V81 passaram, mas QNN/QAIRT2.52 rejeita o SoC nativo729 como UNKNOWN_SDM antes de executar o modelo. Inferência não validada; CDSP desabilitado no boot normal. [Evidências e próximo requisito](install/npu/README.md).
+- **NPU:** 100 inferências por sessão passaram no HTP V81 com QAIRT2.48.40 e compatibilidade experimental de SoC. A reabertura falha também sem QNN (0x8000054f); ativação permanente bloqueada, CDSP desabilitado no boot normal. [Evidências e reprodutor](install/npu/README.md).
 - **GPU:** aceleração validada; faltam calibração do speed-bin 193, frequências acima de 310 MHz, Vulkan e teste do Niri. [Estado e receita](install/mesa-x2-45/README.md).
 - **Kernel novo:** o R4 (`install/kernel-r4/`, base v7.4-rc3) traz firewall, zram e sequenciador ALSA; nunca deu boot e ainda precisa do patch completo do vídeo.
 - **Câmeras:** perfil Windows completo, validação colorimétrica e iluminador contínuo nos aplicativos ainda pendentes. RGB/IR usam a mesma rota na libcamera atual, sem captura simultânea ou sincronização de exposição demonstradas. A chave física gera eventos; bloqueio nos aplicativos não foi validado.
@@ -118,7 +118,7 @@ como OpenGL via sessão do usuário. Boot normal em 34,444 s, áudio preservado.
 | `install/ec-rtc/`, `install/power/`, `install/camera/` | Teclas de função e relógio, tampa e térmica, câmera |
 | `install/kernel-r2/`, `kernel-r3/`, `kernel-r4/` | Configuração, patches e scripts dos kernels candidatos |
 | `install/mesa-x2-45/` | Patch e build do Mesa para a Adreno X2-45 |
-| `install/npu/` | CDSP/FastRPC V81, teste QNN e incompatibilidade nativa do SoC729 |
+| `install/npu/` | Inferência HTP V81 comprovada e reprodutor da falha de reabertura |
 | `iso/` | Menu GRUB e scripts da mídia de diagnóstico usada no bring-up |
 | `windows/` | Coletor PowerShell de drivers, firmware, ACPI e perfis do Windows original |
 | [`CORES.md`](CORES.md), [`COLETA-WINDOWS-2026-11-13.md`](COLETA-WINDOWS-2026-11-13.md), [`ISO-LENOVO-DIAGNOSTICS-5.2.1.md`](ISO-LENOVO-DIAGNOSTICS-5.2.1.md), [`sources.json`](sources.json) | Referência: perfis de cor Lenovo, coleta do Windows, ISO oficial, fontes |
