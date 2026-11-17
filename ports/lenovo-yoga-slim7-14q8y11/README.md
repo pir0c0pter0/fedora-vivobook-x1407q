@@ -4,7 +4,7 @@ Porte do Fedora 45 aarch64 para o Lenovo Yoga Slim 7 14Q8Y11 (DMI 83QR), Snapdra
 
 Esta pasta é independente do projeto ASUS Vivobook X1407QA que ocupa o resto do repositório. Nada daqui se aplica ao ASUS, e os scripts e módulos `vivobook_*` não devem ser executados no Lenovo.
 
-**Estado em 16/11/2026:** o Fedora está instalado no SSD interno e liga sozinho em um desktop utilizável. É um trabalho em andamento, feito num único aparelho; não há ISO pronta para instalar.
+**Estado em 17/11/2026:** o Fedora está instalado no SSD interno e liga sozinho em um desktop utilizável. É um trabalho em andamento, feito num único aparelho; não há ISO pronta para instalar.
 
 A integração `gwnx2d1` passou no slot `try` e no boot normal pelo `current`,
 com vídeo, EC, RTC e USB automáticos.
@@ -14,19 +14,21 @@ associação a uma rede. O teste offline e o gatilho udev `add|move` no slot
 `try` e no boot normal pelo `current` passaram: o USB subiu antes da conexão
 Wi-Fi, preservando vídeo, bateria e NVMe.
 
-**Pausa em 16/11/2026:** USB3 passou nas duas portas da esquerda a 10 Gbit/s,
-nas duas orientações, com leituras de 548–615 MB/s e hashes iguais.
-A direita enumerou, mas apresentou resets e erros de leitura tanto a
-10 Gbit/s quanto no teste a 5 Gbit/s. **Decisão: direita em USB2 por enquanto.**
-A Lenovo especifica as três portas como [USB4 de 40 Gbit/s](https://psref.lenovo.com/Product/Yoga_Slim_7_14Q8Y11?tab=spec);
-essa capacidade do hardware ainda não está habilitada neste porte Linux.
+**USB3 permanente validado em 17/11:** direita a **5 Gbit/s** e as duas
+esquerdas a **10 Gbit/s**, nas duas orientações. A direita precisou do patch
+Qualcomm de calibração do QMP combo e do limite Gen1: 16 GiB lidos em cada
+orientação a 296/288 MB/s, sem resets/erros e com hashes de amostras iguais.
+USB2 na direita também passou. As esquerdas foram revalidadas com o novo módulo.
 
-Nenhum USB3 foi promovido: `current`/`good` intactos e `try` restaurado à base
-USB2, sem boot experimental armado. Amanhã: integrar USB3 automático só nas
-duas portas da esquerda, revisar e validar antes de promover. Fontes dos
-experimentos, logs e patch PHY candidato permanecem locais; esta atualização
-publica apenas documentação. Detalhes em [ESTADO-ATUAL](docs/ESTADO-ATUAL.md)
-e [WORKFLOW](WORKFLOW.md#atual--pausa-após-os-testes-usb3).
+O carregamento automático passou no `try` e no boot normal pelo `current`;
+`good` permanece intacto e a base USB2 anterior tem backup. Vídeo, Wi-Fi,
+NVMe, bateria, EC e RTC preservados. Boot normal em 23,491 s; a espera extra
+antecede o serviço USB3, no caminho de vídeo/GPU/SMMU já observado antes.
+Gen2 na direita continua instável. A Lenovo especifica três portas
+[USB4 de 40 Gbit/s](https://psref.lenovo.com/Product/Yoga_Slim_7_14Q8Y11?tab=spec),
+capacidade ainda não habilitada neste porte Linux.
+Detalhes em [ESTADO-ATUAL](docs/ESTADO-ATUAL.md) e receita de build/instalação
+em [install/usb](install/usb/README.md).
 
 ## O que funciona
 
@@ -43,7 +45,8 @@ Sobe sozinho no boot normal:
 | Bateria | `pmic-glink`, anexando ao coprocessador que o firmware já iniciou |
 | Frequência do processador | SCMI, 355 MHz a 4,03 GHz |
 | Sensores, ventoinha, luz do teclado e teclas de função | EC embutido, com interrupção no `gwnx2d1` |
-| USB 2.0 | Três portas; PHYs protegidos por driver PCIe ativo e trilhos em uso, sem exigir rede associada |
+| USB2 / USB3 | Direita Gen1 (5 Gbit/s), esquerdas Gen2 (10 Gbit/s), nas duas orientações; serviços protegidos por PCIe/trilhos ativos, sem esperar associação Wi-Fi |
+| Orientação USB-C (UCSI) | Automática nas três portas; carga e troca de papel não testadas |
 | Tampa e chave de privacidade da câmera | `gpio-keys`; tampa ignorada pelo logind, suspensão mascarada |
 | Relógio de hardware | `rtc1` + offset em arquivo, serviço automático |
 | Proteção térmica | 24 zonas de CPU com trip passivo de 105 °C; carga anterior atingiu 61 °C |
@@ -52,9 +55,7 @@ Provado em boot de teste, ainda não promovido ao boot normal:
 
 | Item | Observação |
 |---|---|
-| USB 3.2 Gen 2x1 | Duas portas da esquerda a 10 Gbit/s nas duas orientações; leitura sem gravar; serviço automático passou no `try`, ainda sem promoção |
 | Som nos 4 alto-falantes | ADSP + LPASS + 4 amplificadores WSA884x; microfones e fone não testados |
-| Controle Type-C das portas (UCSI) | Registra as três portas; carga e troca de papel não testadas |
 
 ## O que falta
 
@@ -62,7 +63,7 @@ Provado em boot de teste, ainda não promovido ao boot normal:
 - **Kernel novo:** o R4 (`install/kernel-r4/`, base v7.4-rc3) traz firewall, zram e o módulo de som que falta; nunca deu boot e ainda precisa do patch completo do vídeo.
 - **Câmeras (RGB e infravermelha):** só a chave de privacidade. Falta o driver do PMIC das câmeras e a confirmação de três GPIOs.
 - **Suspensão:** mascarada; não testada.
-- **Promover USB3 automático nas duas portas da esquerda; manter a direita em USB2 por enquanto.** USB4, saída de vídeo USB-C, microfones e fone seguem pendentes.
+- **Gen2 na direita:** ainda apresenta resets/erros; mantida em Gen1 estável. USB4, saída de vídeo USB-C, microfones e fone seguem pendentes.
 - **Firewall:** o kernel em uso não tem `nf_tables`.
 
 ## Causas-raiz encontradas

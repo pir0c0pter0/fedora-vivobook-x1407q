@@ -1,0 +1,60 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/* USB3 experimental somente na porta esquerda junto a dobradica (usb_0).
+ * UCSI informa orientacao ao QMP; PS8830 permanece sob controle do firmware.
+ * shortcut: retimer nao descrito no DT, validar as duas orientacoes antes de promover.
+ */
+#include "kalambo-lenovo-yoga-slim7x-gwnx2d1.dts"
+
+/ {
+	pmic-glink {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		connector@0 {
+			compatible = "usb-c-connector";
+			reg = <0>;
+			power-role = "dual";
+			data-role = "dual";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+
+					usb3p0_connector_hs: endpoint {
+						remote-endpoint = <&usb_0_dwc3_hs>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+
+					usb3p0_connector: endpoint {
+						remote-endpoint = <&usb_0_qmpphy_out>;
+					};
+				};
+			};
+		};
+	};
+};
+
+&usb_0_qmpphy {
+	status = "okay";
+};
+
+&usb_0_qmpphy_out {
+	remote-endpoint = <&usb3p0_connector>;
+};
+
+&usb_0_dwc3_hs {
+	remote-endpoint = <&usb3p0_connector_hs>;
+};
+
+&usb_0 {
+	/delete-property/ maximum-speed;
+	/delete-property/ qcom,select-utmi-as-pipe-clk;
+	phys = <&usb_0_hsphy>, <&usb_0_qmpphy QMP_USB43DP_USB3_PHY>;
+	phy-names = "usb2-phy", "usb3-phy";
+};

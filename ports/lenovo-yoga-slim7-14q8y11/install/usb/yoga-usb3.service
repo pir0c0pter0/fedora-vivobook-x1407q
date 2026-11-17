@@ -1,0 +1,19 @@
+[Unit]
+Description=Yoga X2 Plus: USB3 nas tres portas e orientacao UCSI
+ConditionKernelCommandLine=yoga.usb3=1
+Requires=yoga-usb.service yoga-soccp.service
+After=yoga-usb.service yoga-soccp.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/usr/bin/grep -qx DRIVER=ath12k_wifi7_pci /sys/bus/pci/devices/0004:01:00.0/uevent
+ExecStartPre=/usr/bin/grep -qx active /sys/bus/pci/devices/0004:01:00.0/power/runtime_status
+ExecStartPre=/usr/bin/grep -qx active /sys/bus/pci/devices/0005:01:00.0/power/runtime_status
+ExecStartPre=/usr/bin/grep -qx attached /sys/class/remoteproc/remoteproc0/state
+ExecStartPre=/bin/sh -c 'grep -qx connected /sys/class/drm/card*-eDP-*/status'
+ExecStartPre=/usr/bin/awk '$$1 ~ /^vreg_l(3f0|4h0|2f0|1f1|2f1|4f1)$$/ { ok[$$1] = ($$2 ~ /^[0-9]+$$/ && $$2+0 > 0) } END { exit !(ok["vreg_l3f0"] && ok["vreg_l4h0"] && ok["vreg_l2f0"] && ok["vreg_l1f1"] && ok["vreg_l2f1"] && ok["vreg_l4f1"]) }' /sys/kernel/debug/regulator/regulator_summary
+ExecStart=/usr/sbin/modprobe phy_qcom_qmp_combo
+ExecStart=/usr/bin/timeout 10 /bin/sh -c 'until ls /sys/bus/platform/devices/a000000.usb/xhci-hcd.*/usb*/idVendor /sys/bus/platform/devices/a600000.usb/xhci-hcd.*/usb*/idVendor /sys/bus/platform/devices/a800000.usb/xhci-hcd.*/usb*/idVendor >/dev/null 2>&1; do sleep 0.1; done'
+ExecStart=/usr/sbin/modprobe ucsi_glink
+# shortcut: depende de Wi-Fi/NVMe ativos e l3f0 always-on no DT, rever para suspensao/runtime PM.

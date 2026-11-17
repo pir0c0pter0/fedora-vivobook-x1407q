@@ -1,29 +1,25 @@
 # Workflow do porte Lenovo X2 Plus
 
-## Atual — pausa após os testes USB3
+## Atual — USB3 permanente
 
-Pausa pedida pelo usuário em 16/11; continuar em **17/11/2026**.
-As duas portas da esquerda passaram em USB3 a 10 Gbit/s nas duas orientações,
-com leituras de 548–615 MB/s e hashes iguais; a ativação automática passou
-no `try`. A direita apresentou resets/erros de leitura em 10 Gbit/s e no
-ensaio de 5 Gbit/s. **Decisão: direita em USB2 por enquanto.**
+Validado em 17/11/2026: direita Gen1 (5 Gbit/s), esquerdas Gen2 (10 Gbit/s),
+nas duas orientações. A direita precisou do patch Qualcomm de calibração
+mais o limite Gen1. Passou em 16 GiB por orientação sem resets/erros;
+o fallback USB2 na direita e a revalidação USB3 das esquerdas passaram.
 
-A Lenovo especifica três USB4 de 40 Gbit/s. Esses testes cobrem o caminho
-USB3 experimental no Linux; USB4 e DP alt-mode não foram habilitados.
-Não houve promoção: `current`/`good` intactos, `try` restaurado como cópia do
-`current` USB2 e nenhuma tentativa armada. O próximo boot é a base USB2.
-A unidade candidata fica instalada, porém sua condição `yoga.usb3=1` está
-ausente dos slots restaurados. Logs/fontes experimentais ficam locais;
-esta passagem publica só documentação.
+O módulo em `updates` carregou automaticamente no `try`, seguido de nova
+leitura da direita, e a configuração foi promovida e conferida no boot
+normal `current`. `good` ficou intacto; há backup completo da base USB2.
+Nenhuma tentativa permanece armada. Wi-Fi continua em paralelo, sem
+espera por associação. Não foram alteradas tensões, retimers ou SoCCP.
 
-Retomar preparando USB3 automático **somente nas duas portas da esquerda**,
-com direita USB2; revisar, testar no `try` e só então promover. Manter as
-guardas de Wi-Fi/NVMe/eDP/SoCCP e dos trilhos compartilhados, sem espera por
-associação à rede. O candidato de ajuste PHY upstream não foi aplicado;
-a causa da falha da direita continua aberta. Detalhes, hashes, backups e
-limites no topo de [ESTADO-ATUAL](docs/ESTADO-ATUAL.md).
+O requisito USB3 da direita está atendido a 5 Gbit/s. Gen2 na direita,
+USB4 e DP alt-mode continuam pendentes; não remover o limite Gen1 sem
+revisão e nova evidência física. Estado, hashes e limitações em
+[ESTADO-ATUAL](docs/ESTADO-ATUAL.md); build e rollback em
+[install/usb](install/usb/README.md).
 
-### Preparação de referência anterior ao teste
+### Histórico — preparação de referência anterior ao teste
 
 Passagem preparada em 16/11/2026. A fonte do estado é o topo de
 [docs/ESTADO-ATUAL.md](docs/ESTADO-ATUAL.md), resumido no [README](README.md).

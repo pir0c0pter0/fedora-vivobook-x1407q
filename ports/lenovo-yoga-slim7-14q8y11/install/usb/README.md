@@ -1,20 +1,19 @@
-# USB2 com a placa Wi-Fi ativa no Yoga X2 Plus
+# USB2 e USB3 no Yoga X2 Plus
 
-Esta pasta documenta a base USB2 permanente, mantida após a pausa de 16/11.
-As duas portas da esquerda passaram em USB3 experimental a 10 Gbit/s nas
-duas orientações; a direita falhou em 10 Gbit/s e no ensaio a 5 Gbit/s.
-**Decisão do usuário: direita em USB2 por enquanto.**
+Suporte permanente validado em 17/11/2026: **direita Gen1 (5 Gbit/s),
+esquerdas Gen2 (10 Gbit/s)**, nas duas orientações. A direita leu 16 GiB por
+orientação a 296/288 MB/s, sem resets ou erros; hashes de amostras iguais.
+O pendrive via adaptador também passou na direita a 480M. USB2 nas esquerdas
+já havia sido comprovado; não foi repetido nesta rodada.
 
-A automação candidata passou no `try`, mas não foi promovida. `try` foi
-restaurado à base USB2; `current` e `good` seguem intactos. Fontes candidatas
-e logs permanecem locais. A regra/unidade publicadas aqui continuam sendo
-a base USB2; a unidade USB3 instalada no aparelho fica condicionada a um
-argumento ausente nos slots restaurados.
+A solução combina o patch Qualcomm do QMP combo, o DTS USB3 com direita
+limitada a Gen1 e `yoga-usb3.service`, acionado pela mesma regra udev do USB2.
+Passou no `try` e no boot normal pelo `current`; `good` permanece USB2 e a
+base anterior tem backup. Gen2 na direita continua reprovado, mesmo com o
+patch; o ensaio sem LPM também falhou e não foi mantido. USB4/DP alt-mode
+não foram ativados. Ver [estado e evidências](../../docs/ESTADO-ATUAL.md).
 
-Retomar preparando USB3 automático só nas duas esquerdas, revisar e testar
-antes de promover, conforme [WORKFLOW](../../WORKFLOW.md#atual--pausa-após-os-testes-usb3)
-e [ESTADO-ATUAL](../../docs/ESTADO-ATUAL.md). O hardware possui três portas
-USB4 de 40 Gbit/s; USB4 não foi ativado neste porte.
+## Base USB2 preservada
 
 Unidade preparada para o DTB `gwnx2d1`; validar primeiro no slot `try`.
 A regra udev pede a unidade na criação ou renomeação (`add|move`) da interface
@@ -52,8 +51,9 @@ carga dos PHYs para a unidade, após a placa Wi-Fi estar ativa. Preservar os slo
 Após o boot, conferir `systemctl status yoga-usb.service` e os três xHCI em
 `dmesg`; a enumeração física continua precisando ser conferida por porta.
 
-O DT fixa as três portas em USB2 host. Não oferece USB3, troca de papel nem
-DisplayPort. Sem a placa Wi-Fi ativa e os trilhos em uso, a primeira carga
+O DT da base `gwnx2d1` fixa as três portas em USB2 host. A variante
+`gwnx2d1-usb3` acrescenta os combos e endpoints descritos abaixo. Troca de
+papel e DisplayPort não foram validados. Sem a placa Wi-Fi ativa e os trilhos em uso, a primeira carga
 USB fica bloqueada; não é necessária associação a uma rede. Depois de uma
 carga bem-sucedida, a unidade permanece ativa. Ela respeita a ordem de
 `yoga-video.service` e não tem dependência do NetworkManager. O systemd
@@ -64,6 +64,62 @@ o próximo boot exercita o gatilho udev. Sem `yoga.usb=1`, a unidade não
 executa. Para retirar sua ativação, remover
 `/etc/udev/rules.d/90-yoga-usb.rules` e recarregar as regras; reiniciar desfaz
 a carga dos PHYs.
+
+## Compilar e instalar o módulo USB3 calibrado
+
+O [patch Qualcomm](../../patches/phy-qcom-qmp-combo-glymur-usb3-settings.patch)
+altera 27 valores das tabelas USB3 do QMP combo. Não altera tensões dos
+reguladores, firmware dos PS8830 nem SoCCP. Origem:
+[Konrad Dybcio, 27/10/2026](https://lkml.iu.edu/2610.3/06058.html).
+Ele sozinho não estabilizou a direita em Gen2; a configuração validada
+também limita `usb_2` a `maximum-speed = "super-speed"`.
+
+No PC de build, a partir da raiz do repositório, com o container existente
+`yoga-iso-build` rodando e a árvore/configuração/Module.symvers do kernel em uso:
+
+```sh
+set -eu
+port=ports/lenovo-yoga-slim7-14q8y11
+build="$port/local/iso-build"
+module="$build/extmod-usb3"
+test ! -e "$module"
+mkdir "$module"
+cp "$build/kernel/drivers/phy/qualcomm/phy-qcom-qmp-combo.c" "$module/"
+cp "$build/kernel/drivers/phy/qualcomm/"*.h "$module/"
+git apply --check -p4 --directory="$module" "$port/patches/phy-qcom-qmp-combo-glymur-usb3-settings.patch"
+git apply -p4 --directory="$module" "$port/patches/phy-qcom-qmp-combo-glymur-usb3-settings.patch"
+printf 'obj-m += phy-qcom-qmp-combo.o\n' > "$module/Makefile"
+podman exec yoga-iso-build make -C /work/kernel O=/work/kernel-out-edp M=/work/extmod-usb3 ARCH=arm64 LLVM=1 -j4 modules
+modinfo -F vermagic "$module/phy-qcom-qmp-combo.ko"
+```
+
+Kernel validado: `7.4.0-rc1-yoga-kalambo+`. Módulo de 17/11: SHA256
+`7b319dd1bf03d8739d69d60e82874ac8b602956ed927d2801f3fa63cff8d269c`, build-id
+`e52a2da3c5cde89b5bee1dc9621f0b7d52a0b09c`. Compare o vermagic com o módulo
+original do notebook antes de instalar. Uma recompilação pode produzir outro hash.
+
+No Lenovo, instalar o `.ko` em `/usr/lib/modules/<release>/updates/`,
+preservando qualquer arquivo anterior, executar `depmod -a <release>` e
+conferir que `modprobe --show-depends phy_qcom_qmp_combo` seleciona `updates`.
+Não descarregar o PHY em execução. O original permanece em `kernel/` e
+também no initramfs: manter `phy_qcom_qmp_combo` nas listas existentes de
+`modprobe.blacklist` e `rd.driver.blacklist` para evitar carga antecipada.
+
+Instalar `yoga-usb3.service` em `/etc/systemd/system/` e a regra desta pasta
+em `/etc/udev/rules.d/`, recarregar systemd/udev e acrescentar `yoga.usb3=1`
+aos argumentos existentes do slot. Usar o DTB de
+[`kalambo-lenovo-yoga-slim7x-gwnx2d1-usb3.dts`](../../dts/kalambo-lenovo-yoga-slim7x-gwnx2d1-usb3.dts),
+SHA256 `0a5f45a995b39af9c27b4ce05438abdb3119cd740cbb44ec4ac4d21ef0331551`.
+O serviço preserva as guardas USB2, exige vídeo/SoCCP, PCIe Wi-Fi/NVMe ativos
+e uso positivo de l3f0/l4h0/l2f0/l1f1/l2f1/l4f1; carrega combo, espera os
+três hosts e carrega UCSI. Não espera associação à rede.
+
+Validar uma tentativa pelo `try` antes de promover `current`. Não usar o
+drop-in experimental `10-phy-test.conf` na instalação permanente. Conferir
+o build-id em `/sys/module/phy_qcom_qmp_combo/notes/.note.gnu.build-id`,
+sucesso da unidade, dispositivo externo folha e leituras nas duas orientações.
+Preservar `good` e backup completo do `current` anterior. Para retirar USB3,
+restaurar DTB e argumentos USB2 e reiniciar; não parar o SoCCP.
 
 ## RTC existente
 

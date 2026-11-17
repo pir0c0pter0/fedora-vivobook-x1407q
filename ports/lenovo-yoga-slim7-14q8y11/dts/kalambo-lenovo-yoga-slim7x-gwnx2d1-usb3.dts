@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/* USB3 nas tres portas; deriva da porta0 comprovada nas duas orientacoes.
+ * Os PS8830 continuam sob controle do firmware; sem DP alt-mode ou USB4.
+ */
+#include "kalambo-lenovo-yoga-slim7x-gwnx2d1-usb3p0.dts"
+
+/* Protege o QREF compartilhado antes de qualquer PHY USB inicializar.
+ * O always-on deve estar no RPMh: o fixed HOLD_L3F0 nao mantem voto.
+ */
+&vreg_l3f0 {
+	regulator-always-on;
+};
+
+/ {
+	pmic-glink {
+		connector@1 {
+			compatible = "usb-c-connector";
+			reg = <1>;
+			power-role = "dual";
+			data-role = "dual";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				port@0 {
+					reg = <0>;
+					usb3p1_connector_hs: endpoint {
+						remote-endpoint = <&usb_1_dwc3_hs>;
+					};
+				};
+				port@1 {
+					reg = <1>;
+					usb3p1_connector_ss: endpoint {
+						remote-endpoint = <&usb_1_qmpphy_out>;
+					};
+				};
+			};
+		};
+
+		connector@2 {
+			compatible = "usb-c-connector";
+			reg = <2>;
+			power-role = "dual";
+			data-role = "dual";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				port@0 {
+					reg = <0>;
+					usb3p2_connector_hs: endpoint {
+						remote-endpoint = <&usb_2_dwc3_hs>;
+					};
+				};
+				port@1 {
+					reg = <1>;
+					usb3p2_connector_ss: endpoint {
+						remote-endpoint = <&usb_2_qmpphy_out>;
+					};
+				};
+			};
+		};
+	};
+};
+
+&usb_1_qmpphy {
+	status = "okay";
+};
+
+&usb_1_qmpphy_out {
+	remote-endpoint = <&usb3p1_connector_ss>;
+};
+
+&usb_1_dwc3_hs {
+	remote-endpoint = <&usb3p1_connector_hs>;
+};
+
+&usb_1 {
+	/delete-property/ maximum-speed;
+	/delete-property/ qcom,select-utmi-as-pipe-clk;
+	phys = <&usb_1_hsphy>, <&usb_1_qmpphy QMP_USB43DP_USB3_PHY>;
+	phy-names = "usb2-phy", "usb3-phy";
+};
+
+&usb_2_qmpphy {
+	status = "okay";
+};
+
+&usb_2_qmpphy_out {
+	remote-endpoint = <&usb3p2_connector_ss>;
+};
+
+&usb_2_dwc3_hs {
+	remote-endpoint = <&usb3p2_connector_hs>;
+};
+
+&usb_2 {
+	/* shortcut: direita validada so em Gen1, rever quando Gen2 passar sem resets. */
+	maximum-speed = "super-speed";
+	/delete-property/ qcom,select-utmi-as-pipe-clk;
+	phys = <&usb_2_hsphy>, <&usb_2_qmpphy QMP_USB43DP_USB3_PHY>;
+	phy-names = "usb2-phy", "usb3-phy";
+};

@@ -1,12 +1,65 @@
 # Contexto limpo — Lenovo Yoga Slim 7 14Q8Y11 / Snapdragon X2 Plus
 
-Consolidado em 2026-11-16 (sessão de bring-up físico). Fonte de verdade para retomada; históricos e snapshots não substituem este estado. As seções a partir de "Objetivo confirmado" vêm da consolidação de 13/11 e continuam válidas onde não conflitam com as seções abaixo.
+Atualizado em 2026-11-17 (USB3 permanente validado no hardware). Fonte de verdade para retomada; históricos e snapshots não substituem este estado. As seções a partir de "Objetivo confirmado" vêm da consolidação de 13/11 e continuam válidas onde não conflitam com as seções abaixo.
 
-## COMECE AQUI — estado em 16/11/2026 à noite (fonte de verdade)
+## COMECE AQUI — estado em 17/11/2026 (fonte de verdade)
 
 Caminhos: `R` = `<workspace>`; `P` = `R/fedora-vivobook-x1407q/.worktrees/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11`; `B` = `P/local/iso-build`; `OUT` = `P/local/dtb-bisect-r5`; `D` = `P/local/physical-2026-11-16` (todos os logs de hardware).
 
-### Pausa após os testes USB3 — 16/11, 19:57 UTC
+### USB3 permanente — 17/11/2026
+
+**Direita funcionando em USB3 Gen1 (5 Gbit/s); esquerdas em Gen2 (10 Gbit/s).**
+O usuário priorizou corrigir a direita. A solução validada combina o
+patch Qualcomm de 27 ajustes do QMP combo com o limite Gen1 em `usb_2`.
+O patch sozinho ainda apresentou resets em Gen2; desabilitar LPM para o
+enclosure também não resolveu. O quirk temporário foi retirado.
+
+| Porta | Validação de leitura, sem montar ou gravar |
+|---|---|
+| Direita / a000000 | 5000M nas duas orientações, 16 GiB por orientação a 296/288 MB/s, quatro hashes de amostras de 256 MiB iguais; nenhum reset ou erro. Após outro boot com instalação permanente, nova conexão normal e 1 GiB a 297 MB/s, mais dois hashes iguais |
+| Esquerda junto à dobradiça / a600000 | 10000M nas duas orientações; 32 GiB na invertida e 1 GiB a 600 MB/s na normal; hashes iguais e nenhum reset/erro. A leitura de 32 GiB não registrou taxa exata |
+| Esquerda dianteira / a800000 | 10000M nas duas orientações; 1 GiB a 571/548 MB/s, hashes iguais e nenhum reset/erro |
+| USB2 na direita | Pendrive via adaptador a 480M; 256 MiB a 32,5 MB/s, dois hashes de 16 MiB iguais aos de 16/11; sem erro de leitura |
+
+**Promovido e comprovado no boot normal:** `current` e `try` usam o DTB
+`gwnx2d1-usb3` com direita Gen1, SHA256
+`0a5f45a995b39af9c27b4ce05438abdb3119cd740cbb44ec4ac4d21ef0331551`.
+`good` permanece `gwnb1` USB2, com manifesto intacto. `saved_entry=current`,
+sem tentativa pendente. Backup completo do `current` USB2 anterior em
+`/root/usb3-phy-20261117/current-before`; backup do `try` anterior no mesmo diretório.
+
+O módulo calibrado está em `/usr/lib/modules/7.4.0-rc1-yoga-kalambo+/updates/`,
+SHA256 `7b319dd1bf03d8739d69d60e82874ac8b602956ed927d2801f3fa63cff8d269c`,
+build-id `e52a2da3c5cde89b5bee1dc9621f0b7d52a0b09c`, conferido em sysfs.
+O original permanece em `kernel/` e no initramfs. As blacklists evitam a
+carga antecipada; `yoga-usb3.service` carrega pelo nome após as guardas,
+seguido de UCSI. O drop-in experimental foi retirado. O `try` com os
+argumentos permanentes e depois o `current` passaram, sem carga manual.
+
+Boot normal em 23,491 s; vídeo, USB2/3, SoCCP, EC, RTC e GDM ativos/sucesso,
+eDP conectado e bateria presente. Wi-Fi/NVMe preservados; sem espera por
+associação à rede. Os ~10 s extras frente à base USB2 antecedem a unidade
+USB3, na espera de vídeo/GPU/SMMU já observada em 16/11. Só `firewalld`
+permanece em falha por falta de `nf_tables` no kernel. `udisks2` voltou ao
+estado habilitado no boot normal; os discos estavam desconectados.
+
+Fontes: DTS `dts/kalambo-lenovo-yoga-slim7x-gwnx2d1-usb3{,p0}.dts`, unidade e
+regra em `install/usb/`, patch em `patches/phy-qcom-qmp-combo-glymur-usb3-settings.patch`.
+Receita de build/instalação e rollback em `install/usb/README.md`.
+Evidências privadas: `D17 = P/local/physical-2026-11-17/usb3-right/`, incluindo
+revisões independentes, leituras, `gen1-all-ports-journal-full.txt`,
+`integration-try-boot.txt`, `integration-right-read.txt` e `current-final-boot.txt`.
+
+Limites: Gen2 na direita continua reprovado; a causa completa permanece
+aberta. Não foram alteradas tensões dos reguladores, retimers ou SoCCP. USB4, DP alt-mode,
+suspensão e escrita em disco externo não foram testados. USB2 nas esquerdas
+não foi repetido nesta rodada; a base anterior já havia passado. Os hashes
+cobrem amostras, não os 16/32 GiB completos. Não houve nova confirmação
+visual humana depois da promoção, somente estado DRM/serviços. Os avisos
+de device-link e aux-bridges DP adiados continuam presentes.
+
+
+### Histórico — pausa após os testes USB3 em 16/11, 19:57 UTC
 
 **Decisão final do usuário: manter a porta direita em USB2 por enquanto e continuar em 17/11.** As duas portas da esquerda passaram em USB3; a direita enumerou, mas falhou em leitura. Nenhuma configuração USB3 foi promovida ao boot normal.
 
@@ -40,7 +93,7 @@ Evidências privadas em `D/usb3-m2/`: `baseline-readonly.txt`, `orientation-norm
 
 ### Preparação anterior — USB3 SuperSpeed
 
-**Prioridade do usuário após limpar o contexto: USB3**, antes de som, GPU e R4. O suporte USB2 permanente foi publicado na `main` em `f8a334f`; esta passagem só atualiza documentação, sem iniciar teste USB3. Seguir o [processo atual em WORKFLOW.md](../WORKFLOW.md#atual--pausa-após-os-testes-usb3); o restante daquele documento continua como histórico de 13/11.
+**Prioridade do usuário após limpar o contexto: USB3**, antes de som, GPU e R4. O suporte USB2 permanente foi publicado na `main` em `f8a334f`; esta passagem só atualiza documentação, sem iniciar teste USB3. Seguir o [processo atual em WORKFLOW.md](../WORKFLOW.md#atual--usb3-permanente); o restante daquele documento continua como histórico de 13/11.
 
 A linha de base somente de leitura foi capturada em 16/11 às 19:21 UTC em `D/handoff-usb3/baseline-readonly.txt`: `gwnx2d1`, vídeo real, USB ativo, SoCCP anexado, `NetworkManager-wait-online` desabilitado/inativo, só `7760000.pinctrl` adiado, hashes/argumentos dos slots preservados e `next_entry` vazio. `lsusb -t` mostrou seis root hubs a `480M`/`10000M`, **sem periféricos externos**: isso não comprova link USB3. O último boot normal mediu 13,196 s pelo systemd.
 
@@ -62,7 +115,7 @@ Antes de uma variante DTB para **uma porta** no `try`, auditar driver/bindings, 
 - O usuário autorizou reiniciar sem avisar. Travamento duro exige ele no botão de energia (segurar ~10 s).
 - Fedora 45 aarch64 no SSD interno (Windows apagado com autorização). Raiz btrfs em `nvme0n1p4`, `/boot` ext4 em `p2`, ESP em `p1`. Kernel em uso: `7.4.0-rc1-yoga-kalambo+` (qcom for-next 6a876df46), sem nf_tables (firewalld falha; única unidade em falha), sem zram, sem firmware `.xz`.
 - Boot por slots em `/boot/yoga/{current,good,try}` (vmlinuz, board.dtb, initramfs.img, args.cfg), menu em `/boot/efi/EFI/BOOT/grub.cfg`. `yoga-boot-once try` arma UMA tentativa; qualquer reboot volta ao `current`. O `args.cfg` do slot só ACRESCENTA à cmdline base (que bloqueia `qcom_q6v5_pas,msm,dispcc_glymur,gpucc_glymur,camcc_glymur,videocc_glymur,evacc_glymur,av1ecc_glymur` e usa `rd.driver.pre=simpledrm`); blacklist só impede carga por alias, `modprobe` pelo nome carrega.
-- Slots agora: `current` = `gwnx2d1` (a48b6c543bb0b40be7b4590a4cec36675713be29dffb85b9a34449f943fb4875), promovido e comprovado em boot normal; `good` = `gwnb1` (be2fae8e…, simpledrm, reserva preservada); `try` = `gwnx2d1`. `current` usa `yoga.video=1 yoga.usb=1`, sem `yoga.video.failreboot=1`. Backup completo do `current` anterior (`gwnxd1`, 87d1a723…) em `/root/resume-gwnx2d1/current-before`; do `try` anterior em `/root/resume-gwnx2d1/try-before`. Cópia mais antiga do `gwnx1` em `/root/slot-backup`.
+- Slots agora: `current` e `try` = `gwnx2d1-usb3` (0a5f45a9…), esquerda Gen2/direita Gen1; `good` = `gwnb1` USB2 intacto. `current` usa `yoga.video=1 yoga.usb=1 yoga.usb3=1`, sem failreboot, phytest ou máscara udisks. Backup completo da base USB2 anterior em `/root/usb3-phy-20261117/current-before`; ver a seção atual acima.
 - Build de módulo fora da árvore: `podman exec yoga-iso-build bash -c 'make -C /work/kernel O=/work/kernel-out-edp M=/work/<dir> ARCH=arm64 LLVM=1 -j4 modules'` (`B` montado em `/work`). Build de DTB: `cpp` + `dtc` de `B/kernel-out/scripts/dtc` (receita na seção "DTS e DTBs").
 - Regras do usuário: usar a ferramenta Workflow para edição de código/testes (quem edita não verifica); nesta sessão, com Workflow indisponível, o usuário autorizou agentes separados para edição e revisão; Wi-Fi deve conectar em paralelo, sem espera por link online no boot; respostas em português direto; não mexer nos M.2 do PC; pendrive de recuperação serial <serial-do-pendrive> (menu R8, entrada `N1`, pelo F12); nunca imprimir a senha do Wi-Fi (`local/live-updates/` a contém em texto puro: não publicar).
 
@@ -78,7 +131,7 @@ Antes de uma variante DTB para **uma porta** no `try`, auditar driver/bindings, 
 | Bateria | pmic-glink + `yoga-soccp.service` (anexa ao SoCCP iniciado pelo UEFI; nunca reiniciar/parar o SoCCP; recovery desabilitado) |
 | cpufreq | SCMI, 355 MHz–4,03 GHz, schedutil |
 | EC com IRQ | Driver embutido dá probe no nó DT em I²C 0x70, TLMM 66 com pull-up, sem `initcall_blacklist`: 4 temperaturas, RPM, `platform::kbd_backlight` (0–2) e teclas de função. `yoga-ec.service` permanece habilitado para os slots antigos e não recria o dispositivo que já existe; escapes `$$` corrigidos na unidade |
-| USB2 host | Três controladores (a600000, a800000, a000000), seis root hubs; `90-yoga-usb.rules` pede `yoga-usb.service` ao surgir a interface do driver PCIe, sem exigir associação a uma rede. PHYs eUSB2 ficam na blacklist por alias e são carregados pelo nome após as guardas |
+| USB2/USB3 host | Direita Gen1, esquerdas Gen2, com combo calibrado em `updates` e `yoga-usb3.service`; três controladores (a600000, a800000, a000000), seis root hubs; `90-yoga-usb.rules` pede `yoga-usb.service` ao surgir a interface do driver PCIe, sem exigir associação a uma rede. PHYs eUSB2 ficam na blacklist por alias e são carregados pelo nome após as guardas |
 | RTC plano B | `yoga-rtc.service`, condicionado ao alias DT `rtc1`, aplica o offset de `/var/lib/yoga-rtc/offset`; só `rtc1` registrado |
 | Tampa, chave da câmera e térmica | `gpio-keys` para TLMM 92/99; 24 zonas de CPU com trip passivo de 105 °C e cdev de cpufreq. Suspensão mascarada; tampa ignorada pelo logind |
 | Autologin, tela apaga em 60 s sem bloqueio, papel de parede, Claude Code instalado | — |
@@ -127,13 +180,13 @@ Logs em `D/gwnx2/` e `D/gwnx2-live-dmesg.txt`. Fragmentos em `P/dts/fragments/`;
 
 ### Próximos passos, em ordem sugerida
 
-1. **USB3 automático nas duas portas da esquerda; direita em USB2**, decisão final de 16/11 para retomar em 17/11. As duas esquerdas passaram em leitura; direita falhou em Gen2 e Gen1. Preparar/revisar variante, testar no `try` e só então promover. Ver a seção de pausa acima; USB4/DP alt-mode seguem fora.
+1. **USB3 concluído em 17/11:** direita Gen1 e esquerdas Gen2, promovido e validado no boot normal. Manter o limite Gen1; Gen2 na direita/USB4/DP alt-mode continuam pendentes.
 2. Som permanente: serviço que sobe a cadeia na ordem do `yoga-audio.sh`, mantém as macros com `power/control=on`, baixa os volumes antes de liberar a placa ao PipeWire/WirePlumber; depois microfones e fone.
 3. GPU: testar o Mesa de `/opt/mesa-x2-45` (destrava Niri).
 4. Kernel R4 com o patch v2 do PHY (traz firewall, zram, snd-seq) no slot `try`.
 5. UCSI: terminar o teste de carregador nas três portas e troca de papel. Sua necessidade para USB3 ainda deve ser investigada, sem pressupor que seja obrigatório; não carregar `pmic_glink_altmode` nesta rodada.
 6. Câmeras (após decisão sobre os GPIOs), suspensão, evento 0x54 do EC.
-7. `P/README.md`, `docs/ESTADO-ATUAL.md`, `RETOMADA.md` e o topo de `WORKFLOW.md` refletem 16/11. O restante de `WORKFLOW.md`, `DRIVERS.md` e `iso/RESULTADO-*.md` preserva o histórico de 13/11.
+7. `P/README.md`, `docs/ESTADO-ATUAL.md`, `RETOMADA.md` e o topo de `WORKFLOW.md` refletem 17/11. O restante de `WORKFLOW.md`, `DRIVERS.md` e `iso/RESULTADO-*.md` preserva o histórico de 13/11.
 
 ## Detalhe cronológico da sessão de 16/11 (onde conflitar, vale "COMECE AQUI")
 
