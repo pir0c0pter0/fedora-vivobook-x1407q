@@ -1,5 +1,3 @@
-> **Outro notebook neste repositório:** [Lenovo Yoga Slim 7 14Q8Y11 — Snapdragon X2 Plus (Kalambo)](ports/lenovo-yoga-slim7-14q8y11/README.md). Estado em 16/11/2026: Fedora 45 instalado no SSD interno, com vídeo real a 60 Hz e brilho, GNOME, Wi-Fi, Bluetooth, bateria, controle de frequência, teclado, touchpad, tela de toque e USB 2.0; som, as três portas USB, tampa, teclas de função e relógio de hardware provados em boot de teste; GPU, câmeras e suspensão pendentes. Toda a documentação e os arquivos desse porte ficam em `ports/lenovo-yoga-slim7-14q8y11/`. A ISO e os scripts ASUS abaixo continuam específicos do X1407QA.
-
 <div align="center">
   <p>
     <img src="https://cdn.simpleicons.org/linux/FCC624" alt="Linux" height="58">
@@ -9,32 +7,107 @@
     <img src="https://cdn.simpleicons.org/qualcomm/3253DC" alt="Qualcomm Snapdragon" height="58">
   </p>
 
-  <h1>Fedora 44 on the ASUS VivoBook 14 X1407QA</h1>
+  <h1>Fedora on ASUS VivoBook 14 X1407QA &amp; Lenovo Yoga Slim 7 14Q8Y11</h1>
 
-  <p><strong>Published Linux 7.2 ISO · Linux 7.3-rc6 development kernel · Snapdragon X</strong></p>
+  <p><strong>Two AArch64 notebook ports · Snapdragon X and Snapdragon X2 Plus</strong></p>
 
   <p>
-    <img src="https://img.shields.io/badge/Fedora-44-51A2DA?style=flat-square&logo=fedora&logoColor=white" alt="Fedora 44">
-    <img src="https://img.shields.io/badge/Linux-7.2-FCC624?style=flat-square&logo=linux&logoColor=black" alt="Linux 7.2">
-    <img src="https://img.shields.io/badge/tested-7.3--rc6-f59e0b?style=flat-square&logo=linux&logoColor=white" alt="Linux 7.3-rc6 tested">
+    <img src="https://img.shields.io/badge/ASUS-Fedora_44-51A2DA?style=flat-square&logo=fedora&logoColor=white" alt="ASUS: Fedora 44">
+    <img src="https://img.shields.io/badge/Lenovo-Fedora_45-51A2DA?style=flat-square&logo=fedora&logoColor=white" alt="Lenovo: Fedora 45">
     <img src="https://img.shields.io/badge/Architecture-AArch64-111827?style=flat-square" alt="AArch64">
-    <a href="https://github.com/pir0c0pter0/fedora-vivobook-x1407q/releases/latest"><img src="https://img.shields.io/github/v/release/pir0c0pter0/fedora-vivobook-x1407q?style=flat-square&label=release" alt="Latest release"></a>
+    <a href="https://github.com/pir0c0pter0/fedora-vivobook-x1407q/releases/latest"><img src="https://img.shields.io/github/v/release/pir0c0pter0/fedora-vivobook-x1407q?style=flat-square&label=ASUS%20release" alt="Latest ASUS release"></a>
   </p>
 </div>
 
-A community-maintained Fedora image and hardware support stack for the
-**ASUS VivoBook 14 X1407QA**, powered by the Snapdragon X1-26-100. The project
-turns the machine into a usable Fedora workstation while the remaining
-model-specific support works its way upstream.
+Community-maintained Fedora ports for two Qualcomm-powered notebooks:
+**ASUS VivoBook 14 X1407QA** and **Lenovo Yoga Slim 7 14Q8Y11**. This
+repository contains their model-specific kernel patches, hardware support,
+installation tools, and validation records.
+
+## Choose your notebook
+
+Overview updated on **November 17, 2026**. Each port has its own validation
+history and limitations.
+
+| Notebook | Platform | Fedora / kernel | Status and guide |
+|---|---|---|---|
+| **ASUS VivoBook 14 X1407QA** | Snapdragon X, X1-26-100 | Fedora 44; published ISO: Linux 7.2; installed-system validation: Linux 7.3-rc6 | [ISO and installation](#asus-vivobook-14-x1407qa--download-the-iso). Hardware support validated on October 7; the test unit is now non-booting and under [EDL recovery investigation](docs/research/2026-11-03-edl-9008-recovery.md). |
+| **Lenovo Yoga Slim 7 14Q8Y11 (83QR)** | Snapdragon X2 Plus, X2P-42-100 / Kalambo | Fedora 45; Linux 7.4.0-rc1-yoga-kalambo+ | [Port guide][yoga-guide]. Boots from internal NVMe into an accelerated GNOME desktop; experimental support on one device, with no ready-to-install ISO. |
+
+## What we have achieved on each notebook
+
+ASUS results below were validated on **October 7, 2026**, before the unit
+stopped booting and entered the EDL recovery investigation. Yoga results
+reflect the working installation on **November 17, 2026**.
+
+| Area | ASUS VivoBook 14 X1407QA | Lenovo Yoga Slim 7 14Q8Y11 |
+|---|---|---|
+| Fedora desktop | Fedora 44 booting from NVMe with the custom Linux 7.3-rc6 kernel | Fedora 45 booting automatically from NVMe into GNOME with Linux 7.4-rc1 |
+| Graphics | GPU acceleration and Vulkan validated | Adreno X2-45 acceleration, OpenGL 4.6 / GLES 3.2; capped at 310 MHz pending calibration |
+| Audio | Speakers and microphones working through PipeWire | Four speakers and two microphones validated through PipeWire |
+| Cameras | RGB camera, IR capture, and IR illuminator validated | RGB 1080p/~30 fps and IR 640×480/~60 fps; partial Windows color tuning and IR pulse validated |
+| NPU | Real QNN/HTP inference with CPU fallback disabled; controlled CDSP startup validated | 100 HTP V81 inferences per process across three boots, without CPU fallback; session reopening still blocks normal use |
+| USB and video output | USB-C, USB3, charging, and DisplayPort validated | USB3 in both orientations: right port 5 Gbit/s, both left ports 10 Gbit/s |
+| Everyday hardware | Wi-Fi, Bluetooth, input devices, battery, charge limit, and power-dependent CPU limits | Wi-Fi, Bluetooth, input devices, touchscreen, battery, CPU frequency control, EC, and hardware clock |
+| Suspend | `s2idle` validated; `deep` unsafe | Disabled and untested |
+| Installation media | Fedora 44 / Linux 7.2 ISO published; artifact checks passed, physical installation cycle pending | Installed and validated on one device; no ready-to-install ISO |
+
+Both ports still need work. The ASUS unit is currently non-booting; the Yoga
+NPU remains disabled in normal boot, and USB4 is not enabled on either model.
 
 > [!WARNING]
-> This project targets the **X1407QA only**. Keep Secure Boot disabled, use
-> `s2idle` instead of `deep` suspend, and keep the live USB available for
-> recovery.
+> Use only the files and instructions for your exact model. The published
+> ISO and root-level `vivobook` scripts target the **ASUS X1407QA**.
+> Lenovo files live under `ports/lenovo-yoga-slim7-14q8y11/`; they target the
+> **X2 Plus / Kalambo** variant and are not interchangeable with ASUS or
+> X2 Elite device trees.
 
-## Download the ISO
+## Lenovo Yoga Slim 7 14Q8Y11 — current port
 
-### [Download the latest release →](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/releases/tag/fedora44-x1407qa-2026.08.24)
+Fedora 45 boots automatically from the internal SSD with a 1920×1200 60 Hz
+display, brightness control, GNOME, Wi-Fi, Bluetooth, battery reporting,
+keyboard, touchpad, touchscreen, hotkeys, and hardware clock.
+
+- **GPU:** Adreno X2-45 acceleration with Mesa 26.2.3, OpenGL 4.6 and
+  GLES 3.2. Frequency is capped at 310 MHz pending calibration; Vulkan is
+  untested.
+- **Audio:** four speakers and two microphones validated through PipeWire.
+  External headphones and proprietary acoustic calibration remain untested.
+- **Cameras:** RGB OV08X40 at 1080p/~30 fps and IR VD55G0 at 640×480/~60 fps
+  validated through PipeWire. Windows color tuning is partially imported;
+  full calibration, simultaneous capture, and continuous IR illumination
+  in applications remain pending.
+- **USB3:** right port at 5 Gbit/s and both left ports at 10 Gbit/s, tested
+  in both plug orientations. Right-port Gen2 remains unstable; USB4 and
+  USB-C video output remain unvalidated.
+- **NPU:** 100 HTP V81 inferences per process passed across three boots,
+  with CPU fallback disabled and experimental per-process SoC compatibility.
+  Reopening a session still fails, including without QNN. **The NPU remains
+  disabled during normal boot.**
+
+Suspend is disabled and untested. The running kernel also lacks `nf_tables`
+firewall support. This port is still under development and has no public
+installation ISO.
+
+The latest validated Yoga sources and documentation are on the
+[Yoga port branch][yoga-branch]. Start with the [Lenovo port README][yoga-guide],
+the [current hardware state][yoga-state], and the
+[NPU evidence and reproducer][yoga-npu].
+
+[yoga-branch]: https://github.com/pir0c0pter0/fedora-vivobook-x1407q/tree/port/lenovo-yoga-slim7-14q8y11-x2plus
+[yoga-guide]: https://github.com/pir0c0pter0/fedora-vivobook-x1407q/blob/port/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11/README.md
+[yoga-state]: https://github.com/pir0c0pter0/fedora-vivobook-x1407q/blob/port/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11/docs/ESTADO-ATUAL.md
+[yoga-npu]: https://github.com/pir0c0pter0/fedora-vivobook-x1407q/blob/port/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11/install/npu/README.md
+
+## ASUS VivoBook 14 X1407QA — download the ISO
+
+The following release, setup commands, and hardware results apply to the
+ASUS only. Keep Secure Boot disabled and use `s2idle` instead of `deep`
+suspend. The test unit currently responds in EDL 9008 but does not boot;
+the [recovery report](docs/research/2026-11-03-edl-9008-recovery.md) records
+the unresolved cause and available evidence.
+
+### [Download the ASUS release →](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/releases/tag/fedora44-x1407qa-2026.08.24)
 
 | Image | Value |
 |---|---|
@@ -60,10 +133,10 @@ The rebuilt ISO passed filesystem, boot layout, kernel, initramfs, firmware,
 permissions, payload, archive, and checksum validation. Its first physical
 USB boot and installation cycle is still pending.
 
-## Linux 7.3-rc6 development update — October 7, 2026
+## ASUS Linux 7.3-rc6 development update — October 7, 2026
 
-The installed X1407QA now runs the speed-oriented development kernel
-`7.3.0-rc6-x1407qa-perf`. This kernel is validated on the physical notebook,
+The installed X1407QA was validated with the speed-oriented development kernel
+`7.3.0-rc6-x1407qa-perf`. This kernel was tested on the physical notebook,
 but it is **not yet the kernel shipped by the downloadable ISO above**. The
 public ISO remains the published Linux 7.2 baseline. Its automated artifact
 checks passed, but its first physical USB boot and installation are pending.
@@ -114,11 +187,12 @@ patches, commands, evidence, and rollback boundary.
   route probe remain visible even though the corresponding hardware is
   operational. They are documented rather than hidden.
 
-## Current status
+## ASUS validated hardware — October 7, 2026
 
 The table describes the installed Fedora system validated on the X1407QA on
-October 7, 2026. It does not replace the pending physical test of a refreshed
-ISO build.
+October 7, 2026, before the current EDL recovery case. These are historical
+hardware results; they do not replace the pending physical test of a
+refreshed ISO build.
 
 | Area | State |
 |---|---|
@@ -150,7 +224,7 @@ sudo tools/ir-camera-capture.sh 30 /tmp/camera-ir.png
 The native libcamera soft-ISP still rejects monochrome `R10_CSI2P`; this is a
 userspace format limitation, not a sensor or illuminator failure.
 
-## Quick start
+## ASUS quick start
 
 1. Download, verify, join, and decompress the release assets above.
 2. Write the ISO to a USB drive with Fedora Media Writer or another raw-image
@@ -170,11 +244,11 @@ If the installed system does not boot, return to the live environment and run:
 sudo rescue-installed-boot --repair
 ```
 
-## Documentation
+## ASUS documentation
 
 | Document | Purpose |
 |---|---|
-| [Current build state](BUILD-STATE.md) | Exact validated state, release hashes, and remaining work |
+| [October 7 build state](BUILD-STATE.md) | Validated build state, release hashes, and remaining work at that date |
 | [Detailed technical guide](docs/TECHNICAL-GUIDE.md) | Full installation history, fix guide, commands, and implementation notes |
 | [October 7 kernel 7.3 build report](docs/BUILD-REPORT-2026-10-07.md) | Package refresh, kernel configuration, runtime fixes, boot evidence, and remaining work |
 | [August 24 build report](docs/BUILD-REPORT-2026-08-24.md) | Full-system ISO/build validation baseline; IR hardware proof is documented above |
@@ -184,10 +258,10 @@ sudo rescue-installed-boot --repair
 | [EDL 9008 recovery status](docs/research/2026-11-03-edl-9008-recovery.md) | Concise source of truth for completed tests, rejected loaders, known limits, and risk-ranked experiments on the non-booting X1407QA |
 | [Research archive](docs/research/) | Camera, Wi-Fi, suspend, USB4, and hardware notes |
 
-## Testing another Snapdragon X device?
+## Testing another Snapdragon device?
 
-Reports from other Snapdragon X laptops are welcome, but support outside the
-X1407QA is experimental. Open a
+Reports from other Snapdragon laptops are welcome. The model-specific files
+here have only been tested on the two exact devices listed above. Open a
 [compatibility report](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/issues/new)
 with the exact laptop model, Snapdragon SoC, boot result, working and broken
 hardware, and any relevant logs from the detailed guide.
@@ -199,6 +273,6 @@ ASUS firmware and are not covered by the MIT license; see
 [`firmware/README.md`](firmware/README.md).
 
 This is an independent community project and is not affiliated with or
-endorsed by ASUS, Fedora, Red Hat, Qualcomm, or the Linux Foundation. Linux,
+endorsed by ASUS, Lenovo, Fedora, Red Hat, Qualcomm, or the Linux Foundation. Linux,
 Fedora, Snapdragon, Qualcomm, and related logos are trademarks of their
 respective owners.
