@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/* Yoga CAMF/CAMP: CCI master 3, sensor 0x10, MCLK4, reset 239, CSIPHY4.
+ * Windows sensor module confirms four lanes (laneAssign 0x3210).
+ * Use the upstream OV08X40 400 MHz mode, with its own register sequence.
+ */
+#include <dt-bindings/media/video-interfaces.h>
+
+&camss {
+	status = "okay";
+};
+
+&camss_csiphy4_inep {
+	data-lanes = <1 2 3 4>;
+};
+
+&cci1 {
+	/* Bus 0 uses GPIO106, which belongs to the camera PMIC reset. */
+	pinctrl-0 = <&cci1_1_default>;
+	pinctrl-1 = <&cci1_1_sleep>;
+	status = "okay";
+};
+
+&cci1_i2c0 {
+	status = "disabled";
+};
+
+&cci1_i2c1 {
+	camera@10 {
+		compatible = "ovti,ov08x40";
+		reg = <0x10>;
+
+		reset-gpios = <&tlmm 239 GPIO_ACTIVE_LOW>;
+		pinctrl-0 = <&cam_mclk4_default &yoga_rgb_reset_default>;
+		pinctrl-names = "default";
+
+		clocks = <&camcc CAM_CC_MCLK4_CLK>;
+		assigned-clocks = <&camcc CAM_CC_MCLK4_CLK>;
+		assigned-clock-rates = <19200000>;
+
+		avdd-supply = <&vreg_cam_l7_2p8>;
+		dovdd-supply = <&vreg_cam_l4_1p8>;
+		dvdd-supply = <&vreg_cam_l2_1p1>;
+
+		port {
+			yoga_ov08x40_out_ep: endpoint {
+				data-lanes = <1 2 3 4>;
+				link-frequencies = /bits/ 64 <400000000>;
+				remote-endpoint = <&csiphy4_in_ep>;
+			};
+		};
+	};
+};
+
+&csiphy4 {
+	/* C1KD.bin: LDO1_F_E1 and LDO4_F_E1; preserve existing board limits. */
+	vdda-0p9-supply = <&vreg_l1f1>;
+	vdda-1p2-supply = <&vreg_l4f1>;
+	status = "okay";
+};
+
+&csiphy4_in_ep {
+	bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
+	clock-lanes = <0>;
+	data-lanes = <1 2 3 4>;
+	remote-endpoint = <&yoga_ov08x40_out_ep>;
+};
+
+&tlmm {
+	yoga_rgb_reset_default: yoga-rgb-reset-default-state {
+		pins = "gpio239";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};

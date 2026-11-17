@@ -1,0 +1,122 @@
+From: Qianhui Xu <xiaqinghuan@mail.ustc.edu.cn>
+Subject: [LOCAL] media: camss: stop started subdevices when a start fails
+
+Backport the minimal unwind from the author's 29 October patch, preserving
+this kernel's legacy s_stream API and pad walk. The later v2 additionally
+converts to the streams API; that refactor is deliberately separate here.
+
+The Yoga's OV08X40 initial reset can return ETIMEDOUT. CAMSS has already
+started its receivers then, but the error path only releases the pipeline
+and buffers. On the next start the V4L2 core warns about the still-enabled
+subdevices and skips their setup. Stop only the successfully started prefix
+before releasing the pipeline, and keep stopping if one teardown fails.
+
+Source and maintainer review:
+https://lists.openwall.net/linux-kernel/2026/10/29/1874
+https://lore.kernel.org/all/20261031041154.308030-3-xiaqinghuan@mail.ustc.edu.cn/
+
+Validated on the Yoga on 2026-11-17 as part of the three-module recovery set:
+10 rapid RGB opens (15 frames each) and 10 IR opens (30 frames each), exact
+counts, no WARN/Oops or stream failures. The injected-failure harness covers
+the unwind itself; this physical run does not inject a sensor-start failure.
+Promoted to updates/ after the physical test. Post-promotion normal current
+boot passed with 90 RGB metadata frames and separate 1800-buffer RGB and IR
+PipeWire captures to EOS; no kernel WARN/Oops or stream failures. WirePlumber
+had no restarts. This local backport does not imply upstream acceptance.
+
+--- a/drivers/media/platform/qcom/camss/camss-video.c
++++ b/drivers/media/platform/qcom/camss/camss-video.c
+@@ -249,11 +249,37 @@
+ 	return ret;
+ }
+ 
++/* Stop the started subdevices, excluding the one that failed to start. */
++static void video_stop_subdevices(struct camss_video *video,
++				 struct media_entity *stop)
++{
++	struct media_entity *entity = &video->vdev.entity;
++	struct v4l2_subdev *subdev;
++	struct media_pad *pad;
++	int ret;
++
++	while (entity != stop) {
++		pad = &entity->pads[0];
++		if (!(pad->flags & MEDIA_PAD_FL_SINK))
++			break;
++		pad = media_pad_remote_pad_first(pad);
++		if (!pad || !is_media_entity_v4l2_subdev(pad->entity))
++			break;
++		entity = pad->entity;
++		if (entity == stop)
++			break;
++		subdev = media_entity_to_v4l2_subdev(entity);
++		ret = v4l2_subdev_call(subdev, video, s_stream, 0);
++		if (ret && ret != -ENOIOCTLCMD)
++			dev_err(video->camss->dev, "Video pipeline stop failed: %d\n", ret);
++	}
++}
++
+ static int video_start_streaming(struct vb2_queue *q, unsigned int count)
+ {
+ 	struct camss_video *video = vb2_get_drv_priv(q);
+ 	struct video_device *vdev = &video->vdev;
+-	struct media_entity *entity;
++	struct media_entity *entity = &vdev->entity;
+ 	struct media_pad *pad;
+ 	struct v4l2_subdev *subdev;
+ 	int ret;
+@@ -268,7 +294,6 @@
+ 	if (ret < 0)
+ 		goto error;
+ 
+-	entity = &vdev->entity;
+ 	while (1) {
+ 		pad = &entity->pads[0];
+ 		if (!(pad->flags & MEDIA_PAD_FL_SINK))
+@@ -289,6 +314,7 @@
+ 	return 0;
+ 
+ error:
++	video_stop_subdevices(video, entity);
+ 	video_device_pipeline_stop(vdev);
+ 
+ flush_buffers:
+@@ -300,35 +326,9 @@
+ static void video_stop_streaming(struct vb2_queue *q)
+ {
+ 	struct camss_video *video = vb2_get_drv_priv(q);
+-	struct video_device *vdev = &video->vdev;
+-	struct media_entity *entity;
+-	struct media_pad *pad;
+-	struct v4l2_subdev *subdev;
+-	int ret;
+-
+-	entity = &vdev->entity;
+-	while (1) {
+-		pad = &entity->pads[0];
+-		if (!(pad->flags & MEDIA_PAD_FL_SINK))
+-			break;
+-
+-		pad = media_pad_remote_pad_first(pad);
+-		if (!pad || !is_media_entity_v4l2_subdev(pad->entity))
+-			break;
+-
+-		entity = pad->entity;
+-		subdev = media_entity_to_v4l2_subdev(entity);
+-
+-		ret = v4l2_subdev_call(subdev, video, s_stream, 0);
+-
+-		if (ret) {
+-			dev_err(video->camss->dev, "Video pipeline stop failed: %d\n", ret);
+-			return;
+-		}
+-	}
+-
+-	video_device_pipeline_stop(vdev);
+-
++
++	video_stop_subdevices(video, NULL);
++	video_device_pipeline_stop(&video->vdev);
+ 	video->ops->flush_buffers(video, VB2_BUF_STATE_ERROR);
+ }
+ 

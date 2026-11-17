@@ -30,6 +30,24 @@ capacidade ainda não habilitada neste porte Linux.
 Detalhes em [ESTADO-ATUAL](docs/ESTADO-ATUAL.md) e receita de build/instalação
 em [install/usb](install/usb/README.md).
 
+**Câmeras permanentes validadas em 17/11:** RGB OV08X40 com imagem colorida
+1080p a cerca de 30 fps e IR VD55G0 em 640×480 a cerca de 60 fps.
+Ambas aparecem automaticamente no desktop e passaram em captura pelo
+PipeWire como usuário normal; RGB é a padrão. O iluminador IR emitiu um
+pulso com aumento de brilho confirmado nos quadros. O disparo por sinal do
+sensor também passou no ensaio de quadro único, incluindo OFF e restauração;
+o modo contínuo nos aplicativos segue pendente.
+
+O boot normal `current` usa o DT conjunto de [install/camera](install/camera/README.md),
+sobre a base USB3, com PM8010, CCI corrigido e `cma=128M`. A inicialização
+leva 23,897 s; `good` e o backup da base USB3 permanecem preservados.
+O WirePlumber usa processamento CPU da libcamera, mantendo suas proteções.
+A RGB agora usa [matrizes de cor extraídas do Windows](install/camera/WINDOWS-CALIBRATION.md),
+instaladas por sensor na libcamera. São ajustes parciais do modelo, sem
+medição com carta de cores. Após corrigir a recuperação de reabertura,
+dez aberturas rápidas de cada câmera passaram. No boot normal, PipeWire
+entregou 1.800 buffers de cada câmera, sequencialmente, sem reiniciar o WirePlumber.
+
 ## O que funciona
 
 Sobe sozinho no boot normal:
@@ -49,6 +67,9 @@ Sobe sozinho no boot normal:
 | Orientação USB-C (UCSI) | Automática nas três portas; carga e troca de papel não testadas |
 | Tampa e chave de privacidade da câmera | `gpio-keys`; tampa ignorada pelo logind, suspensão mascarada |
 | Relógio de hardware | `rtc1` + offset em arquivo, serviço automático |
+| Câmera RGB | OV08X40: RAW 3856×2416 e imagem processada 1920×1080 a ~30 fps; PipeWire validado |
+| Câmera IR | VD55G0: 640×480 em tons de cinza a ~60 fps; PipeWire validado |
+| Iluminador IR | Registrado e OFF no boot; emissão comprovada em pulso manual de 50 mA totais/10 ms |
 | Proteção térmica | 24 zonas de CPU com trip passivo de 105 °C; carga anterior atingiu 61 °C |
 
 Provado em boot de teste, ainda não promovido ao boot normal:
@@ -61,7 +82,7 @@ Provado em boot de teste, ainda não promovido ao boot normal:
 
 - **GPU:** o kernel sobe a Adreno X2-45, mas o Mesa 26.2.3 não reconhece o chip. Há um Mesa recompilado em `install/mesa-x2-45/`, não testado. Sem isso não há Niri.
 - **Kernel novo:** o R4 (`install/kernel-r4/`, base v7.4-rc3) traz firewall, zram e o módulo de som que falta; nunca deu boot e ainda precisa do patch completo do vídeo.
-- **Câmeras (RGB e infravermelha):** só a chave de privacidade. Falta o driver do PMIC das câmeras e a confirmação de três GPIOs.
+- **Câmeras:** perfil Windows completo, validação colorimétrica e iluminador contínuo nos aplicativos ainda pendentes. RGB/IR usam a mesma rota na libcamera atual, sem captura simultânea ou sincronização de exposição demonstradas. A chave física gera eventos; bloqueio nos aplicativos não foi validado.
 - **Suspensão:** mascarada; não testada.
 - **Gen2 na direita:** ainda apresenta resets/erros; mantida em Gen1 estável. USB4, saída de vídeo USB-C, microfones e fone seguem pendentes.
 - **Firewall:** o kernel em uso não tem `nf_tables`.
@@ -72,6 +93,7 @@ Provado em boot de teste, ainda não promovido ao boot normal:
 2. **Boot por Device Tree travava:** o TLMM precisa de `gpio-reserved-ranges = <4 4>, <10 2>, <27 1>, <44 4>, <65 1>, <90 2>, <139 1>`.
 3. **A tela apagava ao subir o Wi-Fi:** ciclo de liga/desliga do PCIe em adiamento de probe; resolvido com ordem de carga (pwrctrl/pwrseq antes do PHY).
 4. **Tela preta com o driver de vídeo real:** dois defeitos no PHY eDP v8 (Glymur) do kernel, presentes também no upstream. A tabela de PLL estava errada e o link não fechava; e o divisor do relógio de pixel em 5,4 Gbit/s deixava o vídeo a 30 Hz. Correção em [`patches/phy-qcom-edp-glymur-pll-v2.patch`](patches/phy-qcom-edp-glymur-pll-v2.patch). Só a taxa de 5,4 Gbit/s foi comprovada no hardware.
+5. **Travamento ao carregar CCI das câmeras:** o reset usa a completion do master 0, mas o driver só a inicializava para barramentos habilitados. Este Yoga usa somente o master 1 no CCI da RGB. O [patch CCI](install/camera/camss/qcom-cci-reset-completion.patch) inicializa todos os masters; o reprodutor e os boots corrigidos passaram. O travamento original não deixou backtrace persistente.
 
 ## Onde está cada coisa
 
@@ -79,7 +101,7 @@ Provado em boot de teste, ainda não promovido ao boot normal:
 |---|---|
 | [`docs/ESTADO-ATUAL.md`](docs/ESTADO-ATUAL.md) | Estado completo, mecanismo de cada item, armadilhas e próximos passos. Comece pela seção "COMECE AQUI" |
 | [`docs/ROTEIRO-TESTE-GWNX2.md`](docs/ROTEIRO-TESTE-GWNX2.md) | Roteiro do boot de teste combinado de 16/11 |
-| `dts/` | Device Trees do porte. Em uso: `gwnx2d1`, validado no `try` e no boot normal; reserva `gwnb1` |
+| `dts/` | Bases Device Tree; DT atual acrescenta câmeras em `install/camera/ir/yoga-camera-all-test.dts`; reserva `gwnb1` |
 | `dts/fragments/` | Um fragmento por subsistema (som, USB, EC, RTC, tampa, térmica, câmera, toque, Bluetooth) |
 | `patches/` | Correção do PHY eDP para a árvore do kernel |
 | `install/install-yoga.sh` | Instalador usado no SSD interno (apaga o disco de destino) |
@@ -92,7 +114,7 @@ Provado em boot de teste, ainda não promovido ao boot normal:
 | `iso/` | Menu GRUB e scripts da mídia de diagnóstico usada no bring-up |
 | `windows/` | Coletor PowerShell de drivers, firmware, ACPI e perfis do Windows original |
 | [`CORES.md`](CORES.md), [`COLETA-WINDOWS-2026-11-13.md`](COLETA-WINDOWS-2026-11-13.md), [`ISO-LENOVO-DIAGNOSTICS-5.2.1.md`](ISO-LENOVO-DIAGNOSTICS-5.2.1.md), [`sources.json`](sources.json) | Referência: perfis de cor Lenovo, coleta do Windows, ISO oficial, fontes |
-| [`WORKFLOW.md`](WORKFLOW.md) | Processo atual para USB3 no topo; planejamento de 13/11 preservado abaixo |
+| [`WORKFLOW.md`](WORKFLOW.md) | Resultado do workflow de câmeras e USB3; planejamento de 13/11 preservado abaixo |
 | [`DRIVERS.md`](DRIVERS.md), `iso/RESULTADO*.md` | Histórico do planejamento de 13/11 |
 
 A pasta `local/` não é versionada: guarda a árvore e os builds do kernel, firmware e ACPI coletados do aparelho, os DTBs compilados e os registros dos testes físicos. Binários (`*.dtb`, `*.ko`) também ficam fora; compile a partir das fontes.

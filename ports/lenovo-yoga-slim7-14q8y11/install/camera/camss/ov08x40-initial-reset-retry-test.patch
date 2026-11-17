@@ -1,0 +1,35 @@
+Subject: [LOCAL] media: ov08x40: retry the initial reset once after timeout
+
+The Yoga OV08X40 rapid-reopen failure was captured before any frames with
+CCI IRQ_STATUS=0, CUR_CMD=0x01030139, CUR_WORD_CNT=1, EXEC_WORD_CNT=3 and
+REPORT_STATUS=0. The command is the initial write 01 03 01 (software reset).
+The CCI timeout path resets the stalled controller before returning.
+
+Repeat only that idempotent initial reset, once, and only for ETIMEDOUT.
+Do not retry NACK, other errors, mode tables, controls or stream-on writes.
+Preserve the second error and all existing startup cleanup.
+
+This is a local workaround for this observed CCI behaviour, not an
+upstream-approved generic sensor retry policy. On 2026-11-17 the combined
+recovery set passed 10 rapid RGB opens (15 frames each) and 10 IR opens
+(30 frames each), with exact counts and no WARN/Oops or stream failures.
+Nine initial RGB reset timeouts were recovered. The physical timeout remains
+possible and adds about 100 ms to a recovered open; it is not eliminated.
+Promoted to updates/ after that test. Normal current boot then passed with
+90 RGB metadata frames and separate 1800-buffer RGB and IR PipeWire captures
+to EOS. One initial RGB reset timeout was recovered, with no kernel WARN/Oops
+or stream failures and no WirePlumber restarts.
+
+--- a/drivers/media/i2c/ov08x40.c
++++ b/drivers/media/i2c/ov08x40.c
+@@ -1920,6 +1920,10 @@
+ 	/* Get out of from software reset */
+ 	ret = ov08x40_write_reg(ov08x, OV08X40_REG_SOFTWARE_RST,
+ 				OV08X40_REG_VALUE_08BIT, OV08X40_SOFTWARE_RST);
++	/* The CCI timeout path resets a stalled controller. Reset is idempotent. */
++	if (ret == -ETIMEDOUT)
++		ret = ov08x40_write_reg(ov08x, OV08X40_REG_SOFTWARE_RST,
++					OV08X40_REG_VALUE_08BIT, OV08X40_SOFTWARE_RST);
+ 	if (ret) {
+ 		dev_err(ov08x->dev, "%s failed to set powerup registers\n",
+ 			__func__);

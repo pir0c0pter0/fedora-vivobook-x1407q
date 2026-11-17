@@ -1,0 +1,21 @@
+--- a/drivers/i2c/busses/i2c-qcom-cci.c
++++ b/drivers/i2c/busses/i2c-qcom-cci.c
+@@ -682,6 +682,10 @@
+ 	if (!cci->data)
+ 		return -ENOENT;
+ 
++	/* Controller reset uses master 0 even when its bus is disabled. */
++	for (i = 0; i < cci->data->num_masters; i++)
++		init_completion(&cci->master[i].irq_complete);
++
+ 	for_each_available_child_of_node_scoped(dev->of_node, child) {
+ 		struct cci_master *master;
+ 		u32 idx;
+@@ -721,7 +725,6 @@
+ 				master->mode = I2C_MODE_FAST_PLUS;
+ 		}
+ 
+-		init_completion(&master->irq_complete);
+ 	}
+ 
+ 	/* Memory */

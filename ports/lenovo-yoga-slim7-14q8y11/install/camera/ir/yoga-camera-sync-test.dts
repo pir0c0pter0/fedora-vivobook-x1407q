@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/* Private one-frame experiment; requires both reviewed diagnostic modules. */
+#include "yoga-camera-all-test.dts"
+
+&cci0_i2c0 {
+	camera@10 {
+		/* Original Windows context1 sets VD55G0 GPIO0 to exposure strobe. */
+		st,leds = <0>;
+		flash-leds = <&yoga_ir_flash>;
+	};
+};
+
+&yoga_ir_flash {
+	flash-max-microamp = <50000>;
+	flash-max-timeout-us = <10000>;
+};

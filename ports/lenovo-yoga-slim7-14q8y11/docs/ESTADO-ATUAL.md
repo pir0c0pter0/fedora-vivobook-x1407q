@@ -1,12 +1,158 @@
 # Contexto limpo — Lenovo Yoga Slim 7 14Q8Y11 / Snapdragon X2 Plus
 
-Atualizado em 2026-11-17 (USB3 permanente validado no hardware). Fonte de verdade para retomada; históricos e snapshots não substituem este estado. As seções a partir de "Objetivo confirmado" vêm da consolidação de 13/11 e continuam válidas onde não conflitam com as seções abaixo.
+Atualizado em 2026-11-17 (perfil RGB do Windows instalado, reabertura recuperada e sincronismo IR ensaiado em quadro único). Fonte de verdade para retomada; históricos e snapshots não substituem este estado. As seções a partir de "Objetivo confirmado" vêm da consolidação de 13/11 e continuam válidas onde não conflitam com as seções abaixo.
 
 ## COMECE AQUI — estado em 17/11/2026 (fonte de verdade)
 
-Caminhos: `R` = `<workspace>`; `P` = `R/fedora-vivobook-x1407q/.worktrees/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11`; `B` = `P/local/iso-build`; `OUT` = `P/local/dtb-bisect-r5`; `D` = `P/local/physical-2026-11-16` (todos os logs de hardware).
+Caminhos: `R` = `<workspace>`; `P` = `R/fedora-vivobook-x1407q/.worktrees/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11`; `B` = `P/local/iso-build`; `OUT` = `P/local/dtb-bisect-r5`; `D` = `P/local/physical-2026-11-16` (logs históricos); os testes de 17/11 ficam em `P/local/physical-2026-11-17/`.
 
-### USB3 permanente — 17/11/2026
+### Calibração Windows e recuperação de reabertura — 17/11/2026
+
+**Instalado e validado no boot normal `current`.** A RGB usa quatro
+matrizes de correção de cor extraídas do Chromatix Windows associado ao
+módulo deste Yoga, em `/etc/libcamera/ipa/simple/ov08x40.yaml`.
+O [extrator e a revisão](../install/camera/WINDOWS-CALIBRATION.md) verificam
+estrutura, CRC, vínculo pelo perfil/HWID e equivalência CHI/LVI. O perfil
+conserva intervalos CCT, mas fixa os demais eixos do ISP; não representa
+calibração individual nem todo o processamento Windows. Coeficientes e
+blobs permanecem privados em `local/`.
+
+| Validação final no Yoga | Resultado |
+|---|---|
+| Boot normal | 23,897 s; câmera em 23,871674 s, antes do GDM em 23,897372 s |
+| RGB direta como usuário | 90 quadros RGB888 1920×1080; CCM original confirmada nos metadados, blacklevel4096 |
+| PipeWire RGB | 1.800 buffers 1080p até EOS em 60,181 s |
+| PipeWire IR | 1.800 buffers GRAY8 640×480 até EOS em 29,016 s, após RGB |
+| WirePlumber | PID1718/NRestarts0 antes/depois; CPU e MDWE preservados; RGB padrão |
+| Reabertura no ensaio anterior | 10 aberturas RGB×15 quadros e 10 IR×30, todas completas |
+| Iluminador no boot normal | OFF físico em ee46/ee4e; ee67 bit0=1 |
+
+O CCI ainda pode travar a primeira escrita de reset numa reabertura rápida.
+As correções fazem reset na retomada, drenam a IRQ anterior e repetem
+**somente** o reset inicial OV08X40 uma vez após ETIMEDOUT. O CAMSS desfaz
+os subdispositivos já iniciados quando um start falha. Foram recuperados nove
+timeouts no ensaio rápido e um no teste PipeWire normal, sem WARN/Oops/falha
+de stream; o contorno pode acrescentar cerca de 100 ms na abertura.
+
+Módulos permanentes atualizados em `updates/`:
+
+| Módulo | SHA256 |
+|---|---|
+| CCI | `b7f3f921a932fb8e342d2949896def292e615a88e307d90fc857e023f5dd291c` |
+| OV08X40 | `4ae757a56100c1d93529e1200aba6fe590b2f0efe25beadeed86bf47e6741c9d` |
+| CAMSS | `31a4efbe2542c455799a6dd0dc0a4b220a44c2835c5299e6b67e4c7b3534308c` |
+
+São sete módulos de câmera em updates, com o CAMSS corrigido; o stock
+permanece em kernel/. O script agora exige também CAMSS vindo de updates;
+20 testes offline passaram, incluindo recusa do stock antes de carregar.
+Essa guarda adicional foi instalada após o boot de validação, com caminho
+real conferido; não foi feito outro reboot só para a guarda.
+
+**Sincronismo IR:** dois ensaios privados de um quadro usaram a rota do
+Windows GPIO0 do VD55G0 → strobe do PMIC, a 50 mA totais/10 ms e exposição
+manual1166 linhas (~9,994 ms). A versão final entregou 384.000 bytes,
+faults0, canais/módulo OFF e ee67 restaurado a1, sem erros de cleanup.
+Houve aumento de sinal compatível com iluminação adicional, mas a cena mudou
+entre boots; isso não mede precisão fotométrica, largura elétrica ou rearme
+contínuo. [Diagnóstico e evidências](../install/camera/ir/SYNCHRONIZATION.md).
+Os módulos de quadro único, wrapper V4L2, DT com st,leds, opções, bind mounts
+e unidades temporárias foram retirados. O iluminador não é automático nos apps.
+
+**Limites:** sem carta de cores não foi medido erro colorimétrico. AWB/LSC
+proprietários não foram portados. ExposureTime da libcamera0.7.2 mantém a
+escala do modo inicial ao mudar para binning (59,217 ms publicados versus
+33,315 ms reais no exemplo); AGC usa linhas/limites corretos. Ambas as rotas
+Simple selecionam CSID0/VFE0; os testes são sequenciais, sem sincronização
+RGB↔IR de exposição demonstrada. Suspensão/privacidade em apps não testadas.
+
+DTB, kernel, initramfs e argumentos de current/good continuam intactos;
+try foi restaurado de current, saved_entry=current, sem next_entry.
+Vídeo, USB2/3, SoCCP, EC e RTC ativos; eDP, PCIe e bateria presentes.
+A única unidade em falha continua sendo firewalld por falta de nf_tables.
+Backups: `/root/camera-calibration-20261117/modules-before/`, estado anterior
+do tuning e dos slots no mesmo diretório. Para reverter as correções, restaurar
+CCI/OV08X40, remover somente o CAMSS acrescentado em updates, executar depmod
+e reiniciar; para o perfil, remover/restaurar apenas o YAML do sensor.
+Logs, fotos, RAWs e laudos: `local/physical-2026-11-17/camera-calibration/`,
+principalmente `normal-*.txt`, `final-*.sha256`, `sync-v2*.txt` e `review/`.
+
+### Integração inicial das câmeras — antes da calibração, 17/11/2026
+
+**RGB, IR e iluminador responderam no Yoga.** A configuração passou no
+`try` e foi promovida e repetida no boot normal `current`, sem carga manual.
+O iluminador inicia desligado; somente um pulso manual foi emitido nesta rodada.
+
+| Item | Evidência física |
+|---|---|
+| RGB OV08X40 | Quatro quadros RAW 3856×2416 a ~30 fps; imagem colorida inspecionada. Libcamera como usuário: 90 quadros 1920×1080 ABGR8888 a ~30 fps. No boot normal, PipeWire entregou 90 buffers 1080p até EOS |
+| IR VD55G0 | Oito quadros RAW10 640×480 a ~60 fps; imagem inspecionada. Libcamera/GStreamer entregaram GRAY8; no boot normal, PipeWire entregou 60 buffers 640×480 até EOS |
+| Iluminador PMH0101 | Um pulso de 50 mA totais/10 ms nos canais 1+4 durante 120 quadros IR com exposição/ganhos fixos. Quadros 23/24 coincidiram com o pulso; pico +22,54% global e +66,34% no centro, retorno ao basal no quadro 25. OFF físico confirmado em ee46/ee4e |
+
+**Configuração instalada:** DTB compilado de
+`install/camera/ir/yoga-camera-all-test.dts`, SHA256
+`8283c271a15ebb3397338a0b1ce1a61f9c41e5fe328898ee3a7cc85f9b8a2544`,
+em `current` e `try`. Kernel/initramfs permanecem os da base USB3;
+kernel `7.4.0-rc1-yoga-kalambo+`. `saved_entry=current`, sem `next_entry`.
+`good` permanece intacto. Backup completo dos slots anteriores e manifestos
+em `/root/camera-workflow-20261117/{current-before,good-before,try-before}`.
+Não substituir `good` pelo experimento de câmeras.
+
+Seis módulos em `updates/`: PM8010 MFD/regulador, CCI corrigido, OV08X40,
+VD55G0 e flash corrigido. `yoga.camera=1` e `cma=128M` nos argumentos;
+blacklists de modprobe/initramfs impedem a carga antecipada. O serviço
+`yoga-camera` depende de vídeo/USB3 e do gatilho udev existente, prepara
+sensores/heaps antes do CAMSS e termina antes do GDM. Não espera associação
+Wi-Fi. A regra dos DMA heaps concede acesso à sessão local nos heaps
+`system`/`default_cma_region`. Não foi acrescentada permissão ao heap `reserved`.
+
+No boot normal: câmera concluiu em 23,810963 s, GDM iniciou em 23,813315 s,
+boot total 23,838 s. Vídeo, USB2/3, SoCCP, EC, RTC e GDM ativos; eDP conectado,
+bateria presente, Wi-Fi/raiz NVMe acessíveis. Só a falha preexistente do
+`firewalld` por falta de `nf_tables`. Não foram repetidas leituras de discos
+externos: nesta rodada foram conferidos os controladores USB e seus serviços.
+
+**Desktop:** dois dispositivos/fontes libcamera aparecem automaticamente;
+RGB selecionada como padrão. Drop-in por usuário do WirePlumber define
+`LIBCAMERA_SOFTISP_MODE=cpu`, mantendo `MemoryDenyWriteExecute=yes`.
+O modo EGL/llvmpipe original caiu no JIT LLVM ao capturar pelo WirePlumber;
+o modo CPU passou. No boot normal o PID ficou 1712 e `NRestarts=0` antes e
+depois das duas capturas. A reserva CMA anterior de 32 MiB falhava em 1080p;
+128 MiB passou. Não usar índices numéricos de `cam`: a ordem muda entre boots;
+IDs completos e receitas em [install/camera](../install/camera/README.md).
+
+**Travamento inicial:** o CCI stock deu segmentation fault e o aparelho
+precisou de reboot forçado pelo usuário. O journal terminou antes da falha e
+pstore estava vazio, portanto não há backtrace desse travamento. A auditoria
+reproduziu uma completion não inicializada: reset usa master 0 mesmo quando
+só o master 1 está habilitado. O patch inicializa todos os masters; reprodutor,
+carga física e boots posteriores passaram. Não recarregar o CCI stock.
+O flash também recebeu correção de teardown e de timeout: código 0 equivale
+a 10 ms; o original programava 20 ms ao solicitar 10 ms.
+
+PM8010 foi identificado por tipo 0x51/subtipo 0x41 em 0x08/0x09, após
+BOB1=3,416 V e GPIO106 alto. RGB usa reset239/MCLK4/CCI1 bus1/CSIPHY4;
+IR usa reset109/MCLK0/CCI0 bus0/CSIPHY0. LDOs e ligações estão descritos
+em [power](../install/camera/power/README.md). Revisões separadas cobriram
+DTS, drivers, pulso e inicialização; 19 cenários do serviço passaram com a
+estrutura sysfs real (mídia em `/sys/bus/media/devices`, não `class/media`).
+
+**Limites:** calibração genérica de imagem, avisos de metadados dos sensores,
+ensaios curtos e sequenciais. Não foram testadas captura simultânea,
+suspensão, reconhecimento facial, bloqueio nos aplicativos pela chave de
+privacidade nem sincronização automática do iluminador. O evento
+`flash-timeout-exceeded` apareceu após o pulso; emissão e OFF foram provados,
+mas a largura elétrica exata não foi medida. Não usar torch para contornar
+o timer nem aumentar a corrente a partir do valor encontrado no Windows.
+
+Evidências privadas em `P/local/physical-2026-11-17/camera-workflow/`:
+`current-final-validation.txt` inclui comandos, serviços, capturas e
+manifestos; `integration-try-v2.txt`, `pipewire-cpu-test.txt`,
+`cci-independent-review.md`, `power/promotion-evidence-review.md` e
+`ir/ir-pulse-validation.md` completam a revisão. Fotos, RAWs e dumps ficam
+somente em `local/`. Build, instalação e rollback em
+[install/camera](../install/camera/README.md).
+
+### USB3 permanente — estado antes das câmeras, 17/11/2026
 
 **Direita funcionando em USB3 Gen1 (5 Gbit/s); esquerdas em Gen2 (10 Gbit/s).**
 O usuário priorizou corrigir a direita. A solução validada combina o
@@ -167,7 +313,7 @@ Logs em `D/gwnx2/` e `D/gwnx2-live-dmesg.txt`. Fragmentos em `P/dts/fragments/`;
 
 - **Kernel R4** (`B/kernel-r4`, `B/kernel-out-r4/dist`, release `7.4.0-rc3-yoga-kalambo-r4+`; scripts em `P/install/kernel-r4/`): for-next + v7.4-rc3, nf_tables, zram, firmware comprimido, snd-seq, Bluetooth LE, CAMSS/sensores =m, depuração. **Tem só a correção de PLL do PHY eDP; falta aplicar `OUT/phy-qcom-edp-glymur-pll-v2.patch` (PLL + divisor) e recompilar antes de usar com vídeo.** Nunca deu boot. R2/R3 (`kernel-out-r2`, `kernel-out-r3`) são anteriores.
 - **Mesa para a Adreno X2-45** (`P/install/mesa-x2-45/`, build em `B/mesa-build/`): o Mesa 26.2.3 do Fedora rejeita o chip (`unsupported GPU id 0x0 / chip id 0xc144060020`); pacote recompilado para `/opt/mesa-x2-45` com wrapper de ambiente. O kernel já sobe a GPU (gpucc, gxclkctl, SMMU 3da0000, firmware `gen80100_*` descomprimido, GMU v5.2.38, `renderD128`). Recomendações do revisor: limitar `devfreq` da GPU a um OPP baixo antes do primeiro draw; `timeout` em cada teste. Hoje o `yoga-video-up` grava `driver_override=none` na GPU: o teste de GPU precisa conviver com isso.
-- **Câmeras (RGB + IR):** só a chave de privacidade. Imagem depende de driver do PMIC de câmera (hipótese PM8010, módulos preparados em `P/install/camera/`) e de GPIOs de saída 106/239/109 que só têm a configuração do Windows como fonte: **decisão do usuário pendente**.
+- **Câmeras (registro histórico de 16/11, superado):** naquela etapa só a chave de privacidade funcionava. Em 17/11, PM8010, RGB, IR e iluminador foram validados e as câmeras promovidas ao boot normal; ver o topo deste documento.
 - **Suspensão s2idle:** só avaliação (`P/install/power/`); revisores recomendam não testar no kernel em uso.
 
 ### Causas-raiz encontradas (não reinvestigar)

@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/* PMIC identification only: BOB1 + I2C5, no sensors or PMIC driver. */
+#include "../../../dts/kalambo-lenovo-yoga-slim7x-gwnx2d1-usb3.dts"
+
+&rpmh_vregs_b_e0 {
+	vreg_bob1_e0: bob1 {
+		regulator-name = "vreg_bob1_e0";
+		/* Windows requests 3.4 V; pmic5_bob rounds up in 32 mV steps. */
+		regulator-min-microvolt = <3400000>;
+		regulator-max-microvolt = <3416000>;
+		regulator-initial-mode = <RPMH_REGULATOR_MODE_AUTO>;
+		regulator-always-on;
+	};
+};
+
+/* DSDT PML0: address 0x08, I2C6/QUP0_SE5, 100 kHz. */
+&i2c5 {
+	clock-frequency = <100000>;
+	status = "okay";
+};

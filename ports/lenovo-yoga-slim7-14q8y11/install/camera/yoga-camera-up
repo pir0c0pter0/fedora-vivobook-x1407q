@@ -1,0 +1,118 @@
+#!/bin/sh
+# Inicializacao do DT RGB+IR+flash sobre a base USB3 validada. Nao captura nem dispara.
+set -eu
+
+fail() { echo "yoga-camera: FALHA: $*" >&2; exit 1; }
+
+case " $(cat /proc/cmdline) " in
+    *" yoga.camera=1 "*) ;;
+    *) fail "falta yoga.camera=1" ;;
+esac
+tr '\000' '\n' < /sys/firmware/devicetree/base/compatible |
+    grep -qx 'lenovo,yoga-slim7x-gen11-x2plus-diag' || fail "DT de outra placa"
+systemctl is-active --quiet yoga-video.service || fail "video inativo"
+systemctl is-active --quiet yoga-usb3.service || fail "USB3 inativo"
+grep -qx connected /sys/class/drm/card*-eDP-*/status || fail "eDP desconectado"
+for pci in 0004:01:00.0 0005:01:00.0; do
+    grep -qx active "/sys/bus/pci/devices/$pci/power/runtime_status" ||
+        fail "PCIe $pci inativo"
+done
+awk '
+    $1 == "vreg_l1f1" || $1 == "vreg_l4f1" {
+        ok[$1] = ($2 ~ /^[0-9]+$/ && $2+0 > 0)
+    }
+    $1 == "vreg_bob1_e0" {
+        bob = ($2 ~ /^[0-9]+$/ && $2+0 > 0 && $6 == "3416mV")
+    }
+    END { exit !(ok["vreg_l1f1"] && ok["vreg_l4f1"] && bob) }
+' /sys/kernel/debug/regulator/regulator_summary || fail "trilhos compartilhados/BOB nao prontos"
+
+# Verificar TODOS os arquivos antes da primeira carga. O CCI stock causa oops
+# com somente bus1 ativo. modinfo inspeciona disco, nao o modulo ja em memoria.
+for module in i2c_qcom_cci leds_qcom_flash; do
+    [ ! -d "/sys/module/$module" ] || fail "$module ja carregado; conferir blacklist e reiniciar"
+done
+release=$(uname -r)
+for module in qcom_pm8008 qcom_pm8008_regulator camcc_glymur i2c_qcom_cci \
+              phy_qcom_mipi_csi2 qcom_camss ov08x40 vd55g0 leds_qcom_flash \
+              system_heap cma_heap; do
+    module_file=$(modinfo -n "$module") || fail "modulo ausente: $module"
+    case "$module" in
+        qcom_pm8008|qcom_pm8008_regulator|i2c_qcom_cci|qcom_camss|ov08x40|vd55g0|leds_qcom_flash)
+            case "$module_file" in
+                */updates/*) ;;
+                *) fail "$module deve vir de updates/; conferir depmod" ;;
+            esac ;;
+    esac
+    magic=$(modinfo -F vermagic "$module") || fail "vermagic: $module"
+    [ "${magic%% *}" = "$release" ] || fail "kernel incompatível: $module"
+done
+
+sensor_bound() {
+    for device in /sys/bus/i2c/devices/*-0010; do
+        [ -L "$device/driver" ] || continue
+        [ "$(basename "$(readlink "$device/driver")")" = "$1" ] && return 0
+    done
+    return 1
+}
+
+# CAMSS publica mediaN antes do notifier. Preparar sensores e heaps primeiro
+# evita anunciar uma topologia vazia ou iniciar o ISP sem acesso aos buffers.
+for module in qcom_pm8008 qcom_pm8008_regulator camcc_glymur i2c_qcom_cci \
+              phy_qcom_mipi_csi2 ov08x40 vd55g0 system_heap cma_heap; do
+    modprobe "$module" || fail "carga de $module"
+done
+attempt=0
+until sensor_bound ov08x40 && sensor_bound vd55g0 &&
+      [ -c /dev/dma_heap/system ] && [ -c /dev/dma_heap/default_cma_region ]; do
+    [ "$attempt" -lt 100 ] || fail "sensores/heaps nao ficaram prontos em 10 s"
+    sleep 0.1
+    attempt=$((attempt + 1))
+done
+udevadm wait --timeout=10 --initialized=yes \
+    /dev/dma_heap/system /dev/dma_heap/default_cma_region || fail "udev dos DMA heaps"
+modprobe qcom_camss || fail "carga de qcom_camss"
+modprobe leds_qcom_flash || fail "carga de leds_qcom_flash"
+
+# default-state nao e interpretado pelo driver flash. Tentar ambos os OFF,
+# mesmo se o primeiro falhar. Nao usar brightness positivo (torch sem timer).
+led=/sys/class/leds/ir:flash
+off_failed=0
+printf '0\n' > "$led/flash_strobe" || off_failed=1
+printf '0\n' > "$led/brightness" || off_failed=1
+python3 - <<'PY'
+import os
+from pathlib import Path
+
+regmap = Path('/sys/kernel/debug/regmap/0-01')
+if (regmap / 'range').read_text().strip() != '0-ffff':
+    raise RuntimeError('layout regmap inesperado')
+fd = os.open(regmap / 'registers', os.O_RDONLY)
+try:
+    for reg, mask in ((0xee46, 0x80), (0xee4e, 0x0f)):
+        line = os.pread(fd, 9, reg * 9).decode('ascii')
+        if len(line) != 9 or line[:6] != f'{reg:04x}: ':
+            raise RuntimeError(f'leitura invalida em {reg:04x}')
+        if int(line[6:8], 16) & mask:
+            raise RuntimeError(f'iluminador nao esta OFF em {reg:04x}')
+finally:
+    os.close(fd)
+PY
+[ "$off_failed" = 0 ] || fail "escrita OFF do iluminador falhou"
+
+media_ready() {
+    for device in /sys/bus/media/devices/media*; do
+        [ -c "/dev/${device##*/}" ] || continue
+        media_path=$(readlink -f "$device") || continue
+        [ "$(basename "$(readlink "$media_path/../driver")")" = qcom-camss ] && return 0
+    done
+    return 1
+}
+attempt=0
+until sensor_bound ov08x40 && sensor_bound vd55g0 && media_ready &&
+      [ -c /dev/dma_heap/system ] && [ -c /dev/dma_heap/default_cma_region ]; do
+    [ "$attempt" -lt 100 ] || fail "sensores/media/heaps nao ficaram prontos em 10 s"
+    sleep 0.1
+    attempt=$((attempt + 1))
+done
+echo "yoga-camera: RGB e IR registrados; DMA heaps prontos; iluminador OFF"

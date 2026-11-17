@@ -1,0 +1,203 @@
+--- a/drivers/leds/flash/leds-qcom-flash.c
++++ b/drivers/leds/flash/leds-qcom-flash.c
+@@ -12,6 +12,11 @@
+ #include <linux/property.h>
+ #include <linux/regmap.h>
+ #include <media/v4l2-flash-led-class.h>
++
++/* Private Yoga one-frame diagnostic; never used by the baseline build. */
++static bool diagnostic_windows_ee67;
++module_param(diagnostic_windows_ee67, bool, 0400);
++MODULE_PARM_DESC(diagnostic_windows_ee67, "Reproduce Yoga Windows ee67 bit0 for one-frame test");
+ 
+ /* registers definitions */
+ #define FLASH_REVISION_REG		0x00
+@@ -166,6 +171,9 @@
+ };
+ 
+ struct qcom_flash_data {
++	struct regmap_field	*diagnostic_ee67;
++	u32			diagnostic_saved;
++	bool			diagnostic_saved_valid;
+ 	struct v4l2_flash	**v4l2_flash;
+ 	struct regmap_field     *r_fields[REG_MAX_COUNT];
+ 	struct mutex		lock;
+@@ -463,6 +471,77 @@
+ 	return 0;
+ }
+ 
++/* Caller has disabled both channel and module gates. No field-name or
++ * timer-restart semantics are inferred: this mirrors qcpmic8480 0x140027370.
++ */
++static int diagnostic_windows_config(struct qcom_flash_led *led, bool prepare)
++{
++	struct qcom_flash_data *data = led->flash_data;
++	u32 value;
++	int rc;
++
++	if (!diagnostic_windows_ee67)
++		return 0;
++	if (!data->diagnostic_ee67)
++		return -ENODEV;
++	if (prepare) {
++		if (data->diagnostic_saved_valid)
++			return -EBUSY;
++		if (led->chan_count != 2 || led->chan_id[0] != 0 ||
++		    led->chan_id[1] != 3 || led->flash_current_ma > 50 ||
++		    !led->flash_current_ma || led->flash_timeout_ms != 10)
++			return -EINVAL;
++		rc = regmap_field_read(data->diagnostic_ee67, &data->diagnostic_saved);
++		if (rc)
++			return rc;
++		data->diagnostic_saved_valid = true;
++		dev_info(led->flash.led_cdev.dev, "diagnostic ee67 bit0 saved=%u\n",
++			 data->diagnostic_saved);
++	} else if (!data->diagnostic_saved_valid) {
++		return 0;
++	}
++
++	value = prepare ? 0 : data->diagnostic_saved;
++	rc = regmap_field_write(data->diagnostic_ee67, value);
++	if (rc)
++		return rc;
++	rc = regmap_field_read(data->diagnostic_ee67, &value);
++	if (rc)
++		return rc;
++	if (value != (prepare ? 0 : data->diagnostic_saved))
++		return -EIO;
++	if (!prepare) {
++		data->diagnostic_saved_valid = false;
++		dev_info(led->flash.led_cdev.dev, "diagnostic ee67 bit0 restored=%u\n", value);
++	}
++	return 0;
++}
++
++static int diagnostic_external_off(struct qcom_flash_led *led)
++{
++	struct qcom_flash_data *data = led->flash_data;
++	u32 channels, module;
++	int rc, module_rc;
++
++	/* Attempt both OFF gates even if one write fails. */
++	rc = set_flash_strobe(led, HW_STROBE, false);
++	module_rc = set_flash_module_en(led, false);
++	if (rc || module_rc)
++		return rc ? rc : module_rc;
++	if (!diagnostic_windows_ee67 || !data->diagnostic_saved_valid)
++		return 0;
++	/* Restore only after actual register readback proves both gates OFF. */
++	rc = regmap_field_read(data->r_fields[REG_CHAN_EN], &channels);
++	if (rc)
++		return rc;
++	rc = regmap_field_read(data->r_fields[REG_MODULE_EN], &module);
++	if (rc)
++		return rc;
++	if (channels || module)
++		return -EBUSY;
++	return diagnostic_windows_config(led, false);
++}
++
+ static inline struct qcom_flash_led *flcdev_to_qcom_fled(struct led_classdev_flash *flcdev)
+ {
+ 	return container_of(flcdev, struct qcom_flash_led, flash);
+@@ -488,6 +567,10 @@
+ {
+ 	struct qcom_flash_led *led = flcdev_to_qcom_fled(fled_cdev);
+ 	int rc;
++
++	/* V4L2 MODE_NONE uses these LED-class OFF callbacks. */
++	if (diagnostic_windows_ee67 && !state)
++		return diagnostic_external_off(led);
+ 
+ 	rc = set_flash_strobe(led, SW_STROBE, false);
+ 	if (rc)
+@@ -605,6 +688,10 @@
+ 	bool enable = !!brightness;
+ 	int rc;
+ 
++	/* V4L2 MODE_NONE uses these LED-class OFF callbacks. */
++	if (diagnostic_windows_ee67 && !brightness)
++		return diagnostic_external_off(led);
++
+ 	rc = set_flash_strobe(led, SW_STROBE, false);
+ 	if (rc)
+ 		return rc;
+@@ -646,15 +733,12 @@
+ {
+ 	struct led_classdev_flash *fled_cdev = v4l2_flash->fled_cdev;
+ 	struct qcom_flash_led *led = flcdev_to_qcom_fled(fled_cdev);
+-	int rc, off_rc;
++	int rc;
+ 
+ 	/* Keep both gates off while programming; attempt both even on error. */
+-	rc = set_flash_strobe(led, HW_STROBE, false);
+-	off_rc = set_flash_module_en(led, false);
+-	if (rc || off_rc) {
+-		rc = rc ? rc : off_rc;
++	rc = diagnostic_external_off(led);
++	if (rc)
+ 		goto disable;
+-	}
+ 	if (!enable)
+ 		return 0;
+ 
+@@ -672,6 +756,10 @@
+ 	if (rc)
+ 		goto disable;
+ 
++	rc = diagnostic_windows_config(led, true);
++	if (rc)
++		goto disable;
++
+ 	/* Current, timer and external source are configured before either gate. */
+ 	rc = set_flash_module_en(led, true);
+ 	if (rc)
+@@ -681,8 +769,7 @@
+ 		return 0;
+ 
+ disable:
+-	set_flash_strobe(led, HW_STROBE, false);
+-	set_flash_module_en(led, false);
++	diagnostic_external_off(led);
+ 	return rc;
+ }
+ 
+@@ -965,6 +1052,22 @@
+ 	}
+ 	devm_kfree(dev, regs); /* devm_regmap_field_bulk_alloc() makes copies */
+ 
++	if (diagnostic_windows_ee67) {
++		if (reg_base != 0xee00 || flash_data->hw_type != QCOM_MVFLASH_4CH ||
++		    flash_data->revision != 1 || device_get_child_node_count(dev) != 1 ||
++		    device_property_match_string(dev, "compatible", "qcom,pmh0101-flash-led") < 0)
++			return -ENODEV;
++		rc = regmap_read(regmap, 0x0105, &val);
++		if (rc)
++			return rc;
++		if (val != 0x5d)
++			return -ENODEV;
++		flash_data->diagnostic_ee67 = devm_regmap_field_alloc(dev, regmap,
++							       (struct reg_field)REG_FIELD(0xee67, 0, 0));
++		if (IS_ERR(flash_data->diagnostic_ee67))
++			return PTR_ERR(flash_data->diagnostic_ee67);
++	}
++
+ 	platform_set_drvdata(pdev, flash_data);
+ 	mutex_init(&flash_data->lock);
+ 
+@@ -1005,6 +1108,15 @@
+ {
+ 	struct qcom_flash_data *flash_data = platform_get_drvdata(pdev);
+ 
++	if (diagnostic_windows_ee67 && flash_data->leds_count &&
++	    flash_data->v4l2_flash[0]) {
++		struct qcom_flash_led *led = flcdev_to_qcom_fled(
++			flash_data->v4l2_flash[0]->fled_cdev);
++		int rc = diagnostic_external_off(led);
++
++		if (rc)
++			dev_err(&pdev->dev, "diagnostic OFF/restore failed: %d\n", rc);
++	}
+ 	while (flash_data->leds_count)
+ 		v4l2_flash_release(flash_data->v4l2_flash[--flash_data->leds_count]);
+ 

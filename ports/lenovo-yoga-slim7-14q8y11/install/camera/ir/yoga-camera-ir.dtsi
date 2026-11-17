@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/* CAMI/CAMP QRD: CCI master 0, address 0x10, MCLK0, reset109, CSIPHY0.
+ * Windows RAW10/84 MHz output pixel clock/one lane implies 420 MHz link.
+ * No st,leds: the sensor-to-illuminator GPIO wiring is not established yet.
+ */
+#include <dt-bindings/media/video-interfaces.h>
+
+&camss {
+	status = "okay";
+};
+
+&camss_csiphy0_inep {
+	data-lanes = <1>;
+};
+
+&cci0 {
+	pinctrl-0 = <&cci0_0_default>;
+	pinctrl-1 = <&cci0_0_sleep>;
+	status = "okay";
+};
+
+&cci0_i2c1 {
+	status = "disabled";
+};
+
+&cci0_i2c0 {
+	camera@10 {
+		compatible = "st,vd55g0";
+		reg = <0x10>;
+		reset-gpios = <&tlmm 109 GPIO_ACTIVE_LOW>;
+		pinctrl-0 = <&cam_mclk0_default &yoga_ir_reset_default>;
+		pinctrl-names = "default";
+		clocks = <&camcc CAM_CC_MCLK0_CLK>;
+		assigned-clocks = <&camcc CAM_CC_MCLK0_CLK>;
+		assigned-clock-rates = <24000000>;
+		vcore-supply = <&vreg_cam_l1_1p15>;
+		vddio-supply = <&vreg_cam_l4_1p8>;
+		vana-supply = <&vreg_cam_l3_2p8>;
+
+		port {
+			yoga_vd55g0_out_ep: endpoint {
+				clock-lanes = <0>;
+				data-lanes = <1>;
+				link-frequencies = /bits/ 64 <420000000>;
+				remote-endpoint = <&csiphy0_in_ep>;
+			};
+		};
+	};
+};
+
+&csiphy0 {
+	/* C1KD.bin lists the same rails as the RGB CSIPHY. */
+	vdda-0p9-supply = <&vreg_l1f1>;
+	vdda-1p2-supply = <&vreg_l4f1>;
+	status = "okay";
+};
+
+&csiphy0_in_ep {
+	bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
+	clock-lanes = <0>;
+	data-lanes = <1>;
+	remote-endpoint = <&yoga_vd55g0_out_ep>;
+};
+
+&tlmm {
+	yoga_ir_reset_default: yoga-ir-reset-default-state {
+		pins = "gpio109";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+};

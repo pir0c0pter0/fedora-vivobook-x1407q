@@ -1,6 +1,39 @@
 # Workflow do porte Lenovo X2 Plus
 
-## Atual — USB3 permanente
+## Atual — perfil Windows e sincronização controlada
+
+Pedido de 17/11/2026: aproveitar a coleta Windows, sem referência de cor física.
+CCM RGB extraído com estrutura/CRC verificados e revisão independente, instalado
+por sensor e validado em 90 quadros com metadados. CCI/OV08X40/CAMSS receberam
+correções de retomada, repetição limitada do reset inicial e unwind de falha.
+Dez reaberturas rápidas de cada câmera passaram; a configuração foi promovida.
+Boot normal em 23,897 s, PipeWire com 1.800 buffers RGB e 1.800 IR até EOS,
+WirePlumber PID1718 sem reinícios.
+
+O iluminador passou no ensaio por sinal do sensor com um quadro e limites
+50 mA/10 ms, terminando OFF e com o bit PMIC restaurado. Os módulos/DT
+diagnósticos foram retirados. Calibração completa do ISP Windows, precisão
+colorimétrica e sincronização contínua permanecem pendentes.
+Detalhes em [perfil Windows](install/camera/WINDOWS-CALIBRATION.md) e
+[sincronização](install/camera/ir/SYNCHRONIZATION.md).
+
+## Etapa anterior — integração RGB, IR e iluminador
+
+Workflow solicitado pelo usuário em 17/11/2026 e concluído com implementação
+e revisão separadas. PM8010 identificado, drivers/DTS preparados, correções
+CCI/flash reproduzidas e verificadas, câmeras capturando e pulso do iluminador
+confirmado opticamente. O travamento inicial com CCI stock exigiu reboot
+forçado; a falha de completion foi corrigida antes de retomar os testes.
+
+Inicialização automática aprovada no `try` e no boot normal `current`.
+RGB1080 e IR640×480 passaram pelo PipeWire como usuário; WirePlumber usa
+CPU e mantém MDWE. Iluminador OFF no boot e ao fim dos testes. `good` e
+backups preservados; nenhuma tentativa de boot pendente. Estado, limites,
+evidências e rollback em [ESTADO-ATUAL](docs/ESTADO-ATUAL.md) e
+[install/camera](install/camera/README.md). Naquela etapa a calibração era
+genérica; o avanço posterior está registrado acima.
+
+## Etapa anterior — USB3 permanente
 
 Validado em 17/11/2026: direita Gen1 (5 Gbit/s), esquerdas Gen2 (10 Gbit/s),
 nas duas orientações. A direita precisou do patch Qualcomm de calibração

@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: BSD-3-Clause
+#include <dt-bindings/leds/common.h>
+
+/* Windows IR uses logical LED1, paired physical channels1+4 on PMH0101.
+ * Test limits only: 100 mA total, 10 ms hardware timeout; Windows sets 700 mA.
+ */
+&pmh0101_flash {
+	status = "okay";
+
+	yoga_ir_flash: led-0 {
+		function = LED_FUNCTION_FLASH;
+		color = <LED_COLOR_ID_IR>;
+		led-sources = <1 4>;
+		led-max-microamp = <10000>;
+		flash-max-microamp = <100000>;
+		flash-max-timeout-us = <10000>;
+		default-state = "off";
+	};
+};

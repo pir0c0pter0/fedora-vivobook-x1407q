@@ -1,0 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/* Manual test only: keep leds_qcom_flash blacklisted until sensor validation. */
+#include "../yoga-camera-rgb-ir-test.dts"
+#include "yoga-ir-illuminator-test.dtsi"

@@ -1,0 +1,46 @@
+--- a/drivers/leds/flash/leds-qcom-flash.c
++++ b/drivers/leds/flash/leds-qcom-flash.c
+@@ -397,11 +397,13 @@
+ 	for (i = 0; i < led->chan_count; i++) {
+ 		chan_id = led->chan_id[i];
+ 
+-		timer = timeout_ms / FLASH_TIMER_STEP_MS;
+-		timer = clamp_t(u8, timer, 0, FLASH_TIMER_VAL_MASK);
+-
+-		if (timeout_ms)
++		timer = 0;
++		if (timeout_ms) {
++			/* Code 0 is 10 ms, code 127 is 1280 ms. */
++			timer = clamp_t(u32, timeout_ms / FLASH_TIMER_STEP_MS,
++					1, FLASH_TIMER_VAL_MASK + 1) - 1;
+ 			timer |= FLASH_TIMER_EN_BIT;
++		}
+ 
+ 		rc = regmap_fields_write(flash_data->r_fields[REG_CHAN_TIMER], chan_id, timer);
+ 		if (rc)
+@@ -953,8 +955,8 @@
+ 
+ 	return regmap_field_write(flash_data->r_fields[REG_TORCH_CLAMP], flash_data->torch_clamp);
+ release:
+-	while (flash_data->v4l2_flash[flash_data->leds_count] && flash_data->leds_count)
+-		v4l2_flash_release(flash_data->v4l2_flash[flash_data->leds_count--]);
++	while (flash_data->leds_count)
++		v4l2_flash_release(flash_data->v4l2_flash[--flash_data->leds_count]);
+ 	return rc;
+ }
+ 
+@@ -962,10 +964,10 @@
+ {
+ 	struct qcom_flash_data *flash_data = platform_get_drvdata(pdev);
+ 
+-	while (flash_data->v4l2_flash[flash_data->leds_count] && flash_data->leds_count)
+-		v4l2_flash_release(flash_data->v4l2_flash[flash_data->leds_count--]);
+-
+-	mutex_destroy(&flash_data->lock);
++	while (flash_data->leds_count)
++		v4l2_flash_release(flash_data->v4l2_flash[--flash_data->leds_count]);
++
++	/* Managed LED unregister still needs the mutex to turn channels off. */
+ }
+ 
+ static const struct of_device_id qcom_flash_led_match_table[] = {

@@ -1,0 +1,79 @@
+--- a/drivers/leds/flash/leds-qcom-flash.c
++++ b/drivers/leds/flash/leds-qcom-flash.c
+@@ -419,7 +419,20 @@
+ 	u8 strobe_sel, chan_en, chan_id, chan_mask = 0;
+ 	int rc, i;
+ 
+-	/* Set SW strobe config for all channels connected to the LED */
++	/* Disable channels before changing HW/SW source: selecting SW while
++	 * an externally armed channel is enabled would briefly fire it.
++	 */
++	for (i = 0; i < led->chan_count; i++)
++		chan_mask |= BIT(led->chan_id[i]);
++	if (!state) {
++		rc = regmap_field_update_bits(flash_data->r_fields[REG_CHAN_EN],
++					     chan_mask, 0);
++		if (rc)
++			return rc;
++		led->enabled = false;
++	}
++
++	/* Set strobe config for all channels connected to the LED */
+ 	for (i = 0; i < led->chan_count; i++) {
+ 		chan_id = led->chan_id[i];
+ 
+@@ -633,16 +646,44 @@
+ {
+ 	struct led_classdev_flash *fled_cdev = v4l2_flash->fled_cdev;
+ 	struct qcom_flash_led *led = flcdev_to_qcom_fled(fled_cdev);
+-	int rc;
+-
+-	rc = set_flash_module_en(led, enable);
+-	if (rc)
+-		return rc;
+-
+-	if (enable)
+-		return set_flash_strobe(led, HW_STROBE, true);
+-	else
+-		return set_flash_strobe(led, SW_STROBE, false);
++	int rc, off_rc;
++
++	/* Keep both gates off while programming; attempt both even on error. */
++	rc = set_flash_strobe(led, HW_STROBE, false);
++	off_rc = set_flash_module_en(led, false);
++	if (rc || off_rc) {
++		rc = rc ? rc : off_rc;
++		goto disable;
++	}
++	if (!enable)
++		return 0;
++
++	/* Unlike torch, external flash must always have its safety timer. */
++	if (!led->flash_timeout_ms)
++		return -EINVAL;
++
++	rc = update_allowed_flash_current(led, &led->flash_current_ma, true);
++	if (rc < 0)
++		goto disable;
++	rc = set_flash_current(led, led->flash_current_ma, FLASH_MODE);
++	if (rc)
++		goto disable;
++	rc = set_flash_timeout(led, led->flash_timeout_ms);
++	if (rc)
++		goto disable;
++
++	/* Current, timer and external source are configured before either gate. */
++	rc = set_flash_module_en(led, true);
++	if (rc)
++		goto disable;
++	rc = set_flash_strobe(led, HW_STROBE, true);
++	if (!rc)
++		return 0;
++
++disable:
++	set_flash_strobe(led, HW_STROBE, false);
++	set_flash_module_en(led, false);
++	return rc;
+ }
+ 
+ static enum led_brightness

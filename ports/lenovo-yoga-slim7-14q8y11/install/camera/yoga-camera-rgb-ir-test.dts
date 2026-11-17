@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/* One-shot camera test over the working USB3/video base; no illuminator. */
+#include "../../dts/kalambo-lenovo-yoga-slim7x-gwnx2d1-usb3.dts"
+#include "camss/glymur-camera-soc.dtsi"
+#include "power/yoga-camera-power.dtsi"
+#include "camss/yoga-camera-rgb.dtsi"
+#include "ir/yoga-camera-ir.dtsi"

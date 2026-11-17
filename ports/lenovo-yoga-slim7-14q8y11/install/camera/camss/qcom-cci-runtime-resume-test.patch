@@ -1,0 +1,71 @@
+Subject: [LOCAL] i2c: qcom-cci: reset on runtime resume and log stalled queue
+
+Local v2; v1 passed resumed opens but not rapid reopen.
+Applied on top of qcom-cci-reset-completion.patch.
+
+On 2026-11-17 the combined CCI v2, OV08 reset retry and CAMSS unwind set
+passed 10 rapid RGB opens (15 frames each) and 10 IR opens (30 frames each),
+with exact counts and no WARN/Oops or stream failures. Nine initial RGB reset
+timeouts were recovered by the sensor-specific retry; CCI v2 alone does not
+eliminate the runtime-active timeout. Promoted to updates/ after that test.
+Normal current boot then passed with 90 RGB metadata frames and separate
+1800-buffer RGB and IR PipeWire captures to EOS. One initial RGB reset timeout
+was recovered; no kernel WARN/Oops, stream failures or WirePlumber restarts.
+
+Reset on resume follows the maintainer discussion and the author retest:
+https://lore.kernel.org/all/179261145907.36927.5158021314822941179@pm.me/
+https://lore.kernel.org/all/20261020193946.51478-1-birk.skyum@pm.me/
+
+Keep the 1 s autosuspend and do not replay I2C messages. Capture queue state
+before the existing timeout recovery so the rapid-reopen case can be checked.
+On resume failure, undo the clock enable. This does not claim to fix a target
+power cycle which happens while CCI remains runtime-active.
+
+Drain the reset ISR after its master0 completion: it also completes master1,
+and that must finish before a resumed master1 transfer reinitializes its wait.
+The process-context xfer caller holds the I2C adapter lock, but the ISR never
+acquires that lock or depends on a lock held by these callers.
+
+--- a/drivers/i2c/busses/i2c-qcom-cci.c
++++ b/drivers/i2c/busses/i2c-qcom-cci.c
+@@ -385,6 +385,9 @@
+ 		return -ETIMEDOUT;
+ 	}
+ 
++	/* Drain the reset ISR before it can complete a new master 1 transfer. */
++	synchronize_irq(cci->irq);
++
+ 	return cci_init(cci);
+ }
+ 
+@@ -401,8 +404,14 @@
+ 
+ 	if (!wait_for_completion_timeout(&cci->master[master].irq_complete,
+ 					 CCI_TIMEOUT)) {
+-		dev_err(cci->dev, "master %d queue %d timeout\n",
+-			master, queue);
++		dev_err(cci->dev,
++			"master %d queue %d timeout: irq=%#x cmd=%#x cur=%u exec=%u report=%#x\n",
++			master, queue,
++			readl(cci->base + CCI_IRQ_STATUS_0),
++			readl(cci->base + CCI_I2C_Mm_Qn_CUR_CMD(master, queue)),
++			readl(cci->base + CCI_I2C_Mm_Qn_CUR_WORD_CNT(master, queue)),
++			readl(cci->base + CCI_I2C_Mm_Qn_EXEC_WORD_CNT(master, queue)),
++			readl(cci->base + CCI_I2C_Mm_Qn_REPORT_STATUS(master, queue)));
+ 		cci_reset(cci);
+ 		return -ETIMEDOUT;
+ 	}
+@@ -651,7 +660,12 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	return cci_init(cci);
++	/* A powered-down target may leave the controller unable to start. */
++	ret = cci_reset(cci);
++	if (ret)
++		cci_disable_clocks(cci);
++
++	return ret;
+ }
+ 
+ static const struct dev_pm_ops qcom_cci_pm = {

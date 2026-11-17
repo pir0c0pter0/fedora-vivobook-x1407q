@@ -1,0 +1,150 @@
+--- a/vd55g0.c
++++ b/vd55g0.c
+@@ -84,6 +84,17 @@
+ #define VD55G0_DUSTER_DYN_ENABLE			BIT(1)
+ #define VD55G0_DUSTER_RING_ENABLE			BIT(4)
+ #define VD55G0_REG_AE_TARGET_PERCENTAGE			CCI_REG16_LE(0x0440)
++
++/* Private diagnostic build only; one start per module bind, no rearming. */
++static bool diagnostic_one_frame;
++module_param(diagnostic_one_frame, bool, 0400);
++MODULE_PARM_DESC(diagnostic_one_frame,
++		"Allow one manually exposed frame <=10ms per bind, then hardware standby");
++
++#define VD55G0_REG_STROBE_START_DELAY CCI_REG8(0x046d)
++#define VD55G0_REG_STROBE_END_DELAY CCI_REG8(0x046e)
++#define VD55G0_REG_CONTEXT_REPEAT_COUNT CCI_REG16_LE(0x0476)
++#define VD55G0_REG_NEXT_CONTEXT CCI_REG16_LE(0x0478)
+ 
+ #define VD55G0_WIDTH					644
+ #define VD55G0_HEIGHT					604
+@@ -863,6 +874,7 @@
+ 		struct v4l2_ctrl *dgain_ctrl;
+ 	};
+ 	struct v4l2_ctrl *ae_lock_ctrl;
++	bool diagnostic_consumed;
+ 	/* What the last stream applied, for the next one to start from */
+ 	struct {
+ 		u16 expo;
+@@ -1233,6 +1245,18 @@
+ 	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+ 	struct device *dev = &sensor->i2c_client->dev;
+ 	int ret;
++	u64 fsm;
++	u64 exposure_us;
++
++	if (diagnostic_one_frame) {
++		if (sensor->diagnostic_consumed)
++			return -EALREADY;
++		exposure_us = DIV_ROUND_UP_ULL((u64)sensor->expo_ctrl->val *
++			vd55g0_line_length(sensor) * USEC_PER_SEC,
++			vd55g0_pixel_rate(sensor));
++		if (sensor->ae_ctrl->val != V4L2_EXPOSURE_MANUAL || exposure_us > 10000)
++			return -EINVAL;
++	}
+ 
+ 	ret = pm_runtime_resume_and_get(dev);
+ 	if (ret < 0)
+@@ -1260,6 +1284,35 @@
+ 	if (ret)
+ 		goto err_rpm_put;
+ 
++	if (diagnostic_one_frame) {
++		/* No extension of the integration envelope at either edge. */
++		ret = vd55g0_write(sensor, VD55G0_REG_STROBE_START_DELAY, 0, NULL);
++		if (ret)
++			goto err_rpm_put;
++		ret = vd55g0_write(sensor, VD55G0_REG_STROBE_END_DELAY, 0, NULL);
++		if (ret)
++			goto err_rpm_put;
++		/* UM2829 section 15: stop after one frame without a host timer. */
++		ret = vd55g0_write(sensor, VD55G0_REG_CONTEXT_REPEAT_COUNT, 1, NULL);
++		if (ret)
++			goto err_rpm_put;
++		ret = vd55g0_write(sensor, VD55G0_REG_NEXT_CONTEXT, 0xff, NULL);
++		if (ret)
++			goto err_rpm_put;
++		ret = vd55g0_read(sensor, VD55G0_REG_CONTEXT_REPEAT_COUNT, &fsm, NULL);
++		if (ret || fsm != 1) {
++			ret = ret ? ret : -EIO;
++			goto err_rpm_put;
++		}
++		ret = vd55g0_read(sensor, VD55G0_REG_NEXT_CONTEXT, &fsm, NULL);
++		if (ret || fsm != 0xff) {
++			ret = ret ? ret : -EIO;
++			goto err_rpm_put;
++		}
++		/* Consume even if START fails; never retry an uncertain pulse. */
++		sensor->diagnostic_consumed = true;
++	}
++
+ 	ret = vd55g0_write(sensor, VD55G0_REG_SW_STBY,
+ 			   VD55G0_SW_STBY_START_STREAM, NULL);
+ 	if (ret)
+@@ -1269,14 +1322,24 @@
+ 	if (ret)
+ 		goto err_rpm_put;
+ 
+-	ret = vd55g0_wait_state(sensor, VD55G0_SYSTEM_FSM_STREAMING,
+-				VD55G0_TIMEOUT_MS);
++	if (diagnostic_one_frame) {
++		/* STREAMING can already have ended after the single frame. */
++		ret = vd55g0_read(sensor, VD55G0_REG_SYSTEM_FSM, &fsm, NULL);
++		if (!ret && fsm != VD55G0_SYSTEM_FSM_STREAMING &&
++		    fsm != VD55G0_SYSTEM_FSM_SW_STBY)
++			ret = -EIO;
++	} else {
++		ret = vd55g0_wait_state(sensor, VD55G0_SYSTEM_FSM_STREAMING,
++					VD55G0_TIMEOUT_MS);
++	}
+ 	if (ret)
+ 		goto err_rpm_put;
+ 
+ 	return 0;
+ 
+ err_rpm_put:
++	if (diagnostic_one_frame)
++		vd55g0_disable_gpios(sensor);
+ 	pm_runtime_put(dev);
+ 	return ret;
+ }
+@@ -1299,10 +1362,17 @@
+ {
+ 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
+ 	int ret;
++	u64 fsm;
+ 
+ 	/* Keep exposure values for next cold start boot */
+ 	vd55g0_save_exposure(sensor);
+ 
++	if (diagnostic_one_frame) {
++		ret = vd55g0_read(sensor, VD55G0_REG_SYSTEM_FSM, &fsm, NULL);
++		if (!ret && fsm == VD55G0_SYSTEM_FSM_SW_STBY)
++			goto err_str_dis;
++	}
++
+ 	ret = vd55g0_write(sensor, VD55G0_REG_STREAMING,
+ 			   VD55G0_STREAMING_STOP_STREAM, NULL);
+ 	if (ret)
+@@ -1316,6 +1386,8 @@
+ 				VD55G0_TIMEOUT_MS);
+ 
+ err_str_dis:
++	if (diagnostic_one_frame)
++		vd55g0_disable_gpios(sensor);
+ 	if (ret)
+ 		dev_err(&client->dev, "failed to stop streaming: %d\n", ret);
+ 	pm_runtime_put_autosuspend(&client->dev);
+@@ -1727,6 +1799,12 @@
+ 	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+ 	bool is_auto, locked;
+ 	int ret;
++
++	/* Keep the tested exposure envelope immutable after START. */
++	if (diagnostic_one_frame && sensor->diagnostic_consumed &&
++	    !(ctrl->id == V4L2_CID_FLASH_LED_MODE &&
++	      ctrl->val == V4L2_FLASH_LED_MODE_NONE))
++		return -EBUSY;
+ 
+ 	/* Read-only controls are set by the driver: nothing to apply */
+ 	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
