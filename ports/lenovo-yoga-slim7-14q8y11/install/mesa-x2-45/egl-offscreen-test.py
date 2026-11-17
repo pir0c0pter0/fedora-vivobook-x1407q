@@ -33,7 +33,7 @@ dev = gbm.gbm_create_device(fd) or die("gbm_create_device")
 dpy = egl.eglGetPlatformDisplay(0x31D7, dev, None) or die("eglGetPlatformDisplay")  # EGL_PLATFORM_GBM_KHR
 egl.eglInitialize(dpy, None, None) or die("eglInitialize")
 print("EGL_VERSION :", egl.eglQueryString(dpy, 0x3054).decode())
-egl.eglBindAPI(0x30A0)  # EGL_OPENGL_ES_API
+egl.eglBindAPI(0x30A0) or die("eglBindAPI")  # EGL_OPENGL_ES_API
 cfg, n = P(), C.c_int()
 attrs = (C.c_int * 5)(0x3033, 0, 0x3040, 0x0004, 0x3038)  # SURFACE_TYPE 0, RENDERABLE_TYPE ES2, NONE
 (egl.eglChooseConfig(dpy, attrs, C.byref(cfg), 1, C.byref(n)) and n.value) or die("eglChooseConfig")
@@ -43,6 +43,8 @@ egl.eglMakeCurrent(dpy, None, None, ctx) or die("eglMakeCurrent (surfaceless)")
 renderer = gl.glGetString(0x1F01).decode()
 print("GL_RENDERER :", renderer)
 print("GL_VERSION  :", gl.glGetString(0x1F02).decode())
+if "X2-45" not in renderer:
+    die("renderer nao e a Adreno X2-45")
 
 tex, fbo = C.c_uint(), C.c_uint()
 gl.glGenTextures(1, C.byref(tex))
@@ -71,6 +73,9 @@ gl.glAttachShader(prog, shader(0x8B31, "attribute vec2 p; void main(){gl_Positio
 gl.glAttachShader(prog, shader(0x8B30, "precision mediump float; void main(){gl_FragColor=vec4(0.,1.,0.,1.);}"))
 gl.glBindAttribLocation(prog, 0, b"p")
 gl.glLinkProgram(prog)
+linked = C.c_int()
+gl.glGetProgramiv(prog, 0x8B82, C.byref(linked))  # GL_LINK_STATUS
+linked.value or die("link do programa")
 gl.glUseProgram(prog)
 gl.glViewport(0, 0, W, H)
 gl.glClearColor(1, 0, 0, 1)
@@ -92,8 +97,8 @@ def px(x, y):
 inside, outside = px(W // 8, H // 8), px(W - 8, H - 8)
 print("pixel dentro do triangulo:", inside, "(esperado 0,255,0,255)")
 print("pixel fora  do triangulo:", outside, "(esperado 255,0,0,255)")
-print("glGetError: 0x%x" % gl.glGetError())
-soft = any(s in renderer.lower() for s in ("llvmpipe", "softpipe", "swrast"))
-ok = not soft and inside == (0, 255, 0, 255) and outside == (255, 0, 0, 255)
-print("RESULTADO:", "OK" if ok else "FALHA" + (" (renderer de software)" if soft else " (pixels errados)"))
+error = gl.glGetError()
+print("glGetError: 0x%x" % error)
+ok = error == 0 and inside == (0, 255, 0, 255) and outside == (255, 0, 0, 255)
+print("RESULTADO:", "OK" if ok else "FALHA (pixels ou erro GL)")
 sys.exit(0 if ok else 1)

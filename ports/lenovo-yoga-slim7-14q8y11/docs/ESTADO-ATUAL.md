@@ -1,8 +1,80 @@
 # Contexto limpo — Lenovo Yoga Slim 7 14Q8Y11 / Snapdragon X2 Plus
 
-Atualizado em 2026-11-17 (perfil RGB do Windows instalado, reabertura recuperada e sincronismo IR ensaiado em quadro único). Fonte de verdade para retomada; históricos e snapshots não substituem este estado. As seções a partir de "Objetivo confirmado" vêm da consolidação de 13/11 e continuam válidas onde não conflitam com as seções abaixo.
+Atualizado em 2026-11-17 (audio e GPU integrados ao boot normal; cameras com perfil RGB do Windows e IR ensaiado). Fonte de verdade para retomada; históricos e snapshots não substituem este estado. As seções a partir de "Objetivo confirmado" vêm da consolidação de 13/11 e continuam válidas onde não conflitam com as seções abaixo.
 
 ## COMECE AQUI — estado em 17/11/2026 (fonte de verdade)
+
+### NPU — teste concluido, inferencia bloqueada no QNN
+
+CDSP iniciou manualmente no `try` em391ms; FastRPC respondeu consultas
+com DOMAIN_SUPPORT1, UNSIGNED_PD_SUPPORT1 e ARCH_VER0x8081/V81.
+HMX_DEPTH e HMX_SPATIAL retornaram0, sem inferir ausencia de hardware.
+SoCCPattached, ADSPrunning, audio/GPU/cameras e bateria preservados.
+
+O runtime oficial QNN2.8.0/QAIRT2.52.0.261104115025, com ORT1.29,
+leu /sys/devices/soc0/soc_id=729 e reportou UNKNOWN_SDM e
+No Snapdragon SOC detected, falhando no router/backend antes de abrir
+FastRPC ou executar o modelo. Perfil sem eventos Node; CPU fallback
+desabilitado. Diagnostico verbose terminou em SIGSEGV no processo usuario
+durante o erro; sem SSR/fault do DSP. A ausencia do simbolo opcional
+remote_system_request nao foi demonstrada como causa.
+
+**Nao promovido.** NPU desabilitada no boot normal; try restaurado ao
+estado anterior, current/good preservados, sem next_entry. Firmware
+em /var/lib/yoga-npu-fw (separado do ADSP) e runtime /opt/yoga-npu
+permanecem inativos. Nao ha servico NPU automatico. SoC nao foi falsificado.
+Falta runtime com suporte nativo Kalambo729 e depois validar user PD e
+inferencia real. [Receita e evidencias](../install/npu/README.md).
+26 testes startup passaram; DT/modelo revisados independentemente.
+Backup do ensaio: /root/npu-20261117. Logs privados npu-try-state.txt,
+npu-capabilities.txt, qnn-verbose.log e qnn.strace na pasta audio-gpu-npu.
+Retorno ao current confirmado: boot34,424s, audio/GPU/GDM/cameras ativos,
+DT92f6b329 em current/try, apenas SoCCPattached e ADSPrunning.
+
+### GPU permanente — 17/11/2026, depois do audio
+
+Adreno X2-45 integrada ao GNOME no boot normal `current`, com Mesa26.2.3
+em `/opt/mesa-x2-45`. `yoga.gpu=1` aciona servico apos audio, antes do GDM;
+shader EGL com pixels conferidos e GLerr0 e condicao para iniciar o desktop.
+GNOME mapeia Mesa de /opt e usa renderD128; display permanece no KMS card1.
+GLX do usuario confirmou direct rendering, accelerated=yes, OpenGL4.6/GLES3.2.
+Testes sysmem/GMEM1920x1200 e GMEM3840x2160 passaram sem novos faults/hangs.
+
+Confirmacao visual/interativa do GNOME pelo usuario ainda pendente.
+Teto310MHz aplicado antes de abrir a GPU: speed-bin193 ainda sem suporte
+comprovado. Nao liberar OPPs superiores sem calibracao. Vulkan e Niri nao
+testados. Boot normal34,444s, WirePlumber2097/NRestarts0, audio e SoCCP
+preservados; `good` intacto, saved_entry=current, sem next_entry.
+DT92f6b329 permanece igual ao audio. Backup `/root/gpu-20261117/`.
+23 checks offline do startup e nove do EGL passaram em revisao separada.
+[Receita, evidencia e rollback](../install/mesa-x2-45/README.md).
+
+### Audio permanente — 17/11/2026, depois das cameras
+
+Alto-falantes e dois microfones integrados ao boot normal `current`.
+`yoga-audio.service` inicia depois das cameras e antes do GDM, somente
+com `yoga.audio=1`. UCM especifico com PA6/DV66 e captura VA84; o PCM
+ALSA duplica estereo em quatro canais sem aumentar ganhos. MP3 normalizado
+e quatro trechos isolados foram ouvidos pelo usuario; lados nao distinguidos.
+Tres ciclos de perfil/volume preservaram os ganhos.
+
+DMIC0/1 usa apenas LPASS6/7. Sinal dos dois canais correlacionado com musica
+real e retorno ao ruido de fundo ao cessar o estimulo; captura ALSA e
+PipeWire passou. DTB de `install/audio/yoga-audio-mic-test.dts`, SHA256
+`92f6b329e0e0225c61d98181866669c062847594cc73061fa4af721f01ba8642`,
+em current/try. Kernel, initramfs, modulos de cameras/USB e good preservados.
+
+Boot normal 34,317 s, WirePlumber PID2125/NRestarts0, reproducao e
+278.528 quadros de captura estereo/48 kHz. Ganhos PA6/DV66 conferidos apos
+ambos. Video/USB/cameras/EC/RTC ativos, SoCCP attached, ADSP running.
+O timeout APM inicial ja conhecido acrescenta espera; so firewalld falhou
+nessa verificacao. `saved_entry=current`, sem next_entry.
+
+18 testes offline passaram e revisao separada validou firmware, volumes,
+perfil e DT. Backup no Yoga: `/root/audio-20261117/`. Evidencias privadas
+em `local/physical-2026-11-17/audio-gpu-npu/audio-current-validation.txt`.
+Receita, limites e rollback em [audio](../install/audio/README.md).
+Ainda sem calibracao acustica proprietaria, AEC ou teste de fone externo.
 
 Caminhos: `R` = `<workspace>`; `P` = `R/fedora-vivobook-x1407q/.worktrees/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11`; `B` = `P/local/iso-build`; `OUT` = `P/local/dtb-bisect-r5`; `D` = `P/local/physical-2026-11-16` (logs históricos); os testes de 17/11 ficam em `P/local/physical-2026-11-17/`.
 

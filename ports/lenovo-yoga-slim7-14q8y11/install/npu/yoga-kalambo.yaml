@@ -1,0 +1,4 @@
+machines:
+  "Lenovo Yoga Slim 7x Gen 11 X2 Plus (diagnostic)":
+    DSP_LIBRARY_PATH: kalambo/LENOVO/83QR/dsp
+    CDSP_ARCH: v81
