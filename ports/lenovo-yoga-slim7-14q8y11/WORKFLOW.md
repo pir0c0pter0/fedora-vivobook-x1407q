@@ -1,10 +1,10 @@
 # Workflow do porte Lenovo X2 Plus
 
-Este arquivo preserva as etapas anteriores. Após os ensaios de NPU de
-17/11, o estado operacional e o próximo passo estão em
-[RETOMADA.md](RETOMADA.md) e [ESTADO-ATUAL.md](docs/ESTADO-ATUAL.md).
+Este arquivo preserva as etapas anteriores. O boot otimizado e a ISO live
+estão documentados em [RETOMADA.md](RETOMADA.md) e
+[ESTADO-ATUAL.md](docs/ESTADO-ATUAL.md).
 
-## Atual — perfil Windows e sincronização controlada
+## Etapa de 17/11 — perfil Windows e sincronização controlada
 
 Pedido de 17/11/2026: aproveitar a coleta Windows, sem referência de cor física.
 CCM RGB extraído com estrutura/CRC verificados e revisão independente, instalado

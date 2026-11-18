@@ -66,7 +66,10 @@ NPU remains disabled in normal boot, and USB4 is not enabled on either model.
 
 Fedora 45 boots automatically from the internal SSD with a 1920×1200 60 Hz
 display, brightness control, GNOME, Wi-Fi, Bluetooth, battery reporting,
-keyboard, touchpad, touchscreen, hotkeys, and hardware clock.
+keyboard, touchpad, touchscreen, hotkeys, and hardware clock. The installed
+system reached GDM in **5.1 s from Linux startup** on a warm reboot. GRUB
+waits 1 s. The [1.87 GiB live ISO][yoga-live] reached login via emulated USB
+in QEMU ARM64. Physical USB boot on the Yoga is pending.
 
 - **GPU:** Adreno X2-45 acceleration with Mesa 26.2.3, OpenGL 4.6 and
   GLES 3.2. Frequency is capped at 310 MHz pending calibration; Vulkan is

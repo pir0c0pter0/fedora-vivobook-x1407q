@@ -1,8 +1,15 @@
 # Contexto limpo — Lenovo Yoga Slim 7 14Q8Y11 / Snapdragon X2 Plus
 
-Atualizado em 2026-11-17 (áudio e GPU integrados ao boot normal; câmeras calibradas parcialmente; inferência NPU comprovada, reabertura bloqueada). Fonte de verdade para retomada; históricos e snapshots não substituem este estado. As seções a partir de "Objetivo confirmado" vêm da consolidação de 13/11 e continuam válidas onde não conflitam com as seções abaixo.
+Atualizado em **18/11/2026** com o boot mais rápido no SSD e a publicação da ISO live.
 
-## COMECE AQUI — estado em 17/11/2026 (fonte de verdade)
+## COMECE AQUI — 18/11/2026
+
+- **SSD, slot `current`.** GDM ativo em **5,076 s** desde o início do Linux, em reboot. O GRUB espera **1 s** e oferece a entrada `Fedora Yoga - boot anterior`. A medição exclui firmware e GRUB. O Wi-Fi associou em 21,2 s.
+- **Sequência do boot.** O eDP entra em 30 bpp no primeiro modeset. O GDM aguarda vídeo, USB3 e GPU, com teto de 310 MHz verificado. Câmera e áudio terminam em paralelo com o login. A inicialização do áudio terminou em 10,4 s desde o início do Linux, com PA6/DV66 e sem o timeout inicial do DSP. O login por senha abriu o cofre e o GitHub CLI reutilizou a credencial. [Plano e medições](superpowers/plans/2026-11-18-boot-yoga.md)
+- **ISO live.** A release tem um arquivo de **1,87 GiB**, SHA-256 verificado e fontes correspondentes. Chegou ao login em QEMU ARM64 iniciado por USB emulado. A mídia em pendrive físico ainda aguarda validação no Yoga. Áudio interno depende do firmware ADSP obtido do próprio aparelho. [Guia da ISO](../iso/LIVE.md)
+- **NPU.** Continua desativada no boot normal. O bloqueio de reabertura está registrado nos ensaios de 17/11 abaixo.
+
+## Validações de 17/11/2026
 
 ### NPU — inferencia comprovada; reabertura bloqueada
 

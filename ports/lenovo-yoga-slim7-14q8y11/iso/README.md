@@ -1,5 +1,7 @@
 # Mídias de diagnóstico Yoga — estado em 13/11/2026
 
+A imagem publicada em 18/11 está no [guia da ISO live](LIVE.md).
+
 > **Histórico (13/11/2026).** Este documento descreve o planejamento e os testes anteriores ao bring-up físico de 16/11. O estado atual está no [README do porte](/ports/lenovo-yoga-slim7-14q8y11/README.md) e em [docs/ESTADO-ATUAL.md](/ports/lenovo-yoga-slim7-14q8y11/docs/ESTADO-ATUAL.md).
 
 Pausado até a retomada pelo usuário, prevista para 16/11/2026. Ver [retomada](../RETOMADA.md).

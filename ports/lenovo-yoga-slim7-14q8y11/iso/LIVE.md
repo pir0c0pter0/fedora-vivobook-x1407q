@@ -1,6 +1,6 @@
 # Yoga 14Q8Y11 Live 45
 
-Mídia experimental ARM64 baseada no Fedora 45 para o Lenovo Yoga Slim 7 14Q8Y11 (83QR), Snapdragon X2 Plus. A edição carrega GNOME a partir do pendrive e mantém a raiz live em RAM. A gravação usa a ISO inteira e substitui o conteúdo do pendrive escolhido.
+ISO experimental ARM64 de **1,87 GiB** para o Lenovo Yoga Slim 7 14Q8Y11 (83QR), Snapdragon X2 Plus, baseada no Fedora 45. O GRUB espera **1 s** e carrega a raiz live em RAM a partir do pendrive. A gravação usa a ISO inteira e substitui o conteúdo do pendrive escolhido.
 
 1. Baixe a ISO e o arquivo de SHA-256 na [release do Yoga](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/releases/tag/yoga14q8y11-live-2026.11.18).
 2. Confira a imagem com `sha256sum -c Yoga-14Q8Y11-Live-45-20261118.iso.sha256`.
@@ -17,4 +17,4 @@ O arquivo `yoga-hardware.tar` contém o DTB compilado em `boot/yoga/current/boar
 
 O script elimina a imagem de resgate do kernel Fedora anterior, o instalador de base e pacotes de firmware de outros dispositivos. O SquashFS usa XZ, filtro ARM64 e blocos de 1 MiB. A ISO guarda uma única cópia do sistema live, em um CPIO carregado pelo GRUB. A estrutura EFI continua servindo tanto para mídia USB quanto para CD-ROM virtual. [Código e fontes da base Fedora](https://archives.fedoraproject.org/pub/archive/fedora/linux/)
 
-A validação desta mídia abrange o boot em UEFI ARM64 no QEMU e a integridade do arquivo. O primeiro boot da ISO gravada em um pendrive físico do Yoga precisa de confirmação.
+O SHA-256 do arquivo local confere com o registrado no GitHub. A ISO chegou ao login via USB emulado no QEMU ARM64 em modo UEFI. O primeiro boot da ISO gravada em um pendrive físico do Yoga precisa de confirmação.

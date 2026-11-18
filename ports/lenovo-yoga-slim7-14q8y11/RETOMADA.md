@@ -1,12 +1,15 @@
 # Retomada — Yoga Slim 7 14Q8Y11 / X2 Plus
 
-Atualizado em **17/11/2026, após os ensaios de NPU**. Fonte de verdade:
-[docs/ESTADO-ATUAL.md](docs/ESTADO-ATUAL.md), seção "COMECE AQUI".
+Atualizado em **18/11/2026**. O estado do hardware e as medições ficam na
+seção “COMECE AQUI” do [estado atual](docs/ESTADO-ATUAL.md).
 
-O Yoga voltou ao boot normal `current` em **34,441 s**, com vídeo, USB,
-câmeras, áudio, GPU e GDM ativos. SoCCP attached, ADSP running e bateria
-legível. `current` e `try` usam o DTB `92f6b329…`; hashes de `current` e
-`good` conferidos. `saved_entry=current`, sem tentativa de boot pendente.
+O Yoga iniciou pelo slot `current` e chegou ao GDM em **5,1 s** desde o
+início do Linux, com GRUB em **1 s**. Use `Fedora Yoga - boot anterior`
+no GRUB para recuperar a instalação anterior à otimização. A ISO live
+de **1,87 GiB** chegou ao login em QEMU ARM64 via USB emulado. O boot em
+pendrive físico no Yoga segue pendente. [Guia da ISO](iso/LIVE.md)
+
+## Pendências dos ensaios de NPU de 17/11
 
 - **NPU:** três ensaios de 100 inferências Abs passaram no HTP V81, com
   resultados conferidos e nenhum Node CPU nos perfis. QAIRT 2.48.40/QNN 2.4

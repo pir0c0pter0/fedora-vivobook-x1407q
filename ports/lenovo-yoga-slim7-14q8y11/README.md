@@ -4,7 +4,7 @@ Porte do Fedora 45 aarch64 para o Lenovo Yoga Slim 7 14Q8Y11 (DMI 83QR), Snapdra
 
 Esta pasta é independente do projeto ASUS Vivobook X1407QA que ocupa o resto do repositório. Nada daqui se aplica ao ASUS, e os scripts e módulos `vivobook_*` não devem ser executados no Lenovo.
 
-**Estado em 18/11/2026.** O sistema instalado no SSD chegou ao GNOME em 5,1 s após o início do Linux. A [ISO live experimental](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/releases/tag/yoga14q8y11-live-2026.11.18) inicia a sessão em RAM. O [guia da mídia](iso/LIVE.md) explica a gravação e os limites.
+**Estado em 18/11/2026.** No reboot pelo SSD, o GDM iniciou em **5,1 s** após o início do Linux. O GRUB espera **1 s**. A [ISO live experimental de 1,87 GiB](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/releases/tag/yoga14q8y11-live-2026.11.18) chegou ao login via USB emulado no QEMU ARM64. O [guia da mídia](iso/LIVE.md) explica a gravação e os limites.
 
 A integração `gwnx2d1` passou no slot `try` e no boot normal pelo `current`,
 com vídeo, EC, RTC e USB automáticos.
@@ -76,12 +76,11 @@ Sobe sozinho no boot normal:
 **Áudio permanente validado em 17/11:** reprodução nos quatro canais e
 captura dos dois microfones pelo PipeWire. Perfil específico conserva
 PA6/DV66 e distribui estéreo em quatro canais; microfones com ganho de 0 dB.
-Boot normal em 34,317 s, reprodução/captura simultâneas e WirePlumber sem
-reinícios. Fone externo e calibração acústica proprietária não testados.
+Reprodução e captura simultâneas passaram com o WirePlumber sem reinícios. Fone externo e calibração acústica proprietária não testados.
 
 **GPU permanente validada em 17/11:** GNOME e aplicativos usam a Adreno
 X2-45. Testes de pixels EGL em sysmem/GMEM 1920×1200 e GMEM 3840×2160 passaram, assim
-como OpenGL via sessão do usuário. Boot normal em 34,444 s, áudio preservado.
+como OpenGL via sessão do usuário. O reboot de 18/11 validou o teto de 310 MHz.
 [Detalhes e limite de frequência](install/mesa-x2-45/README.md).
 
 ## O que falta
