@@ -1,0 +1,23 @@
+Yoga: recalculate the first eDP stream bpp after reading link capabilities.
+
+--- a/drivers/gpu/drm/msm/dp/dp_display.c
++++ b/drivers/gpu/drm/msm/dp/dp_display.c
+@@ -637,8 +637,16 @@
+ 
+ 	drm_dbg_dp(dp->drm_dev, "sink_count=%d\n", dp->link->sink_count);
+ 
+-	if (msm_dp_display->is_edp)
+-		msm_dp_hpd_plug_handle(dp);
++	if (msm_dp_display->is_edp && !msm_dp_hpd_plug_handle(dp) &&
++	    !msm_dp_display_check_video_test(msm_dp_display)) {
++		struct msm_dp_panel *panel = dp->panel;
++		u32 bpp = panel->connector->display_info.bpc * 3;
++
++		/* The first pre_enable ran before the eDP link caps were read. */
++		panel->msm_dp_mode.bpp = msm_dp_panel_get_mode_bpp(panel, bpp ?: 24,
++					panel->msm_dp_mode.drm_mode.clock);
++		drm_dbg_dp(dp->drm_dev, "eDP stream bpp=%u\n", panel->msm_dp_mode.bpp);
++	}
+ 
+ 	rc = pm_runtime_resume_and_get(&msm_dp_display->pdev->dev);
+ 	if (rc) {

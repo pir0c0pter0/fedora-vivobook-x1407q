@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: BSD-3-Clause
+#include "../camera/ir/yoga-camera-all-test.dts"
+
+/* DMIC0/1 confirmados neste Plus por captura ALSA e PipeWire. */
+&lpass_vamacro {
+	pinctrl-0 = <&dmic01_default>;
+	pinctrl-names = "default";
+};

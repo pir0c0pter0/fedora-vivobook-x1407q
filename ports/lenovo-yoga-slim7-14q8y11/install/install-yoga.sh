@@ -177,7 +177,7 @@ gen_grub_cfg() {
 # Gerado por install-yoga.sh. Slots em /boot/yoga/<slot>/{vmlinuz,board.dtb,initramfs.img,args.cfg}.
 # Teste remoto de UMA tentativa: copie para /boot/yoga/try/ e rode 'yoga-boot-once try'; o boot seguinte
 # volta sozinho para a entrada padrao (next_entry e apagado antes de entregar o controle ao kernel).
-set timeout=3
+set timeout=1
 # fallback por indice (funciona em qualquer GRUB): 1 = 'good', a segunda entrada. Nao reordene o menu.
 set default=current
 set fallback=1

@@ -17,7 +17,9 @@ não foram ativados. Ver [estado e evidências](../../docs/ESTADO-ATUAL.md).
 
 Unidade preparada para o DTB `gwnx2d1`; validar primeiro no slot `try`.
 A regra udev pede a unidade na criação ou renomeação (`add|move`) da interface
-de rede do driver `ath12k_wifi7_pci`. Ela procura o driver nos pais do dispositivo,
+de rede do driver `ath12k_wifi7_pci`. O mesmo evento ativa o alias
+`/sys/subsystem/net/yoga-wifi-ready`, do qual depende a unidade USB2.
+A espera pelo alias tem limite de 20 s. A regra procura o driver nos pais do dispositivo,
 sem depender do nome inicial `wlan0` ou do nome após a renomeação. O boot não espera por
 link online; o Wi-Fi pode associar em paralelo ou continuar sem rede.
 Antes de carregar os PHYs, a unidade exige o driver no dispositivo PCIe
@@ -37,6 +39,8 @@ No notebook, a partir da pasta do porte já copiada:
 
 ```sh
 sudo install -m 0644 install/usb/yoga-usb.service /etc/systemd/system/
+alias_unit=$(systemd-escape --path --suffix=device /sys/subsystem/net/yoga-wifi-ready)
+sudo install -D -m 0644 "install/usb/$alias_unit.d/timeout.conf" "/etc/systemd/system/$alias_unit.d/timeout.conf"
 sudo rm -f /etc/NetworkManager/dispatcher.d/90-yoga-usb
 sudo install -o root -g root -m 0644 install/usb/90-yoga-usb.rules /etc/udev/rules.d/
 sudo systemctl disable yoga-usb.service NetworkManager-wait-online.service

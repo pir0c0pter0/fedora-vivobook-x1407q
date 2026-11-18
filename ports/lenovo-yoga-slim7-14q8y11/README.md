@@ -38,9 +38,10 @@ pulso com aumento de brilho confirmado nos quadros. O disparo por sinal do
 sensor também passou no ensaio de quadro único, incluindo OFF e restauração;
 o modo contínuo nos aplicativos segue pendente.
 
-O boot normal `current` usa o DT conjunto de [install/camera](install/camera/README.md),
-sobre a base USB3, com PM8010, CCI corrigido e `cma=128M`. A inicialização
-leva 23,897 s; `good` e o backup da base USB3 permanecem preservados.
+A integração original das câmeras usa o DT conjunto de [install/camera](install/camera/README.md),
+sobre a base USB3, com PM8010, CCI corrigido e `cma=128M`.
+O boot atual também inclui os microfones descritos em [install/audio](install/audio/README.md);
+`good` e o backup da base USB3 permanecem preservados.
 O WirePlumber usa processamento CPU da libcamera, mantendo suas proteções.
 A RGB agora usa [matrizes de cor extraídas do Windows](install/camera/WINDOWS-CALIBRATION.md),
 instaladas por sensor na libcamera. São ajustes parciais do modelo, sem
@@ -56,7 +57,7 @@ Sobe sozinho no boot normal:
 |---|---|
 | Boot por Device Tree, 6 núcleos | ACPI não é viável neste modelo (ver causas abaixo) |
 | Vídeo real 1920x1200 a 60 Hz e brilho | `msm`/eDP com o PHY corrigido; brilho pelo painel, 2047 níveis |
-| GNOME | Render por software; a GPU ainda não é usada |
+| GNOME / Adreno X2-45 | Mesa 26.2.3 acelerado, OpenGL 4.6/GLES 3.2; limite conservador de 310 MHz |
 | Teclado, touchpad, tela de toque | I2C-HID |
 | Wi-Fi e Bluetooth | WCN7850, `ath12k` |
 | NVMe | Raiz btrfs no SSD interno |
@@ -72,19 +73,25 @@ Sobe sozinho no boot normal:
 | Iluminador IR | Registrado e OFF no boot; emissão comprovada em pulso manual de 50 mA totais/10 ms |
 | Proteção térmica | 24 zonas de CPU com trip passivo de 105 °C; carga anterior atingiu 61 °C |
 
-Provado em boot de teste, ainda não promovido ao boot normal:
+**Áudio permanente validado em 17/11:** reprodução nos quatro canais e
+captura dos dois microfones pelo PipeWire. Perfil específico conserva
+PA6/DV66 e distribui estéreo em quatro canais; microfones com ganho de 0 dB.
+Boot normal em 34,317 s, reprodução/captura simultâneas e WirePlumber sem
+reinícios. Fone externo e calibração acústica proprietária não testados.
 
-| Item | Observação |
-|---|---|
-| Som nos 4 alto-falantes | ADSP + LPASS + 4 amplificadores WSA884x; microfones e fone não testados |
+**GPU permanente validada em 17/11:** GNOME e aplicativos usam a Adreno
+X2-45. Testes de pixels EGL em sysmem/GMEM 1920×1200 e GMEM 3840×2160 passaram, assim
+como OpenGL via sessão do usuário. Boot normal em 34,444 s, áudio preservado.
+[Detalhes e limite de frequência](install/mesa-x2-45/README.md).
 
 ## O que falta
 
-- **GPU:** o kernel sobe a Adreno X2-45, mas o Mesa 26.2.3 não reconhece o chip. Há um Mesa recompilado em `install/mesa-x2-45/`, não testado. Sem isso não há Niri.
-- **Kernel novo:** o R4 (`install/kernel-r4/`, base v7.4-rc3) traz firewall, zram e o módulo de som que falta; nunca deu boot e ainda precisa do patch completo do vídeo.
+- **NPU:** 100 inferências por sessão passaram no HTP V81 com QAIRT2.48.40 e compatibilidade experimental de SoC. A reabertura falha também sem QNN (0x8000054f); ativação permanente bloqueada, CDSP desabilitado no boot normal. [Evidências e reprodutor](install/npu/README.md).
+- **GPU:** aceleração validada; faltam calibração do speed-bin 193, frequências acima de 310 MHz, Vulkan e teste do Niri. [Estado e receita](install/mesa-x2-45/README.md).
+- **Kernel novo:** o R4 (`install/kernel-r4/`, base v7.4-rc3) traz firewall, zram e sequenciador ALSA; nunca deu boot e ainda precisa do patch completo do vídeo.
 - **Câmeras:** perfil Windows completo, validação colorimétrica e iluminador contínuo nos aplicativos ainda pendentes. RGB/IR usam a mesma rota na libcamera atual, sem captura simultânea ou sincronização de exposição demonstradas. A chave física gera eventos; bloqueio nos aplicativos não foi validado.
 - **Suspensão:** mascarada; não testada.
-- **Gen2 na direita:** ainda apresenta resets/erros; mantida em Gen1 estável. USB4, saída de vídeo USB-C, microfones e fone seguem pendentes.
+- **Gen2 na direita:** ainda apresenta resets/erros; mantida em Gen1 estável. USB4, saída de vídeo USB-C e fone externo seguem pendentes.
 - **Firewall:** o kernel em uso não tem `nf_tables`.
 
 ## Causas-raiz encontradas
@@ -101,7 +108,7 @@ Provado em boot de teste, ainda não promovido ao boot normal:
 |---|---|
 | [`docs/ESTADO-ATUAL.md`](docs/ESTADO-ATUAL.md) | Estado completo, mecanismo de cada item, armadilhas e próximos passos. Comece pela seção "COMECE AQUI" |
 | [`docs/ROTEIRO-TESTE-GWNX2.md`](docs/ROTEIRO-TESTE-GWNX2.md) | Roteiro do boot de teste combinado de 16/11 |
-| `dts/` | Bases Device Tree; DT atual acrescenta câmeras em `install/camera/ir/yoga-camera-all-test.dts`; reserva `gwnb1` |
+| `dts/` | Bases Device Tree; DT atual `install/audio/yoga-audio-mic-test.dts` inclui câmeras e microfones; reserva `gwnb1` |
 | `dts/fragments/` | Um fragmento por subsistema (som, USB, EC, RTC, tampa, térmica, câmera, toque, Bluetooth) |
 | `patches/` | Correção do PHY eDP para a árvore do kernel |
 | `install/install-yoga.sh` | Instalador usado no SSD interno (apaga o disco de destino) |
@@ -111,6 +118,7 @@ Provado em boot de teste, ainda não promovido ao boot normal:
 | `install/ec-rtc/`, `install/power/`, `install/camera/` | Teclas de função e relógio, tampa e térmica, câmera |
 | `install/kernel-r2/`, `kernel-r3/`, `kernel-r4/` | Configuração, patches e scripts dos kernels candidatos |
 | `install/mesa-x2-45/` | Patch e build do Mesa para a Adreno X2-45 |
+| `install/npu/` | Inferência HTP V81 comprovada e reprodutor da falha de reabertura |
 | `iso/` | Menu GRUB e scripts da mídia de diagnóstico usada no bring-up |
 | `windows/` | Coletor PowerShell de drivers, firmware, ACPI e perfis do Windows original |
 | [`CORES.md`](CORES.md), [`COLETA-WINDOWS-2026-11-13.md`](COLETA-WINDOWS-2026-11-13.md), [`ISO-LENOVO-DIAGNOSTICS-5.2.1.md`](ISO-LENOVO-DIAGNOSTICS-5.2.1.md), [`sources.json`](sources.json) | Referência: perfis de cor Lenovo, coleta do Windows, ISO oficial, fontes |

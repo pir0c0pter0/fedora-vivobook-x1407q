@@ -2,8 +2,7 @@
 Description=Yoga X2 Plus: cameras RGB/IR e iluminador inicialmente desligado
 ConditionKernelCommandLine=yoga.camera=1
 Requires=yoga-video.service yoga-usb3.service
-After=yoga-video.service yoga-usb3.service
-Before=display-manager.service
+After=yoga-video.service yoga-usb3.service yoga-gpu.service
 
 [Service]
 Type=oneshot

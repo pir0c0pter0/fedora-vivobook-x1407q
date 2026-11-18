@@ -64,11 +64,23 @@ modprobe msm separate_gpu_kms=1 || fail "msm"
 i=0
 while [ $i -lt 200 ]; do
 	for c in /sys/class/drm/card*-eDP-1; do
-		if [ "$(cat "$c/status" 2>/dev/null)" = connected ] && [ -e /sys/class/backlight/dp_aux_backlight ]; then
-			# O primeiro modeset sai em 18 bpp; a imagem so foi vista apos um ciclo blank/unblank (30 bpp).
-			# Aqui ainda nao ha DRM master (GDM/kmscon sobem depois), entao o fbdev consegue fazer o ciclo.
-			sleep 1; echo 4 > /sys/class/graphics/fb0/blank; sleep 4; echo 0 > /sys/class/graphics/fb0/blank; sleep 3
-			cat /sys/class/backlight/dp_aux_backlight/max_brightness > /sys/class/backlight/dp_aux_backlight/brightness
+		if [ "$(cat "$c/status" 2>/dev/null)" = connected ] &&
+		   [ -e /sys/class/backlight/dp_aux_backlight ] &&
+		   grep -Fxq msm-kmsdrmfb /sys/class/graphics/fb0/name 2>/dev/null; then
+			connector=${c##*/}
+			if grep -Fqw yoga.video.nocycle=1 /proc/cmdline &&
+			   grep -Eq "^[[:space:]]*bpp = 30$" /sys/kernel/debug/dri/*/"${connector#*-}"/dp_debug 2>/dev/null; then
+				echo "yoga-video: primeiro modeset eDP a 30 bpp"
+			else
+				# O primeiro modeset sai em 18 bpp; a imagem so foi vista apos um ciclo blank/unblank (30 bpp).
+				# Aqui ainda nao ha DRM master (GDM/kmscon sobem depois), entao o fbdev consegue fazer o ciclo.
+				sleep 1
+				echo 4 > /sys/class/graphics/fb0/blank || fail "blank do painel"
+				if grep -Fqw yoga.video.fast=1 /proc/cmdline; then sleep 1; else sleep 4; fi
+				echo 0 > /sys/class/graphics/fb0/blank || fail "unblank do painel"
+				if grep -Fqw yoga.video.fast=1 /proc/cmdline; then sleep 1; else sleep 3; fi
+			fi
+			cat /sys/class/backlight/dp_aux_backlight/max_brightness > /sys/class/backlight/dp_aux_backlight/brightness || fail "brilho do painel"
 			echo "yoga-video: ok $c $(head -1 "$c/modes")"
 			exit 0
 		fi

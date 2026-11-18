@@ -2,14 +2,12 @@
 
 `yoga-camera.service` prepara RGB, IR, DMA heaps e o iluminador desligado.
 Só executa com `yoga.camera=1`, depois de `yoga-video.service` e
-`yoga-usb3.service`. A habilitação cria uma dependência em
+`yoga-usb3.service`, e depois de `yoga-gpu.service` quando a GPU estiver
+programada para iniciar. A habilitação cria uma dependência em
 `yoga-usb3.service.wants`: o gatilho udev USB3 existente continua responsável
 por iniciar a sequência depois da placa Wi-Fi, sem esperar associação à rede.
 Sensores e heaps são preparados antes de carregar CAMSS; a espera udev é
-limitada aos dois heaps para concluir suas permissões. A unidade ordena-se
-antes de `display-manager.service`, sem puxá-lo como dependência. Essa ordem
-vale para jobs pendentes e deve ser conferida no journal do boot; não bloqueia
-um gerenciador gráfico já ativo nem sessões SSH/linger.
+limitada aos dois heaps para concluir suas permissões. O GDM pode iniciar enquanto a câmera termina a preparação.
 
 Boot normal aprovado no **slot `current` em 17/11/2026**, após o teste no
 `try`: câmera terminou em 23,810963 s, antes do início do GDM em

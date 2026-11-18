@@ -1,0 +1,13 @@
+Yoga: skip the query issued before the GPR callback is installed.
+
+--- a/sound/soc/qcom/qdsp6/q6apm.c
++++ b/sound/soc/qcom/qdsp6/q6apm.c
+@@ -907,7 +907,7 @@
+ 
+ 	g_apm = apm;
+ 
+-	q6apm_get_apm_state(apm);
++	/* q6prm checks ADSP readiness once APR has installed our callback. */
+ 
+ 	ret = snd_soc_register_component(dev, &q6apm_audio_component, NULL, 0);
+ 	if (ret < 0) {

@@ -1,0 +1,14 @@
+[Unit]
+Description=Yoga X2 Plus: audio com volumes validados
+ConditionKernelCommandLine=yoga.audio=1
+Requires=yoga-camera.service
+After=yoga-camera.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/yoga-audio up
+TimeoutStartSec=60
+
+[Install]
+WantedBy=yoga-camera.service

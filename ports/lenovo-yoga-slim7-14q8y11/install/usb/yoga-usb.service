@@ -1,7 +1,8 @@
 [Unit]
 Description=Yoga X2 Plus: USB2 nas tres portas com a placa Wi-Fi ativa
 ConditionKernelCommandLine=yoga.usb=1
-After=yoga-video.service
+Requires=sys-subsystem-net-yoga\x2dwifi\x2dready.device
+After=yoga-video.service sys-subsystem-net-yoga\x2dwifi\x2dready.device
 
 [Service]
 Type=oneshot

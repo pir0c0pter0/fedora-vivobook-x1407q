@@ -1,0 +1,15 @@
+[Unit]
+Description=Yoga X2 Plus: Adreno X2-45 a 310 MHz e Mesa validado
+ConditionKernelCommandLine=yoga.gpu=1
+Requires=yoga-video.service yoga-usb3.service
+After=yoga-video.service yoga-usb3.service
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/yoga-gpu-up
+TimeoutStartSec=45
+
+[Install]
+WantedBy=yoga-usb3.service

@@ -1,0 +1,5 @@
+# Mantem a placa interna acessivel ao mixer root ate a calibracao.
+ACTION!="remove", SUBSYSTEM=="sound", DEVPATH=="/devices/platform/sound/sound/card*/*", ENV{MAJOR}=="?*", \
+  TEST!="/run/yoga-audio.ready", MODE:="0600", GROUP:="root", TAG-="uaccess"
+ACTION=="change", SUBSYSTEM=="sound", DEVPATH=="/devices/platform/sound/sound/card*/*", ENV{MAJOR}=="?*", \
+  TEST=="/run/yoga-audio.ready", MODE="0660", GROUP="audio", TAG+="uaccess"

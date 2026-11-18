@@ -1,0 +1,59 @@
+#!/bin/sh
+# Bind separado do KMS; o limite deve estar ativo antes de abrir o render node.
+set -eu
+fail() { echo "yoga-gpu: FALHA: $*" >&2; exit 1; }
+grep -qw yoga.gpu=1 /proc/cmdline || fail "falta yoga.gpu=1"
+tr '\000' '\n' < /sys/firmware/devicetree/base/compatible |
+    grep -qx 'lenovo,yoga-slim7x-gen11-x2plus-diag' || fail "DT de outra placa"
+systemctl is-active --quiet yoga-usb3.service || fail "USB3 inativo"
+[ "$(systemctl show display-manager.service -p ActiveState --value)" = inactive ] ||
+    fail "parar o desktop antes de habilitar GPU"
+[ "$(cat /sys/module/msm/parameters/separate_gpu_kms)" = 1 ] ||
+    fail "MSM sem KMS separado"
+rm -f /run/yoga-gpu.env
+gpu=/sys/bus/platform/devices/3d00000.gpu
+[ ! -L "$gpu/driver" ] || fail "GPU ja vinculada; reiniciar para repetir"
+for file in /opt/mesa-x2-45/lib64/libgallium-26.2.3.so \
+            /opt/mesa-x2-45/lib64/libEGL_mesa.so.0 \
+            /opt/mesa-x2-45/lib64/libgbm.so.1 \
+            /usr/lib/firmware/qcom/gen80100_aqe.fw \
+            /usr/lib/firmware/qcom/gen80100_sqe.fw \
+            /usr/lib/firmware/qcom/gen80100_gmu.bin; do
+    [ -s "$file" ] || fail "arquivo ausente: $file"
+done
+
+modprobe gpucc_glymur
+modprobe gxclkctl_kaanapali
+# GX/SMMU podem ter falhado antes de gpucc estar disponivel no boot.
+for device in 3d90000.clock-controller 3d64000.clock-controller 3da0000.iommu; do
+    if [ ! -L "/sys/bus/platform/devices/$device/driver" ]; then
+        printf '%s\n' "$device" > /sys/bus/platform/drivers_probe
+    fi
+    [ -L "/sys/bus/platform/devices/$device/driver" ] || fail "$device sem driver"
+done
+printf '\n' > "$gpu/driver_override"
+printf '3d00000.gpu\n' > /sys/bus/platform/drivers/adreno/bind
+freq=/sys/class/devfreq/3d00000.gpu
+lowest=$(tr ' ' '\n' < "$freq/available_frequencies" | sort -n | head -1)
+[ "$lowest" = 310000000 ] || fail "OPPs inesperados"
+# shortcut: speed-bin 193 sem suporte, liberar outros OPPs so apos calibracao.
+printf '%s\n' "$lowest" > "$freq/max_freq"
+[ "$(cat "$freq/max_freq")" = "$lowest" ] || fail "limite de frequencia"
+set -- "$gpu"/drm/renderD*
+[ "$#" = 1 ] && [ -e "$1/dev" ] || fail "render node ausente/ambiguo"
+render=/dev/dri/${1##*/}
+udevadm wait --timeout=10 --initialized=yes "$render"
+timeout -k 5 20 /usr/local/bin/mesa-x2-45-env python3 -u \
+    /usr/local/libexec/yoga-egl-test.py "$render" 64 64
+
+# Um unico arquivo serve ao GDM e ao gerador de ambiente das sessoes de usuario.
+cat > /run/yoga-gpu.env.tmp <<'EOF'
+LD_LIBRARY_PATH=/opt/mesa-x2-45/lib64
+LIBGL_DRIVERS_PATH=/opt/mesa-x2-45/lib64/dri
+GBM_BACKENDS_PATH=/opt/mesa-x2-45/lib64/gbm
+__EGL_VENDOR_LIBRARY_FILENAMES=/opt/mesa-x2-45/share/glvnd/egl_vendor.d/50_mesa.json
+VK_DRIVER_FILES=/opt/mesa-x2-45/share/vulkan/icd.d/freedreno_icd.aarch64.json
+EOF
+chmod 644 /run/yoga-gpu.env.tmp
+mv /run/yoga-gpu.env.tmp /run/yoga-gpu.env
+echo "yoga-gpu: X2-45 validada, limite 310 MHz"

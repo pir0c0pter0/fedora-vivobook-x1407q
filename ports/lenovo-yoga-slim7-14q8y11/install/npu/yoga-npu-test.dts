@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: BSD-3-Clause
+#include "../audio/yoga-audio-mic-test.dts"
+
+&remoteproc_cdsp {
+	firmware-name = "qcom/glymur/LENOVO/83QR/qccdsp8480.mbn",
+			"qcom/glymur/LENOVO/83QR/cdsp_dtbs.elf";
+	status = "okay";
+};

@@ -1,0 +1,45 @@
+#!/bin/bash
+# Executar somente no Yoga, apos audio/GPU; desfazer reiniciando, nunca rmmod.
+set -euo pipefail
+fail() { echo "yoga-npu: FALHA: $*" >&2; exit 1; }
+rproc() {
+    local name
+    name=$(grep -lx "$1" /sys/class/remoteproc/*/name) || fail "rproc $1 ausente"
+    [ "$(printf '%s\n' "$name" | wc -l)" = 1 ] || fail "rproc $1 ambiguo"
+    dirname "$name"
+}
+alive() {
+    [ "$(cat "$(rproc soccp)/state")" = attached ] || fail "SoCCP nao esta attached"
+    [ "$(cat "$(rproc adsp)/state")" = running ] || fail "ADSP nao esta running"
+    cat /sys/class/power_supply/qcom-battmgr-bat/capacity >/dev/null
+}
+[ "$EUID" = 0 ] || fail "execute como root"
+grep -Eq '(^|[[:space:]])yoga\.npu=1([[:space:]]|$)' /proc/cmdline || fail "falta yoga.npu=1"
+tr '\000' '\n' < /sys/firmware/devicetree/base/compatible |
+    grep -qx 'lenovo,yoga-slim7x-gen11-x2plus-diag' || fail "DT de outra placa"
+[ "$(cat /sys/devices/soc0/soc_id)" = 729 ] || fail "SoC inesperado"
+systemctl is-active --quiet yoga-gpu.service || fail "base/GPU inativa"
+alive
+cdsp=$(rproc cdsp)
+[ "$(cat "$cdsp/state")" = offline ] || fail "CDSP nao esta offline; reiniciar para repetir"
+# Isolado do staging ADSP: a probe automatica nao pode encontrar o CDSP cedo.
+stage=/var/lib/yoga-npu-fw
+sha256sum -c - <<EOF
+acf13d29288d283793f418a36650e8a261eed927d30de109a59cb2210f458794  $stage/qcom/glymur/LENOVO/83QR/qccdsp8480.mbn
+9bee104a48d4aac647287d6c1454df170c1cff7158a2352711fd1e2163ea6d1d  $stage/qcom/glymur/LENOVO/83QR/cdsp_dtbs.elf
+EOF
+[ "$(cat "$cdsp/firmware")" = qcom/glymur/LENOVO/83QR/qccdsp8480.mbn ] || fail "firmware-name inesperado"
+expected=$(printf '%s\n' qcom/glymur/LENOVO/83QR/qccdsp8480.mbn qcom/glymur/LENOVO/83QR/cdsp_dtbs.elf)
+[ "$(tr '\000' '\n' < /sys/firmware/devicetree/base/soc@0/remoteproc@32300000/firmware-name)" = "$expected" ] || fail "par de firmware do DT inesperado"
+fwpath=$(cat /sys/module/firmware_class/parameters/path)
+trap 'printf "%s\n" "$fwpath" > /sys/module/firmware_class/parameters/path' EXIT
+printf 'disabled\n' > "$cdsp/recovery"
+printf '%s\n' "$stage" > /sys/module/firmware_class/parameters/path
+printf 'start\n' > "$cdsp/state"
+printf '%s\n' "$fwpath" > /sys/module/firmware_class/parameters/path
+[ "$(cat /sys/module/firmware_class/parameters/path)" = "$fwpath" ] || fail "caminho de firmware nao restaurado"
+[ "$(cat "$cdsp/state")" = running ] || fail "CDSP nao iniciou"
+modprobe fastrpc
+udevadm wait --timeout=15 --initialized=yes /dev/fastrpc-cdsp
+alive
+echo "yoga-npu: CDSP running e FastRPC presente; inferencia ainda precisa passar"
