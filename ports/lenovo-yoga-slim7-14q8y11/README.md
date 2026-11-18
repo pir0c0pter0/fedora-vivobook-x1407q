@@ -4,7 +4,7 @@ Porte do Fedora 45 aarch64 para o Lenovo Yoga Slim 7 14Q8Y11 (DMI 83QR), Snapdra
 
 Esta pasta é independente do projeto ASUS Vivobook X1407QA que ocupa o resto do repositório. Nada daqui se aplica ao ASUS, e os scripts e módulos `vivobook_*` não devem ser executados no Lenovo.
 
-**Estado em 17/11/2026:** o Fedora está instalado no SSD interno e liga sozinho em um desktop utilizável. É um trabalho em andamento, feito num único aparelho; não há ISO pronta para instalar.
+**Estado em 18/11/2026.** O sistema instalado no SSD chegou ao GNOME em 5,1 s após o início do Linux. A [ISO live experimental](https://github.com/pir0c0pter0/fedora-vivobook-x1407q/releases/tag/yoga14q8y11-live-2026.11.18) inicia a sessão em RAM. O [guia da mídia](iso/LIVE.md) explica a gravação e os limites.
 
 A integração `gwnx2d1` passou no slot `try` e no boot normal pelo `current`,
 com vídeo, EC, RTC e USB automáticos.
@@ -119,7 +119,7 @@ como OpenGL via sessão do usuário. Boot normal em 34,444 s, áudio preservado.
 | `install/kernel-r2/`, `kernel-r3/`, `kernel-r4/` | Configuração, patches e scripts dos kernels candidatos |
 | `install/mesa-x2-45/` | Patch e build do Mesa para a Adreno X2-45 |
 | `install/npu/` | Inferência HTP V81 comprovada e reprodutor da falha de reabertura |
-| `iso/` | Menu GRUB e scripts da mídia de diagnóstico usada no bring-up |
+| `iso/` | Mídia live, receita de build e arquivos históricos do diagnóstico |
 | `windows/` | Coletor PowerShell de drivers, firmware, ACPI e perfis do Windows original |
 | [`CORES.md`](CORES.md), [`COLETA-WINDOWS-2026-11-13.md`](COLETA-WINDOWS-2026-11-13.md), [`ISO-LENOVO-DIAGNOSTICS-5.2.1.md`](ISO-LENOVO-DIAGNOSTICS-5.2.1.md), [`sources.json`](sources.json) | Referência: perfis de cor Lenovo, coleta do Windows, ISO oficial, fontes |
 | [`WORKFLOW.md`](WORKFLOW.md) | Resultado do workflow de câmeras e USB3; planejamento de 13/11 preservado abaixo |

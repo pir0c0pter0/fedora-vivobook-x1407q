@@ -1,0 +1,10 @@
+Yoga 14Q8Y11 Live 45 — 18 de novembro de 2026
+
+Imagem experimental, baseada no Fedora 45 aarch64, para Lenovo Yoga Slim 7 14Q8Y11 (83QR) com Snapdragon X2 Plus. O kernel do porte exige Secure Boot desativado. Escreva a ISO inteira em um pendrive. A entrada padrão inicia GNOME pelo painel interno e carrega a raiz live em RAM. Use a opção de compatibilidade do GRUB caso o vídeo principal falhe. A RAM e o tempo de leitura do pendrive influenciam a inicialização.
+
+A imagem não inclui perfis, credenciais ou firmware extraído do Windows. A configuração e os drivers de áudio estão presentes, mas a reprodução dos amplificadores requer o firmware ADSP deste modelo, obtido pelo usuário. O guia do porte descreve os arquivos e a calibração. NPU permanece desligada. O sistema é live, sem instalador do porte. O kernel é experimental e o SELinux usa modo permissivo nesta mídia. SSH não fica habilitado.
+
+Fontes e documentação
+https://github.com/pir0c0pter0/fedora-vivobook-x1407q
+Pacotes Fedora de base
+https://archives.fedoraproject.org/pub/archive/fedora/linux/

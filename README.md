@@ -32,7 +32,7 @@ history and limitations.
 | Notebook | Platform | Fedora / kernel | Status and guide |
 |---|---|---|---|
 | **ASUS VivoBook 14 X1407QA** | Snapdragon X, X1-26-100 | Fedora 44; published ISO: Linux 7.2; installed-system validation: Linux 7.3-rc6 | [ISO and installation](#asus-vivobook-14-x1407qa--download-the-iso). Hardware support validated on October 7; the test unit is now non-booting and under [EDL recovery investigation](docs/research/2026-11-03-edl-9008-recovery.md). |
-| **Lenovo Yoga Slim 7 14Q8Y11 (83QR)** | Snapdragon X2 Plus, X2P-42-100 / Kalambo | Fedora 45; Linux 7.4.0-rc1-yoga-kalambo+ | [Port guide][yoga-guide]. Boots from internal NVMe into an accelerated GNOME desktop; experimental support on one device, with no ready-to-install ISO. |
+| **Lenovo Yoga Slim 7 14Q8Y11 (83QR)** | Snapdragon X2 Plus, X2P-42-100 / Kalambo | Fedora 45; Linux 7.4.0-rc1-yoga-kalambo+ | [Port guide][yoga-guide] and [experimental live ISO][yoga-live]. The installed system boots from NVMe into accelerated GNOME. |
 
 ## What we have achieved on each notebook
 
@@ -50,7 +50,7 @@ reflect the working installation on **November 17, 2026**.
 | USB and video output | USB-C, USB3, charging, and DisplayPort validated | USB3 in both orientations: right port 5 Gbit/s, both left ports 10 Gbit/s |
 | Everyday hardware | Wi-Fi, Bluetooth, input devices, battery, charge limit, and power-dependent CPU limits | Wi-Fi, Bluetooth, input devices, touchscreen, battery, CPU frequency control, EC, and hardware clock |
 | Suspend | `s2idle` validated; `deep` unsafe | Disabled and untested |
-| Installation media | Fedora 44 / Linux 7.2 ISO published; artifact checks passed, physical installation cycle pending | Installed and validated on one device; no ready-to-install ISO |
+| Installation media | Fedora 44 / Linux 7.2 ISO published; artifact checks passed, physical installation cycle pending | [Experimental live ISO][yoga-live]; the installed system was validated on one device |
 
 Both ports still need work. The ASUS unit is currently non-booting; the Yoga
 NPU remains disabled in normal boot, and USB4 is not enabled on either model.
@@ -86,18 +86,17 @@ keyboard, touchpad, touchscreen, hotkeys, and hardware clock.
   disabled during normal boot.**
 
 Suspend is disabled and untested. The running kernel also lacks `nf_tables`
-firewall support. This port is still under development and has no public
-installation ISO.
+firewall support. The [experimental live ISO][yoga-live] runs from RAM. Read the [live guide][yoga-live-guide] before booting it.
 
-The latest validated Yoga sources and documentation are on the
-[Yoga port branch][yoga-branch]. Start with the [Lenovo port README][yoga-guide],
+The latest Yoga sources and documentation are on `main`. Start with the [Lenovo port README][yoga-guide],
 the [current hardware state][yoga-state], and the
 [NPU evidence and reproducer][yoga-npu].
 
-[yoga-branch]: https://github.com/pir0c0pter0/fedora-vivobook-x1407q/tree/port/lenovo-yoga-slim7-14q8y11-x2plus
-[yoga-guide]: https://github.com/pir0c0pter0/fedora-vivobook-x1407q/blob/port/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11/README.md
-[yoga-state]: https://github.com/pir0c0pter0/fedora-vivobook-x1407q/blob/port/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11/docs/ESTADO-ATUAL.md
-[yoga-npu]: https://github.com/pir0c0pter0/fedora-vivobook-x1407q/blob/port/lenovo-yoga-slim7-14q8y11-x2plus/ports/lenovo-yoga-slim7-14q8y11/install/npu/README.md
+[yoga-live]: https://github.com/pir0c0pter0/fedora-vivobook-x1407q/releases/tag/yoga14q8y11-live-2026.11.18
+[yoga-live-guide]: ports/lenovo-yoga-slim7-14q8y11/iso/LIVE.md
+[yoga-guide]: https://github.com/pir0c0pter0/fedora-vivobook-x1407q/blob/main/ports/lenovo-yoga-slim7-14q8y11/README.md
+[yoga-state]: https://github.com/pir0c0pter0/fedora-vivobook-x1407q/blob/main/ports/lenovo-yoga-slim7-14q8y11/docs/ESTADO-ATUAL.md
+[yoga-npu]: https://github.com/pir0c0pter0/fedora-vivobook-x1407q/blob/main/ports/lenovo-yoga-slim7-14q8y11/install/npu/README.md
 
 ## ASUS VivoBook 14 X1407QA — download the ISO
 
